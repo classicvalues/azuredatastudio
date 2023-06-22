@@ -6,15 +6,12 @@
 import 'vs/css!./welcomePage';
 import 'sql/workbench/contrib/welcome/page/browser/az_data_welcome_page';
 import { URI } from 'vs/base/common/uri';
-import * as strings from 'vs/base/common/strings';
 import { ICommandService } from 'vs/platform/commands/common/commands';
 import * as arrays from 'vs/base/common/arrays';
-import { WalkThroughInput } from 'vs/workbench/contrib/welcome/walkThrough/browser/walkThroughInput';
 import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { onUnexpectedError, isPromiseCanceledError } from 'vs/base/common/errors';
-import { IWindowOpenable } from 'vs/platform/windows/common/windows';
+import { isCancellationError, onUnexpectedError } from 'vs/base/common/errors';
 import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
 import { IConfigurationService, ConfigurationTarget } from 'vs/platform/configuration/common/configuration';
 import { localize } from 'vs/nls';
@@ -31,7 +28,8 @@ import { IThemeService, registerThemingParticipant } from 'vs/platform/theme/com
 import { tileBorder, gradientOne, gradientTwo, gradientBackground, extensionPackHeaderShadow, extensionPackGradientColorOneColor, extensionPackGradientColorTwoColor, tileBoxShadow, hoverShadow } from 'sql/platform/theme/common/colorRegistry';
 import { registerColor, foreground, textLinkActiveForeground, descriptionForeground, activeContrastBorder, buttonForeground, menuBorder, menuForeground, editorWidgetBorder, selectBackground, buttonHoverBackground, selectBorder, iconForeground, textLinkForeground, inputBackground, focusBorder, listFocusBackground, listFocusForeground, buttonSecondaryBackground, buttonSecondaryBorder, buttonDisabledForeground, buttonDisabledBackground, buttonSecondaryForeground, buttonSecondaryHoverBackground } from 'vs/platform/theme/common/colorRegistry';
 import { IExtensionsWorkbenchService } from 'vs/workbench/contrib/extensions/common/extensions';
-import { EditorInput, IEditorInputSerializer } from 'vs/workbench/common/editor';
+import { IEditorSerializer } from 'vs/workbench/common/editor';
+import { EditorInput } from 'vs/workbench/common/editor/editorInput';
 import { INotificationService, Severity } from 'vs/platform/notification/common/notification';
 import { TimeoutTimer } from 'vs/base/common/async';
 import { areSameExtensions } from 'vs/platform/extensionManagement/common/extensionManagementUtil';
@@ -45,16 +43,19 @@ import { IProductService } from 'vs/platform/product/common/productService';
 import { joinPath } from 'vs/base/common/resources';
 import { clearNode } from 'vs/base/browser/dom';
 import { GuidedTour } from 'sql/workbench/contrib/welcome/page/browser/gettingStartedTour';
-import { IWorkbenchLayoutService } from 'vs/workbench/services/layout/browser/layoutService';
+import { IWorkbenchLayoutService, Parts } from 'vs/workbench/services/layout/browser/layoutService';
 import { ILayoutService } from 'vs/platform/layout/browser/layoutService';
 import { Button } from 'sql/base/browser/ui/button/button';
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
-import { ICommandAction, MenuItemAction } from 'vs/platform/actions/common/actions';
+import { MenuItemAction } from 'vs/platform/actions/common/actions';
 import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IExtensionRecommendationsService } from 'vs/workbench/services/extensionRecommendations/common/extensionRecommendations';
 import { attachButtonStyler } from 'vs/platform/theme/common/styler';
 import { AddServerAction } from 'sql/workbench/services/objectExplorer/browser/connectionTreeAction';
 import { IWorkingCopyBackupService } from 'vs/workbench/services/workingCopy/common/workingCopyBackup';
+import { WalkThroughInput } from 'vs/workbench/contrib/welcomeWalkthrough/browser/walkThroughInput';
+import { IWindowOpenable } from 'vs/platform/window/common/window';
+import { ICommandAction } from 'vs/platform/action/common/action';
 const configurationKey = 'workbench.startupEditor';
 const oldConfigurationKey = 'workbench.welcome.enabled';
 const telemetryFrom = 'welcomePage';
@@ -88,7 +89,7 @@ export class WelcomePageContribution implements IWorkbenchContribution {
 						try {
 							const folder = await this.fileService.resolve(folderUri);
 							const files = folder.children ? folder.children.map(child => child.name) : [];
-							const file = files.sort().find(file => strings.startsWith(file.toLowerCase(), 'readme'));
+							const file = files.sort().find(file => file.toLowerCase().startsWith('readme'));
 							if (file) {
 								return joinPath(folderUri, file);
 							}
@@ -100,7 +101,7 @@ export class WelcomePageContribution implements IWorkbenchContribution {
 					arrays.coalesceInPlace(readmes);
 					if (!this.editorService.activeEditor) {
 						if (readmes.length) {
-							const isMarkDown = (readme: URI) => strings.endsWith(readme.path.toLowerCase(), '.md');
+							const isMarkDown = (readme: URI) => readme.path.toLowerCase().endsWith('.md');
 							await Promise.all([
 								this.commandService.executeCommand('markdown.showPreview', null, readmes.filter(isMarkDown), { locked: true }),
 								this.editorService.openEditors(readmes.filter(readme => !isMarkDown(readme)).map(readme => ({ resource: readme }))),
@@ -187,7 +188,7 @@ const extensionPacks: ExtensionSuggestion[] = [
 ];
 
 const extensionPackExtensions: ExtensionPackExtensions[] = [
-	{ name: localize('welcomePage.sqlServerAgent', "SQL Server Agent"), icon: require.toUrl('./../../media/defaultExtensionIcon.svg'), link: `command:azdata.extension.open?{"id":"microsoft.agent"}` },
+	{ name: localize('welcomePage.sqlServerAgent', "SQL Server Agent"), icon: require.toUrl('./../../media/agentExtensionIcon.png'), link: `command:azdata.extension.open?{"id":"microsoft.agent"}` },
 	{ name: localize('welcomePage.sqlServerProfiler', "SQL Server Profiler"), icon: require.toUrl('./../../media/defaultExtensionIcon.svg'), link: `command:azdata.extension.open?{"id":"microsoft.profiler"}` },
 	{ name: localize('welcomePage.sqlServerImport', "SQL Server Import"), icon: require.toUrl('./../../media/defaultExtensionIcon.svg'), link: `command:azdata.extension.open?{"id":"microsoft.import"}` },
 	{ name: localize('welcomePage.sqlServerDacpac', "SQL Server Dacpac"), icon: require.toUrl('./../../media/defaultExtensionIcon.svg'), link: `command:azdata.extension.open?{"id":"microsoft.dacpac"}` }
@@ -381,7 +382,7 @@ class WelcomePage extends Disposable {
 		newButton.onDidClick(() => {
 			this.contextMenuService.showContextMenu({
 				getAnchor: () => newButtonHtmlElement,
-				getActions: () => NewActionItems.map(command => new MenuItemAction(command, undefined, {}, this.contextKeyService, this.commandService))
+				getActions: () => NewActionItems.map(command => new MenuItemAction(command, undefined, {}, undefined, this.contextKeyService, this.commandService))
 			});
 		});
 
@@ -448,7 +449,6 @@ class WelcomePage extends Disposable {
 		p.innerText = localize('WelcomePage.TakeATour', "Would you like to take a quick tour of Azure Data Studio?");
 		b.innerText = localize('WelcomePage.welcome', "Welcome!");
 
-
 		containerLeft.appendChild(icon);
 		containerLeft.appendChild(p);
 		containerRight.appendChild(removeTourBtn);
@@ -458,10 +458,9 @@ class WelcomePage extends Disposable {
 
 		startTourBtn.onDidClick((e) => {
 			this.configurationService.updateValue(configurationKey, 'welcomePageWithTour', ConfigurationTarget.USER);
-			this.layoutService.setSideBarHidden(true);
+			this.layoutService.setPartHidden(true, Parts.SIDEBAR_PART);
 			guidedTour.create();
 		});
-
 
 		removeTourBtn.addEventListener('click', (e: MouseEvent) => {
 			this.configurationService.updateValue(configurationKey, 'welcomePage', ConfigurationTarget.USER);
@@ -666,7 +665,7 @@ class WelcomePage extends Disposable {
 			extensionId: extensionSuggestion.id,
 		});
 		this.instantiationService.invokeFunction(getInstalledExtensions).then(extensions => {
-			const installedExtension = arrays.first(extensions, extension => areSameExtensions(extension.identifier, { id: extensionSuggestion.id }));
+			const installedExtension = extensions.find(extension => areSameExtensions(extension.identifier, { id: extensionSuggestion.id }));
 			if (installedExtension && installedExtension.globallyEnabled) {
 				/* __GDPR__FRAGMENT__
 					"WelcomePageInstalled-1" : {
@@ -758,7 +757,7 @@ class WelcomePage extends Disposable {
 								this.telemetryService.publicLog(extensionPackStrings.installedEvent, {
 									from: telemetryFrom,
 									extensionId: extensionSuggestion.id,
-									outcome: isPromiseCanceledError(err) ? 'canceled' : 'error',
+									outcome: isCancellationError(err) ? 'canceled' : 'error',
 								});
 								this.notificationService.error(err);
 							});
@@ -793,7 +792,7 @@ class WelcomePage extends Disposable {
 			this.telemetryService.publicLog(extensionPackStrings.installedEvent, {
 				from: telemetryFrom,
 				extensionId: extensionSuggestion.id,
-				outcome: isPromiseCanceledError(err) ? 'canceled' : 'error',
+				outcome: isCancellationError(err) ? 'canceled' : 'error',
 			});
 			this.notificationService.error(err);
 		});
@@ -821,7 +820,7 @@ class WelcomePage extends Disposable {
 	}
 }
 
-export class WelcomeInputSerializer implements IEditorInputSerializer {
+export class WelcomeInputSerializer implements IEditorSerializer {
 
 	static readonly ID = welcomeInputTypeId;
 
@@ -840,7 +839,7 @@ export class WelcomeInputSerializer implements IEditorInputSerializer {
 }
 
 // theming
-export const welcomePageBackground = registerColor('welcomePage.background', { light: null, dark: null, hc: null }, localize('welcomePage.background', 'Background color for the Welcome page.'));
+export const welcomePageBackground = registerColor('welcomePage.background', { light: null, dark: null, hcLight: null, hcDark: null }, localize('welcomePage.background', 'Background color for the Welcome page.'));
 
 registerThemingParticipant((theme, collector) => {
 	const backgroundColor = theme.getColor(welcomePageBackground);

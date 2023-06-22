@@ -7,7 +7,6 @@
   "preview": true,
   "license": "https://raw.githubusercontent.com/Microsoft/azuredatastudio/main/LICENSE.txt",
   "icon": "images/extension.png",
-  "aiKey": "AIF-444c3af9-8e69-4462-ab49-4191e6ad1916",
   "engines": {
     "vscode": "*",
     "azdata": ">=1.25.0"
@@ -16,6 +15,12 @@
     "type": "git",
     "url": "https://github.com/Microsoft/azuredatastudio.git"
   },
+	"capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+	},
   "forceReload": true,
   "contributes": {
     "resourceDeploymentTypes": [

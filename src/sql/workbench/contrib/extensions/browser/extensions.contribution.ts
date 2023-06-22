@@ -11,6 +11,7 @@ import { ExtensionsLabel, IExtensionGalleryService, IGalleryExtension } from 'vs
 import { OpenExtensionAuthoringDocsAction } from 'sql/workbench/contrib/extensions/browser/extensionsActions';
 import { localize } from 'vs/nls';
 import { deepClone } from 'vs/base/common/objects';
+import { CancellationToken } from 'vs/base/common/cancellation';
 
 // Global Actions
 const actionRegistry = Registry.as<IWorkbenchActionRegistry>(WorkbenchActionExtensions.WorkbenchActions);
@@ -41,7 +42,7 @@ CommandsRegistry.registerCommand({
 	},
 	handler: async (accessor, arg: string): Promise<IGalleryExtension> => {
 		const extensionGalleryService = accessor.get(IExtensionGalleryService);
-		const extension = await extensionGalleryService.getCompatibleExtension({ id: arg });
+		const [extension] = await extensionGalleryService.getExtensions([{ id: arg }], { source: 'getExtensionFromGallery' }, CancellationToken.None);
 		if (extension) {
 			return deepClone(extension);
 		} else {

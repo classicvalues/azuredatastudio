@@ -3,24 +3,27 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./actionbar';
-import * as platform from 'vs/base/common/platform';
-import * as nls from 'vs/nls';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { SelectBox, ISelectOptionItem, ISelectBoxOptions } from 'vs/base/browser/ui/selectBox/selectBox';
-import { IAction, IActionRunner, Action, IActionChangeEvent, ActionRunner, Separator } from 'vs/base/common/actions';
-import * as types from 'vs/base/common/types';
-import { EventType as TouchEventType, Gesture } from 'vs/base/browser/touch';
-import { IContextViewProvider } from 'vs/base/browser/ui/contextview/contextview';
-import { DataTransfers } from 'vs/base/browser/dnd';
 import { isFirefox } from 'vs/base/browser/browser';
+import { DataTransfers } from 'vs/base/browser/dnd';
 import { $, addDisposableListener, append, EventHelper, EventLike, EventType } from 'vs/base/browser/dom';
+import { EventType as TouchEventType, Gesture } from 'vs/base/browser/touch';
 import { IActionViewItem } from 'vs/base/browser/ui/actionbar/actionbar';
+import { IContextViewProvider } from 'vs/base/browser/ui/contextview/contextview';
+import { IHoverDelegate } from 'vs/base/browser/ui/iconLabel/iconHoverDelegate';
+import { ICustomHover, setupCustomHover } from 'vs/base/browser/ui/iconLabel/iconLabelHover';
+import { ISelectBoxOptions, ISelectOptionItem, SelectBox } from 'vs/base/browser/ui/selectBox/selectBox';
+import { Action, ActionRunner, IAction, IActionChangeEvent, IActionRunner, Separator } from 'vs/base/common/actions';
+import { Disposable } from 'vs/base/common/lifecycle';
+import * as platform from 'vs/base/common/platform';
+import * as types from 'vs/base/common/types';
+import 'vs/css!./actionbar';
+import * as nls from 'vs/nls';
 
 export interface IBaseActionViewItemOptions {
 	draggable?: boolean;
 	isMenu?: boolean;
 	useEventAsContext?: boolean;
+	hoverDelegate?: IHoverDelegate;
 }
 
 export class BaseActionViewItem extends Disposable implements IActionViewItem {
@@ -28,7 +31,13 @@ export class BaseActionViewItem extends Disposable implements IActionViewItem {
 	element: HTMLElement | undefined;
 
 	_context: unknown;
-	_action: IAction;
+	readonly _action: IAction;
+
+	private customHover?: ICustomHover;
+
+	get action() {
+		return this._action;
+	}
 
 	private _actionRunner: IActionRunner | undefined;
 
@@ -117,7 +126,7 @@ export class BaseActionViewItem extends Disposable implements IActionViewItem {
 			}
 		}
 
-		this._register(addDisposableListener(element, TouchEventType.Tap, e => this.onClick(e)));
+		this._register(addDisposableListener(element, TouchEventType.Tap, e => this.onClick(e, true))); // Preserve focus on tap #125470
 
 		this._register(addDisposableListener(element, EventType.MOUSE_DOWN, e => {
 			if (!enableDragging) {
@@ -146,7 +155,7 @@ export class BaseActionViewItem extends Disposable implements IActionViewItem {
 
 			// menus do not use the click event
 			if (!(this.options && this.options.isMenu)) {
-				platform.setImmediate(() => this.onClick(e));
+				this.onClick(e);
 			}
 		}));
 
@@ -162,10 +171,10 @@ export class BaseActionViewItem extends Disposable implements IActionViewItem {
 		});
 	}
 
-	onClick(event: EventLike): void {
+	onClick(event: EventLike, preserveFocus = false): void {
 		EventHelper.stop(event, true);
 
-		const context = types.isUndefinedOrNull(this._context) ? this.options?.useEventAsContext ? event : undefined : this._context;
+		const context = types.isUndefinedOrNull(this._context) ? this.options?.useEventAsContext ? event : { preserveFocus } : this._context;
 		this.actionRunner.run(this._action, context);
 	}
 
@@ -209,8 +218,27 @@ export class BaseActionViewItem extends Disposable implements IActionViewItem {
 		// implement in subclass
 	}
 
+	protected getTooltip(): string | undefined {
+		return this.getAction().tooltip;
+	}
+
 	protected updateTooltip(): void {
-		// implement in subclass
+		if (!this.element) {
+			return;
+		}
+		const title = this.getTooltip() ?? '';
+		this.element.setAttribute('aria-label', title);
+		if (!this.options.hoverDelegate) {
+			this.element.title = title;
+		} else {
+			this.element.title = '';
+			if (!this.customHover) {
+				this.customHover = setupCustomHover(this.options.hoverDelegate, this.element, title);
+				this._store.add(this.customHover);
+			} else {
+				this.customHover.update(title);
+			}
+		}
 	}
 
 	protected updateClass(): void {
@@ -319,7 +347,7 @@ export class ActionViewItem extends BaseActionViewItem {
 		}
 	}
 
-	override updateTooltip(): void {
+	override getTooltip() {
 		let title: string | null = null;
 
 		if (this.getAction().tooltip) {
@@ -332,10 +360,7 @@ export class ActionViewItem extends BaseActionViewItem {
 				title = nls.localize({ key: 'titleLabel', comment: ['action title', 'action keybinding'] }, "{0} ({1})", title, this.options.keybinding);
 			}
 		}
-
-		if (title && this.label) {
-			this.label.title = title;
-		}
+		return title ?? undefined;
 	}
 
 	override updateClass(): void {
@@ -367,9 +392,7 @@ export class ActionViewItem extends BaseActionViewItem {
 
 			this.updateEnabled();
 		} else {
-			if (this.label) {
-				this.label.classList.remove('codicon');
-			}
+			this.label?.classList.remove('codicon');
 		}
 	}
 
@@ -380,18 +403,14 @@ export class ActionViewItem extends BaseActionViewItem {
 				this.label.classList.remove('disabled');
 			}
 
-			if (this.element) {
-				this.element.classList.remove('disabled');
-			}
+			this.element?.classList.remove('disabled');
 		} else {
 			if (this.label) {
 				this.label.setAttribute('aria-disabled', 'true');
 				this.label.classList.add('disabled');
 			}
 
-			if (this.element) {
-				this.element.classList.add('disabled');
-			}
+			this.element?.classList.add('disabled');
 		}
 	}
 
@@ -405,7 +424,7 @@ export class ActionViewItem extends BaseActionViewItem {
 		}
 	}
 
-	// {{SQL CARBON EDIT}}
+	// {{SQL CARBON EDIT}} - BEGIN
 	override updateExpanded(): void {
 		if (this.label) {
 			if (this.getAction().expanded !== undefined) {
@@ -415,6 +434,16 @@ export class ActionViewItem extends BaseActionViewItem {
 			}
 		}
 	}
+
+	override updateTooltip(): void {
+		super.updateTooltip();
+		const tooltip = this.getTooltip();
+		if (tooltip) {
+			this.label?.setAttribute('aria-label', tooltip);
+		}
+	}
+
+	// {{SQL CARBON EDIT}} - END
 }
 
 export class SelectActionViewItem extends BaseActionViewItem {

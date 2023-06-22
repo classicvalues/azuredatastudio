@@ -7,7 +7,7 @@ import * as azdata from 'azdata';
 import * as nls from 'vscode-nls';
 import { BasePage } from './basePage';
 import { JupyterServerInstallation } from '../../jupyter/jupyterServerInstallation';
-import { python3DisplayName, pysparkDisplayName, sparkScalaDisplayName, sparkRDisplayName, powershellDisplayName, allKernelsName } from '../../common/constants';
+import { python3DisplayName, powershellDisplayName, allKernelsName } from '../../common/constants';
 import { getDropdownValue } from '../../common/utils';
 
 const localize = nls.loadMessageBundle();
@@ -39,7 +39,7 @@ export class PickPackagesPage extends BasePage {
 				value: this.model.kernelName
 			}).component();
 		} else {
-			let dropdownValues = [python3DisplayName, pysparkDisplayName, sparkScalaDisplayName, sparkRDisplayName, powershellDisplayName, allKernelsName];
+			let dropdownValues = [python3DisplayName, powershellDisplayName, allKernelsName];
 			this.kernelDropdown = this.view.modelBuilder.dropDown().withProps({
 				value: dropdownValues[0],
 				values: dropdownValues,
@@ -158,9 +158,9 @@ export class PickPackagesPage extends BasePage {
 				this.requiredPackagesTable.data = requiredPkgVersions.map(pkg => [pkg.name, pkg.existingVersion ?? '-', pkg.requiredVersion]);
 				this.model.packagesToInstall = requiredPackages;
 			} else {
-				this.instance.showErrorMessage(localize('msgUnsupportedKernel', "Could not retrieve packages for kernel {0}", kernelName));
+				this.instance.showInfoMessage(localize('msgNoRequirementsForKernel', "No packages are required by default for the kernel '{0}'", kernelName));
 				this.requiredPackagesTable.data = [['-', '-', '-']];
-				this.model.packagesToInstall = undefined;
+				this.model.packagesToInstall = [];
 			}
 		} finally {
 			this.instance.wizard.doneButton.enabled = true;

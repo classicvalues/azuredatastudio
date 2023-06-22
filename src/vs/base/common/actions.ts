@@ -3,9 +3,9 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { Emitter, Event } from 'vs/base/common/event';
+import { Disposable, IDisposable } from 'vs/base/common/lifecycle';
 import * as nls from 'vs/nls';
-import { IDisposable, Disposable } from 'vs/base/common/lifecycle';
-import { Event, Emitter } from 'vs/base/common/event';
 
 export interface ITelemetryData {
 	readonly from?: string;
@@ -14,8 +14,9 @@ export interface ITelemetryData {
 }
 
 export type WorkbenchActionExecutedClassification = {
-	id: { classification: 'SystemMetaData', purpose: 'FeatureInsight'; };
-	from: { classification: 'SystemMetaData', purpose: 'FeatureInsight'; };
+	owner: 'bpasero';
+	id: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The identifier of the action that was run.' };
+	from: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The name of the component the action was run from.' };
 };
 
 export type WorkbenchActionExecutedEvent = {
@@ -29,16 +30,16 @@ export interface IAction extends IDisposable {
 	tooltip: string;
 	class: string | undefined;
 	enabled: boolean;
-	checked: boolean;
-	expanded: boolean | undefined; // {{SQL CARBON EDIT}}
-	run(event?: unknown): Promise<unknown>;
+	checked?: boolean;
+	expanded?: boolean | undefined; // {{SQL CARBON EDIT}}
+	run(event?: unknown): unknown;
 }
 
 export interface IActionRunner extends IDisposable {
 	readonly onDidRun: Event<IRunEvent>;
 	readonly onBeforeRun: Event<IRunEvent>;
 
-	run(action: IAction, context?: unknown): Promise<unknown>;
+	run(action: IAction, context?: unknown): unknown;
 }
 
 export interface IActionChangeEvent {
@@ -60,11 +61,11 @@ export class Action extends Disposable implements IAction {
 	protected _tooltip: string | undefined;
 	protected _cssClass: string | undefined;
 	protected _enabled: boolean = true;
-	protected _checked: boolean = false;
+	protected _checked?: boolean;
 	protected _expanded: boolean = false; // {{SQL CARBON EDIT}}
-	protected readonly _actionCallback?: (event?: unknown) => Promise<unknown>;
+	protected readonly _actionCallback?: (event?: unknown) => unknown;
 
-	constructor(id: string, label: string = '', cssClass: string = '', enabled: boolean = true, actionCallback?: (event?: unknown) => Promise<unknown>) {
+	constructor(id: string, label: string = '', cssClass: string = '', enabled: boolean = true, actionCallback?: (event?: unknown) => unknown) {
 		super();
 		this._id = id;
 		this._label = label;
@@ -137,15 +138,15 @@ export class Action extends Disposable implements IAction {
 		}
 	}
 
-	get checked(): boolean {
+	get checked(): boolean | undefined {
 		return this._checked;
 	}
 
-	set checked(value: boolean) {
+	set checked(value: boolean | undefined) {
 		this._setChecked(value);
 	}
 
-	protected _setChecked(value: boolean): void {
+	protected _setChecked(value: boolean | undefined): void {
 		if (this._checked !== value) {
 			this._checked = value;
 			this._onDidChange.fire({ checked: value });
@@ -212,6 +213,24 @@ export class ActionRunner extends Disposable implements IActionRunner {
 
 export class Separator extends Action {
 
+	/**
+	 * Joins all non-empty lists of actions with separators.
+	 */
+	public static join(...actionLists: readonly IAction[][]) {
+		let out: IAction[] = [];
+		for (const list of actionLists) {
+			if (!list.length) {
+				// skip
+			} else if (out.length) {
+				out = [...out, new Separator(), ...list];
+			} else {
+				out = list;
+			}
+		}
+
+		return out;
+	}
+
 	static readonly ID = 'vs.actions.separator';
 
 	constructor(label?: string) {
@@ -229,7 +248,7 @@ export class SubmenuAction implements IAction {
 	readonly class: string | undefined;
 	readonly tooltip: string = '';
 	readonly enabled: boolean = true;
-	readonly checked: boolean = false;
+	readonly checked: undefined = undefined;
 
 	private readonly _actions: readonly IAction[];
 	get actions(): readonly IAction[] { return this._actions; }
@@ -268,7 +287,7 @@ export class EmptySubmenuAction extends Action {
 	}
 }
 
-export function toAction(props: { id: string, label: string, enabled?: boolean, checked?: boolean, run: Function; }): IAction {
+export function toAction(props: { id: string; label: string; enabled?: boolean; checked?: boolean; run: Function }): IAction {
 	return {
 		id: props.id,
 		label: props.label,

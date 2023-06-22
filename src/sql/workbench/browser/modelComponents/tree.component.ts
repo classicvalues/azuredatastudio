@@ -12,11 +12,11 @@ import {
 import * as azdata from 'azdata';
 
 import { ComponentBase } from 'sql/workbench/browser/modelComponents/componentBase';
-import { Tree } from 'vs/base/parts/tree/browser/treeImpl';
+import { Tree } from 'sql/base/parts/tree/browser/treeImpl';
 import { TreeComponentRenderer } from 'sql/workbench/browser/modelComponents/treeComponentRenderer';
 import { TreeComponentDataSource } from 'sql/workbench/browser/modelComponents/treeDataSource';
 import { attachListStyler } from 'vs/platform/theme/common/styler';
-import { DefaultFilter, DefaultAccessibilityProvider, DefaultController } from 'vs/base/parts/tree/browser/treeDefaults';
+import { DefaultFilter, DefaultAccessibilityProvider, DefaultController } from 'sql/base/parts/tree/browser/treeDefaults';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { ITreeComponentItem } from 'sql/workbench/common/views';
 import { TreeViewDataProvider } from 'sql/workbench/browser/modelComponents/treeViewDataProvider';
@@ -110,7 +110,7 @@ export default class TreeComponent extends ComponentBase<azdata.TreeProperties> 
 				{
 					indentPixels: 10,
 					twistiePixels: 20,
-					ariaLabel: 'Tree Node'
+					ariaLabel: this.ariaLabel
 				});
 			this._tree.setInput(new Root());
 			this._tree.domFocus();
@@ -161,6 +161,13 @@ export default class TreeComponent extends ComponentBase<azdata.TreeProperties> 
 		super.setProperties(properties);
 		if (this._treeRenderer) {
 			this._treeRenderer.options.withCheckbox = this.withCheckbox;
+		}
+
+		if (this._tree) {
+			// If tree was already initialized, update its properties
+			if (this.ariaLabel) {
+				this._tree.ariaLabel = this.ariaLabel;
+			}
 		}
 	}
 

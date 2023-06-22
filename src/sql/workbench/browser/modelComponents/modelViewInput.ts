@@ -6,7 +6,6 @@
 import * as azdata from 'azdata';
 
 import { IEditorModel } from 'vs/platform/editor/common/editor';
-import { EditorInput, EditorModel, IEditorInput } from 'vs/workbench/common/editor';
 import * as DOM from 'vs/base/browser/dom';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 
@@ -15,6 +14,8 @@ import { Emitter, Event } from 'vs/base/common/event';
 import { IWorkbenchLayoutService, Parts } from 'vs/workbench/services/layout/browser/layoutService';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { URI } from 'vs/base/common/uri';
+import { EditorModel } from 'vs/workbench/common/editor/editorModel';
+import { EditorInput } from 'vs/workbench/common/editor/editorInput';
 
 export type ModeViewSaveHandler = (handle: number) => Thenable<boolean>;
 
@@ -139,7 +140,7 @@ export class ModelViewInput extends EditorInput {
 	/**
 	 * Saves the editor if it is dirty. Subclasses return a promise with a boolean indicating the success of the operation.
 	 */
-	override save(): Promise<IEditorInput | undefined> {
+	override save(): Promise<EditorInput | undefined> {
 		return this._model.save().then(saved => saved ? this : undefined);
 	}
 

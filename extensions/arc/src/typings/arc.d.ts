@@ -20,7 +20,9 @@ declare module 'arc' {
 	}
 
 	export type MiaaResourceInfo = ResourceInfo & {
-		userName?: string
+		userName?: string,
+		encrypt?: string,
+		trustServerCertificate?: boolean
 	};
 
 	export type PGResourceInfo = ResourceInfo & {
@@ -39,7 +41,11 @@ declare module 'arc' {
 		kubeClusterContext: string,
 		namespace: string,
 		name: string,
-		resources: ResourceInfo[]
+		resources: ResourceInfo[],
+		resourceGroup: string,
+		connectionMode: string,
+		location: string,
+		customLocation: string
 	};
 
 	export interface DataController {

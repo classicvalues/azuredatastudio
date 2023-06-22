@@ -23,12 +23,12 @@ import * as DOM from 'vs/base/browser/dom';
 import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { ProfilerFilter, ProfilerFilterClause, ProfilerFilterClauseOperator, IProfilerService } from 'sql/workbench/services/profiler/browser/interfaces';
 import { ILogService } from 'vs/platform/log/common/log';
-import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfigurationService';
 import { IAdsTelemetryService } from 'sql/platform/telemetry/common/telemetry';
 import { onUnexpectedError } from 'vs/base/common/errors';
 import { attachModalDialogStyler } from 'sql/workbench/common/styler';
 import { ILayoutService } from 'vs/platform/layout/browser/layoutService';
-
+import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfiguration';
+import * as aria from 'vs/base/browser/ui/aria/aria';
 
 const ClearText: string = localize('profilerFilterDialog.clear', "Clear all");
 const ApplyText: string = localize('profilerFilterDialog.apply', "Apply");
@@ -39,6 +39,8 @@ const RemoveText: string = localize('profilerFilterDialog.remove', "Remove this 
 const SaveFilterText: string = localize('profilerFilterDialog.saveFilter', "Save Filter");
 const LoadFilterText: string = localize('profilerFilterDialog.loadFilter', "Load Filter");
 const AddClauseText: string = localize('profilerFilterDialog.addClauseText', "Add a clause");
+const NewClauseAddedText: string = localize('profilerFilterDialog.newClauseAdded', "A new clause has been added.");
+const AllClausesClearedText: string = localize('profilerFilterDialog.allClausesCleared', "All clauses have been cleared.");
 const TitleIconClass: string = 'icon filterLabel';
 
 const FieldText: string = localize('profilerFilterDialog.fieldColumn', "Field");
@@ -117,19 +119,27 @@ export class ProfilerFilterDialog extends Modal {
 	protected renderBody(container: HTMLElement) {
 		const body = DOM.append(container, DOM.$('.profiler-filter-dialog'));
 		const clauseTableContainer = DOM.append(body, DOM.$('.clause-table-container'));
+		const actionsContainer = DOM.append(body, DOM.$('.actions-container'));
 		this._clauseBuilder = DOM.append(clauseTableContainer, DOM.$('table.profiler-filter-clause-table'));
 		const headerRow = DOM.append(this._clauseBuilder, DOM.$('tr'));
-		DOM.append(headerRow, DOM.$('td')).innerText = FieldText;
-		DOM.append(headerRow, DOM.$('td')).innerText = OperatorText;
-		DOM.append(headerRow, DOM.$('td')).innerText = ValueText;
-		DOM.append(headerRow, DOM.$('td')).innerText = '';
+		DOM.append(headerRow, DOM.$('th')).innerText = FieldText;
+		DOM.append(headerRow, DOM.$('th')).innerText = OperatorText;
+		DOM.append(headerRow, DOM.$('th')).innerText = ValueText;
+		DOM.append(headerRow, DOM.$('th')).innerText = '';
 
 		this._input!.filter.clauses.forEach(clause => {
 			this.addClauseRow(true, clause.field, this.convertToOperatorString(clause.operator), clause.value);
 		});
 
-		this.createClauseTableActionLink(AddClauseText, body, () => { this.addClauseRow(false); });
-		this.createClauseTableActionLink(ClearText, body, () => { this.handleClearButtonClick(); });
+
+
+		this.createClauseTableActionLink(AddClauseText, actionsContainer, () => {
+			this.addClauseRow(false);
+			// Set keyboard focus to the newly added clause.
+			this._clauseRows[this._clauseRows.length - 1]?.field?.focus();
+			aria.status(NewClauseAddedText);
+		});
+		this.createClauseTableActionLink(ClearText, actionsContainer, () => { this.handleClearButtonClick(); });
 	}
 
 	protected layout(height?: number): void {
@@ -156,18 +166,21 @@ export class ProfilerFilterDialog extends Modal {
 			clause.row.remove();
 		});
 		this._clauseRows = [];
+		aria.status(AllClausesClearedText);
 	}
 
 	private createClauseTableActionLink(text: string, parent: HTMLElement, handler: () => void): void {
 		const actionLink = DOM.append(parent, DOM.$('.profiler-filter-clause-table-action', {
 			'tabIndex': '0',
-			'role': 'button'
+			'role': 'button',
+			'aria-label': text
 		}));
 		actionLink.innerText = text;
 		DOM.addDisposableListener(actionLink, DOM.EventType.CLICK, handler);
 		DOM.addStandardDisposableListener(actionLink, DOM.EventType.KEY_DOWN, (e: StandardKeyboardEvent) => {
 			if (e.equals(KeyCode.Space) || e.equals(KeyCode.Enter)) {
 				handler();
+				e.preventDefault();
 				e.stopPropagation();
 			}
 		});
@@ -233,7 +246,7 @@ export class ProfilerFilterDialog extends Modal {
 
 		const operatorDropDown = this.createSelectBox(DOM.append(row, DOM.$('td')), Operators, Operators[0], OperatorText);
 
-		const valueText = new InputBox(DOM.append(row, DOM.$('td')), this.contextViewService, {});
+		const valueText = new InputBox(DOM.append(row, DOM.$('td')), this.contextViewService, { ariaLabel: ValueText });
 		this._register(attachInputBoxStyler(valueText, this._themeService));
 
 		const removeCell = DOM.append(row, DOM.$('td'));

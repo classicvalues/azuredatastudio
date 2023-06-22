@@ -44,7 +44,6 @@ import { ICommandService } from 'vs/platform/commands/common/commands';
 import { TaskRegistry } from 'sql/workbench/services/tasks/browser/tasksRegistry';
 import { MenuRegistry, IMenuService, MenuId, MenuItemAction } from 'vs/platform/actions/common/actions';
 import { fillInActions } from 'vs/platform/actions/browser/menuEntryActionViewItem';
-import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { NAV_SECTION } from 'sql/workbench/contrib/dashboard/browser/containers/dashboardNavSection.contribution';
 import { IWorkbenchThemeService } from 'vs/workbench/services/themes/common/workbenchThemeService';
 import { EDITOR_PANE_BACKGROUND } from 'vs/workbench/common/theme';
@@ -54,6 +53,7 @@ import { focusBorder } from 'vs/platform/theme/common/colorRegistry';
 import { LabeledMenuItemActionItem } from 'sql/platform/actions/browser/menuEntryActionViewItem';
 import { DASHBOARD_BORDER, TOOLBAR_OVERFLOW_SHADOW } from 'sql/workbench/common/theme';
 import { IActionViewItem } from 'vs/base/browser/ui/actionbar/actionbar';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 
 const dashboardRegistry = Registry.as<IDashboardRegistry>(DashboardExtensions.DashboardContributions);
 const homeTabGroupId = 'home';
@@ -83,7 +83,11 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 	// tslint:disable:no-unused-variable
 	private readonly homeTabTitle: string = nls.localize('home', "Home");
 	private readonly homeTabId: string = 'homeTab';
-	private tabToolbarActionsConfig = new Map<string, any[]>();
+	private tabToolbarActionsConfig = new Map<string, {
+		actions: any[],
+		hideRefreshTask: boolean
+	}>();
+
 	private tabContents = new Map<string, string>();
 
 	static tabName = new RawContextKey<string>('tabName', undefined);
@@ -125,8 +129,8 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 		@Inject(ICommandService) private commandService: ICommandService,
 		@Inject(IContextKeyService) contextKeyService: IContextKeyService,
 		@Inject(IMenuService) private menuService: IMenuService,
-		@Inject(IKeybindingService) private keybindingService: IKeybindingService,
-		@Inject(IWorkbenchThemeService) private themeService: IWorkbenchThemeService
+		@Inject(IWorkbenchThemeService) private themeService: IWorkbenchThemeService,
+		@Inject(IInstantiationService) private instantiationService: IInstantiationService
 	) {
 		super();
 		this._tabName = DashboardPage.tabName.bindTo(contextKeyService);
@@ -165,9 +169,6 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 			this.createTabs(tempWidgets);
 		}
 
-		this.showToolbar = true;
-		this.createToolbar(this.toolbarContainer.nativeElement, this.homeTabId);
-
 		this._register(this.themeService.onDidColorThemeChange((event: IColorTheme) => {
 			this.updateTheme(event);
 		}));
@@ -181,7 +182,7 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 			let secondary: IAction[] = [];
 			const menu = this.menuService.createMenu(MenuId.DashboardToolbar, this.contextKeyService);
 			let groups = menu.getActions({ arg: this.connectionManagementService.connectionInfo.connectionProfile.toIConnectionProfile(), shouldForwardArgs: true });
-			fillInActions(groups, { primary, secondary }, false, '', Number.MAX_SAFE_INTEGER, (action: SubmenuAction, group: string, groupSize: number) => group === undefined || group === '');
+			fillInActions(groups, { primary, secondary }, false, g => g === '', Number.MAX_SAFE_INTEGER, (action: SubmenuAction, group: string, groupSize: number) => group === undefined || group === '');
 
 			primary.forEach(a => {
 				if (a instanceof MenuItemAction) {
@@ -193,10 +194,6 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 				}
 			});
 
-			if (primary.length > 0) {
-				let separator: HTMLElement = Taskbar.createTaskbarSeparator();
-				tasks.push({ element: separator });
-			}
 		}
 		return tasks;
 	}
@@ -212,7 +209,7 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 		content = this.getToolbarContent(tabId);
 		if (tabId === this.homeTabId) {
 			const configureDashboardCommand = MenuRegistry.getCommand('configureDashboard');
-			const configureDashboardAction = new ToolbarAction(configureDashboardCommand.id, configureDashboardCommand.title.toString(), TaskRegistry.getOrCreateTaskIconClassName(configureDashboardCommand), this.runAction, this, this.logService);
+			const configureDashboardAction = new ToolbarAction(configureDashboardCommand.id, configureDashboardCommand.title.toString(), nls.localize('dashboard.configureDashboardTooltip', "Learn more about how to configure the dashboard"), TaskRegistry.getOrCreateTaskIconClassName(configureDashboardCommand), this.runAction, this, this.logService);
 			content.push({ action: configureDashboardAction });
 		}
 		this.toolbar.setContent(content);
@@ -222,8 +219,8 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 		const toolbarTasks = this.tabToolbarActionsConfig.get(tabId);
 		let tasks = TaskRegistry.getTasks();
 		let content = [];
-		if (types.isArray(toolbarTasks) && toolbarTasks.length > 0) {
-			tasks = toolbarTasks.map(i => {
+		if (types.isArray(toolbarTasks.actions) && toolbarTasks.actions.length > 0) {
+			tasks = toolbarTasks.actions.map(i => {
 				if (types.isString(i)) {
 					if (tasks.some(x => x === i)) {
 						return i;
@@ -242,12 +239,29 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 
 		// get extension actions contributed to the page's toolbar
 		const contributedTasks = this.getContributedTasks(tabId);
+		if (content.length > 0 && contributedTasks.length > 0) {
+			/**
+			 * Adding the separator before adding contributed tasks if there other
+			 * toolbar tasks already present in the toolbar
+			 */
+			const separator: HTMLElement = Taskbar.createTaskbarSeparator();
+			content.push({ element: separator });
+		}
 		content.push(...contributedTasks);
 
-		const refreshAction = new RefreshWidgetAction(() => {
-			this.refresh();
-		}, this);
-		content.push({ action: refreshAction });
+		if (!toolbarTasks.hideRefreshTask) {
+			/**
+			 * Adding the separator only when there are other actions present on the task
+			 */
+			if (content.length > 0) {
+				const separator: HTMLElement = Taskbar.createTaskbarSeparator();
+				content.push({ element: separator });
+			}
+			const refreshAction = new RefreshWidgetAction(() => {
+				this.refresh();
+			}, this);
+			content.push({ action: refreshAction });
+		}
 		return content;
 	}
 
@@ -258,18 +272,13 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 		_tasks.forEach(a => {
 			const iconClassName = TaskRegistry.getOrCreateTaskIconClassName(a);
 			const title = typeof a.title === 'string' ? a.title : a.title.value;
-			toolbarActions.push(new ToolbarAction(a.id, title, iconClassName, this.runAction, this, this.logService));
+			toolbarActions.push(new ToolbarAction(a.id, title, title, iconClassName, this.runAction, this, this.logService));
 		});
 
 		let content: ITaskbarContent[] = [];
 		toolbarActions.forEach(a => {
 			content.push({ action: a });
 		});
-
-		if (content.length > 0) {
-			let separator: HTMLElement = Taskbar.createTaskbarSeparator();
-			content.push({ element: separator });
-		}
 
 		return content;
 	}
@@ -281,7 +290,7 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 	private createActionItemProvider(action: Action): IActionViewItem {
 		// Create ActionItem for actions contributed by extensions
 		if (action instanceof MenuItemAction) {
-			return new LabeledMenuItemActionItem(action, this.keybindingService, this.notificationService);
+			return this.instantiationService.createInstance(LabeledMenuItemActionItem, action, undefined);
 		}
 		return undefined;
 	}
@@ -445,7 +454,7 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 				configs = cb.apply(this, [configs]);
 			});
 
-			this.processTasksWidgets(configs, value.id);
+			this.processTasksWidgets(configs, value.id, value.hideRefreshTask);
 
 			if (key === WIDGETS_CONTAINER) {
 				return { id: value.id, title: value.title, container: { 'widgets-container': configs }, alwaysShow: value.alwaysShow, iconClass: value.iconClass };
@@ -462,7 +471,7 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 	 * @param widgets widgets
 	 * @param tabId tab id
 	 */
-	private processTasksWidgets(widgets: WidgetConfig[], tabId: string): void {
+	private processTasksWidgets(widgets: WidgetConfig[], tabId: string, hideRefreshTask?: boolean): void {
 		let index;
 		const allTasks = [];
 		// do this in a while loop since there might be multiple tasks widgets in a tab
@@ -476,7 +485,10 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 				widgets.splice(index, 1);
 			}
 		} while (index !== -1);
-		this.tabToolbarActionsConfig.set(tabId, allTasks);
+		this.tabToolbarActionsConfig.set(tabId, {
+			actions: allTasks,
+			hideRefreshTask: hideRefreshTask
+		});
 	}
 
 	protected getContentType(tab: TabConfig): string {
@@ -504,7 +516,7 @@ export abstract class DashboardPage extends AngularDisposable implements IConfig
 			return [this.propertiesWidget];
 		} else if (types.isArray(properties)) {
 			return properties.map((item) => {
-				const retVal = objects.assign({}, this.propertiesWidget);
+				const retVal = Object.assign({}, this.propertiesWidget);
 				retVal.edition = item.edition;
 				retVal.provider = item.provider;
 				retVal.widget = { 'properties-widget': { properties: item.properties } };

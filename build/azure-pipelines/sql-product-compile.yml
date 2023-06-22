@@ -1,7 +1,7 @@
 steps:
 - task: NodeTool@0
   inputs:
-    versionSpec: "12.13.0"
+    versionSpec: "16.x"
 
 - task: geeklearningio.gl-vsts-tasks-yarn.yarn-installer-task.YarnInstaller@3
   inputs:
@@ -74,13 +74,20 @@ steps:
 # inline small SVGs
 - script: |
     set -e
-    node build/azure-pipelines/mixin
+    node build/azure-pipelines/sql-mixin
   displayName: Mix in quality
+
+# Run these separately to avoid OOM errors on pipeline machines
+- script: |
+    set -e
+    yarn npm-run-all -lp core-ci extensions-ci
+    yarn npm-run-all -lp hygiene eslint valid-layers-check
+  displayName: Compile & Hygiene
 
 - script: |
     set -e
-    yarn npm-run-all -lp core-ci extensions-ci hygiene eslint valid-layers-check sqllint strict-vscode
-  displayName: Compile & Hygiene
+    yarn npm-run-all -lp sqllint extensions-lint
+  displayName: SQL Hygiene
 
 - script: |
     set -e
@@ -88,6 +95,7 @@ steps:
     AZURE_STORAGE_ACCESS_KEY="$(sourcemap-storage-key)" \
       node build/azure-pipelines/upload-sourcemaps
   displayName: Upload sourcemaps
+  condition: and(succeeded(), ne(variables['VSCODE_PUBLISH'], 'false'))
 
 - script: |
     set -e

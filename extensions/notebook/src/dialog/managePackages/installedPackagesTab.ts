@@ -27,6 +27,7 @@ export class InstalledPackagesTab {
 	private installedPackagesTable: azdata.TableComponent;
 	private installedPackagesLoader: azdata.LoadingComponent;
 	private uninstallPackageButton: azdata.ButtonComponent;
+	private uninstallProgressSpinner: azdata.LoadingComponent;
 	private view: azdata.ModelView | undefined;
 	private formBuilder: azdata.FormBuilder;
 	private disposables: vscode.Disposable[] = [];
@@ -92,7 +93,7 @@ export class InstalledPackagesTab {
 						}
 					],
 					data: [[]],
-					height: '600px',
+					height: '430px',
 					width: '400px'
 				}).component();
 			this.disposables.push(this.installedPackagesTable.onCellAction(async (rowState) => {
@@ -110,6 +111,14 @@ export class InstalledPackagesTab {
 				}).component();
 			this.uninstallPackageButton.onDidClick(() => this.doUninstallPackage(this.installedPackagesTable.selectedRows));
 
+			this.uninstallProgressSpinner = view.modelBuilder.loadingComponent()
+				.withProps({
+					loadingText: localize('managePackages.uninstallProgressText', "Uninstalling package"),
+					showText: true,
+					loadingCompletedText: localize('managePackages.uninstallCompleteText', "Package uninstalled"),
+					loading: false
+				}).component();
+
 			this.formBuilder = view.modelBuilder.formContainer()
 				.withFormItems([{
 					component: this.packageTypeDropdown,
@@ -123,6 +132,9 @@ export class InstalledPackagesTab {
 				}, {
 					component: this.uninstallPackageButton,
 					title: ''
+				}, {
+					component: this.uninstallProgressSpinner,
+					title: ''
 				}]);
 			await this.resetLocations();
 
@@ -135,7 +147,7 @@ export class InstalledPackagesTab {
 			await view.initializeModel(this.installedPackagesLoader);
 
 			await this.loadInstalledPackagesInfo();
-			this.packageTypeDropdown.focus();
+			await this.packageTypeDropdown.focus();
 		});
 	}
 
@@ -252,7 +264,7 @@ export class InstalledPackagesTab {
 			return;
 		}
 
-		this.uninstallPackageButton.updateProperties({ enabled: false });
+		this.uninstallPackageButton.enabled = false;
 		let doUninstall = await this.prompter.promptSingle<boolean>(<IQuestion>{
 			type: QuestionTypes.confirm,
 			message: localize('managePackages.confirmUninstall', "Are you sure you want to uninstall the specified packages?"),
@@ -281,6 +293,7 @@ export class InstalledPackagesTab {
 					description: taskName,
 					isCancelable: false,
 					operation: op => {
+						this.uninstallProgressSpinner.loading = true;
 						let uninstallPromise: Promise<void> = this.dialog.model.uninstallPackages(packages);
 						uninstallPromise
 							.then(async () => {
@@ -301,14 +314,18 @@ export class InstalledPackagesTab {
 
 								op.updateStatus(azdata.TaskStatus.Failed, uninstallFailedMsg);
 								this.jupyterInstallation.outputChannel.appendLine(uninstallFailedMsg);
+							})
+							.finally(() => {
+								this.uninstallPackageButton.enabled = true;
+								this.uninstallProgressSpinner.loading = false;
 							});
 					}
 				});
 			} catch (err) {
 				this.dialog.showErrorMessage(utils.getErrorMessage(err));
 			}
+		} else {
+			this.uninstallPackageButton.enabled = true;
 		}
-
-		this.uninstallPackageButton.updateProperties({ enabled: true });
 	}
 }

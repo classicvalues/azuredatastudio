@@ -21,12 +21,14 @@ export function createContext(): TestContext {
 			subscriptions: [],
 			workspaceState: {
 				get: () => { return Promise.resolve(); },
-				update: () => { return Promise.resolve(); }
+				update: () => { return Promise.resolve(); },
+				keys: () => []
 			},
 			globalState: {
 				setKeysForSync: (): void => { },
 				get: (): any | undefined => { return Promise.resolve(); },
-				update: (): Thenable<void> => { return Promise.resolve(); }
+				update: (): Thenable<void> => { return Promise.resolve(); },
+				keys: () => []
 			},
 			extensionPath: extensionPath,
 			asAbsolutePath: () => { return ''; },
@@ -197,7 +199,8 @@ export function createViewContext(): ViewTestContext {
 		data: [] as any[][],
 		columns: [] as string[],
 		onRowSelected: onClick.event,
-		appendData: (data: any[][]) => undefined,
+		appendData: (_data: any[][]) => undefined,
+		setActiveCell: (_row: number, _column: number) => undefined
 	});
 
 	let loadingComponent: () => azdata.LoadingComponent = () => Object.assign({}, componentBase, {

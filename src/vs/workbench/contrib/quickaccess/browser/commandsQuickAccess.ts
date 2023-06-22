@@ -11,14 +11,14 @@ import { IExtensionService } from 'vs/workbench/services/extensions/common/exten
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { timeout } from 'vs/base/common/async';
 import { DisposableStore, toDisposable, dispose } from 'vs/base/common/lifecycle';
-import { AbstractEditorCommandsQuickAccessProvider } from 'vs/editor/contrib/quickAccess/commandsQuickAccess';
+import { AbstractEditorCommandsQuickAccessProvider } from 'vs/editor/contrib/quickAccess/browser/commandsQuickAccess';
 import { IEditor } from 'vs/editor/common/editorCommon';
 import { Language } from 'vs/base/common/platform';
 import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { ICommandService } from 'vs/platform/commands/common/commands';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { INotificationService } from 'vs/platform/notification/common/notification';
+import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
 import { DefaultQuickAccessFilterValue } from 'vs/platform/quickinput/common/quickAccess';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IWorkbenchQuickAccessConfiguration } from 'vs/workbench/browser/quickaccess';
@@ -62,7 +62,7 @@ export class CommandsQuickAccessProvider extends AbstractEditorCommandsQuickAcce
 		@IKeybindingService keybindingService: IKeybindingService,
 		@ICommandService commandService: ICommandService,
 		@ITelemetryService telemetryService: ITelemetryService,
-		@INotificationService notificationService: INotificationService,
+		@IDialogService dialogService: IDialogService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IEditorGroupsService private readonly editorGroupService: IEditorGroupsService,
 		@IPreferencesService private readonly preferencesService: IPreferencesService,
@@ -73,7 +73,7 @@ export class CommandsQuickAccessProvider extends AbstractEditorCommandsQuickAcce
 				label: localize('noCommandResults', "No matching commands"),
 				commandId: ''
 			}
-		}, instantiationService, keybindingService, commandService, telemetryService, notificationService);
+		}, instantiationService, keybindingService, commandService, telemetryService, dialogService);
 	}
 
 	private get configuration() {
@@ -160,13 +160,13 @@ export class ShowAllCommandsAction extends Action2 {
 		super({
 			id: ShowAllCommandsAction.ID,
 			title: { value: localize('showTriggerActions', "Show All Commands"), original: 'Show All Commands' },
-			f1: true,
 			keybinding: {
 				weight: KeybindingWeight.WorkbenchContrib,
 				when: undefined,
-				primary: !isFirefox ? (KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_P) : undefined,
+				primary: !isFirefox ? (KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyP) : undefined,
 				secondary: [KeyCode.F1]
-			}
+			},
+			f1: true
 		});
 	}
 
@@ -188,9 +188,23 @@ export class ClearCommandHistoryAction extends Action2 {
 	async run(accessor: ServicesAccessor): Promise<void> {
 		const configurationService = accessor.get(IConfigurationService);
 		const storageService = accessor.get(IStorageService);
+		const dialogService = accessor.get(IDialogService);
 
 		const commandHistoryLength = CommandsHistory.getConfiguredCommandHistoryLength(configurationService);
 		if (commandHistoryLength > 0) {
+
+			// Ask for confirmation
+			const { confirmed } = await dialogService.confirm({
+				message: localize('confirmClearMessage', "Do you want to clear the history of recently used commands?"),
+				detail: localize('confirmClearDetail', "This action is irreversible!"),
+				primaryButton: localize({ key: 'clearButtonLabel', comment: ['&& denotes a mnemonic'] }, "&&Clear"),
+				type: 'warning'
+			});
+
+			if (!confirmed) {
+				return;
+			}
+
 			CommandsHistory.clearHistory(configurationService, storageService);
 		}
 	}

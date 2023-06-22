@@ -4,16 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 import 'vs/css!./notebookViewsGrid';
-import { Component, OnInit, ViewChildren, QueryList, Input, Inject, forwardRef, ChangeDetectorRef, ViewEncapsulation, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, ViewChildren, QueryList, Input, Inject, forwardRef, ChangeDetectorRef, ViewEncapsulation, ChangeDetectionStrategy, ComponentFactoryResolver, ViewChild, ViewContainerRef } from '@angular/core';
 import { NotebookViewsCardComponent } from 'sql/workbench/contrib/notebook/browser/notebookViews/notebookViewsCard.component';
 import { ICellModel } from 'sql/workbench/services/notebook/browser/models/modelInterfaces';
 import { NotebookModel } from 'sql/workbench/services/notebook/browser/models/notebookModel';
-import { GridStack, GridStackEvent, GridStackNode } from 'gridstack';
+import { GridItemHTMLElement, GridStack, GridStackEvent, GridStackNode } from 'gridstack';
 import { localize } from 'vs/nls';
 import { NotebookViewsExtension } from 'sql/workbench/services/notebook/browser/notebookViews/notebookViewsExtension';
-import { CellChangeEvent, INotebookView, INotebookViewCell } from 'sql/workbench/services/notebook/browser/notebookViews/notebookViews';
+import { CellChangeEvent, INotebookView, INotebookViewCard } from 'sql/workbench/services/notebook/browser/notebookViews/notebookViews';
 import { AngularDisposable } from 'sql/base/browser/lifecycle';
-import { generateLayout } from 'sql/workbench/services/notebook/browser/notebookViews/autodash';
 
 export interface INotebookViewsGridOptions {
 	cellHeight?: number;
@@ -31,6 +30,7 @@ export class NotebookViewsGridComponent extends AngularDisposable implements OnI
 	@Input() activeView: INotebookView;
 	@Input() views: NotebookViewsExtension;
 
+	@ViewChild('divContainer', { read: ViewContainerRef }) _containerRef: ViewContainerRef;
 	@ViewChildren(NotebookViewsCardComponent) private _items: QueryList<NotebookViewsCardComponent>;
 
 	protected _grid: GridStack;
@@ -40,18 +40,23 @@ export class NotebookViewsGridComponent extends AngularDisposable implements OnI
 	protected _activeCell: ICellModel;
 
 	protected _options: INotebookViewsGridOptions = {
-		cellHeight: 60
+		cellHeight: 30
 	};;
 
 	constructor(
 		@Inject(forwardRef(() => ChangeDetectorRef)) private _changeRef: ChangeDetectorRef,
+		@Inject(forwardRef(() => ComponentFactoryResolver)) private _componentFactoryResolver: ComponentFactoryResolver
 	) {
 		super();
 		this._loaded = false;
 	}
 
+	public get cards(): INotebookViewCard[] {
+		return this.activeView ? this.activeView.cards : [];
+	}
+
 	public get empty(): boolean {
-		return !this._items || !this._items.find(item => item.visible);
+		return !this._items?.length;
 	}
 
 	public get hiddenItems(): NotebookViewsCardComponent[] {
@@ -72,9 +77,13 @@ export class NotebookViewsGridComponent extends AngularDisposable implements OnI
 		this._loaded = true;
 		this.detectChanges();
 
-		self._grid.on('added', function (e: Event, items: GridStackNode[]) { if (self._gridEnabled) { self.persist('added', items, self._grid, self._items); } });
-		self._grid.on('removed', function (e: Event, items: GridStackNode[]) { if (self._gridEnabled) { self.persist('removed', items, self._grid, self._items); } });
-		self._grid.on('change', function (e: Event, items: GridStackNode[]) { if (self._gridEnabled) { self.persist('change', items, self._grid, self._items); } });
+		let getGridStackItems = (items: GridStackNode[] | GridItemHTMLElement): GridStackNode[] => {
+			return Array.isArray(items) ? items : (items?.gridstackNode ? [items.gridstackNode] : []);
+		};
+
+		self._grid.on('added', function (e: Event, items: GridStackNode[] | GridItemHTMLElement) { if (self._gridEnabled) { self.persist('added', getGridStackItems(items), self._grid, self._items); } });
+		self._grid.on('removed', function (e: Event, items: GridStackNode[] | GridItemHTMLElement) { if (self._gridEnabled) { self.persist('removed', getGridStackItems(items), self._grid, self._items); } });
+		self._grid.on('change', function (e: Event, items: GridStackNode[] | GridItemHTMLElement) { if (self._gridEnabled) { self.persist('change', getGridStackItems(items), self._grid, self._items); } });
 	}
 
 	ngAfterContentChecked() {
@@ -85,20 +94,11 @@ export class NotebookViewsGridComponent extends AngularDisposable implements OnI
 				this._grid = undefined;
 			}
 		}
-		if (this.activeView && this.activeView.guid !== this._gridView?.guid) {
-			this.activeView.initialize();
-		}
-
-		if (this.model?.activeCell?.id !== this._activeCell?.id) {
-			this._activeCell = this.model.activeCell;
-			this.detectChanges();
-		}
 	}
 
 	ngAfterViewChecked() {
 		// If activeView has changed, rebuild the grid
 		if (this.activeView && this.activeView.guid !== this._gridView?.guid) {
-			this._gridView = this.activeView;
 
 			if (!this._grid) {
 				this.createGrid();
@@ -115,6 +115,7 @@ export class NotebookViewsGridComponent extends AngularDisposable implements OnI
 
 	private destroyGrid() {
 		if (this._grid) {
+			this._loaded = false;
 			this._gridEnabled = false;
 			this._grid.destroy(false);
 		}
@@ -122,6 +123,7 @@ export class NotebookViewsGridComponent extends AngularDisposable implements OnI
 
 	private createGrid() {
 		const isNew = this.activeView.isNew;
+		this._gridView = this.activeView;
 
 		if (this._grid) {
 			this.destroyGrid();
@@ -133,17 +135,18 @@ export class NotebookViewsGridComponent extends AngularDisposable implements OnI
 		}
 
 		this._grid = GridStack.init({
-			alwaysShowResizeHandle: false,
+			alwaysShowResizeHandle: true,
 			styleInHead: true,
-			margin: 2,
+			margin: 5,
+			cellHeight: this._options.cellHeight,
 			staticGrid: false,
+			handleClass: 'grid-stack-header'
 		});
+
 
 		this._gridEnabled = true;
 
-		if (isNew) {
-			this.updateGrid();
-		}
+		this.updateGrid();
 	}
 
 	/**
@@ -155,39 +158,48 @@ export class NotebookViewsGridComponent extends AngularDisposable implements OnI
 		}
 
 		this._grid.batchUpdate();
-		this.activeView.cells.forEach(cell => {
-			const el = this._grid.getGridItems().find(x => x.getAttribute('data-cell-id') === cell.cellGuid);
-			const cellData = this.activeView.getCellMetadata(cell);
-			this._grid.update(el, { x: cellData.x, y: cellData.y, w: cellData.width, h: cellData.height });
-
-			if (cellData?.hidden) {
-				this._grid.removeWidget(el, false); // Do not trigger event for batch update
+		this.activeView.cards.forEach(card => {
+			const el = this._grid.getGridItems().find(x => x.getAttribute('data-card-guid') === card.guid);
+			if (el) {
+				this._grid.update(el, { x: card.x, y: card.y, w: card.width, h: card.height });
 			}
 		});
 		this._grid.commit();
 	}
 
-	private resizeCells(): void {
+	private resizeCards(): void {
 		this._items.forEach((i: NotebookViewsCardComponent) => {
 			if (i.elementRef) {
 				const cellHeight = this._options.cellHeight;
+				let maxTabHeight = 30;
 
-				const naturalHeight = i.elementRef.nativeElement.clientHeight;
-				const heightInCells = Math.ceil(naturalHeight / cellHeight);
+				const cardContainers: HTMLCollection = i.elementRef.nativeElement.getElementsByClassName('card-container');
+				if (cardContainers) {
+					maxTabHeight = Array.from(cardContainers).reduce((accum, cardContainer) => {
+						return Math.max(cardContainer.children[0]?.clientHeight ?? 0, accum);
+					}, maxTabHeight);
+				}
 
-				const update: INotebookViewCell = {
+				const cardNaturalHeight = i.elementRef.nativeElement.clientHeight + maxTabHeight;
+				const heightInCells = Math.ceil(cardNaturalHeight / cellHeight);
+
+				const update: INotebookViewCard = {
 					height: heightInCells
 				};
 
-				this.views.updateCell(i.cell, this.activeView, update);
+				this.views.updateCard(i, update, this.activeView);
 			}
 		});
 	}
 
 	private runAutoLayout(view: INotebookView): void {
 		//Resize the cells before regenerating layout so that we know the natural height of the cells
-		this.resizeCells();
-		generateLayout(view);
+		this.resizeCards();
+		//generateLayout(view);
+	}
+
+	trackByCardId(index, item) {
+		return item ? item.guid : undefined;
 	}
 
 	private detectChanges(): void {
@@ -204,20 +216,29 @@ export class NotebookViewsGridComponent extends AngularDisposable implements OnI
 				this.activeView.hideCell(e.cell);
 			}
 
-			if (e.cell && e.event === 'insert') {
-				const component = this._items.find(x => x.cell.cellGuid === e.cell.cellGuid);
 
-				this.activeView.insertCell(e.cell);
+			if (e.cell && e.event === 'insert') {
+				const card = this.activeView.insertCell(e.cell);
+
+				let cardComponentFactory = this._componentFactoryResolver.resolveComponentFactory(NotebookViewsCardComponent);
+				let cardComponent = this._containerRef.createComponent(cardComponentFactory);
+
+				cardComponent.instance.ready = true;
+				cardComponent.instance.activeView = this.activeView;
+				cardComponent.instance.card = card;
+				cardComponent.instance.model = this.model;
+				cardComponent.instance.cells = this.cells;
+
+				cardComponent.instance.initialize();
 
 				this.detectChanges();
 
-				const el = this._grid.getGridItems().find(x => x.getAttribute('data-cell-id') === e.cell.cellGuid);
-				this._grid.makeWidget(el);
+				const el = this._grid.getGridItems().find(x => x.getAttribute('data-card-guid') === card.guid);
+
+				this._grid.addWidget(el);
 				this._grid.update(el, { x: 0, y: 0 });
 				this._grid.resizable(el, true);
 				this._grid.movable(el, true);
-
-				component.initialize();
 			}
 
 			if (e.cell && e.event === 'update') {
@@ -239,25 +260,19 @@ export class NotebookViewsGridComponent extends AngularDisposable implements OnI
 	 */
 	persist(action: GridStackEvent, changedItems: GridStackNode[] = [], grid: GridStack, items: QueryList<NotebookViewsCardComponent>): void {
 		changedItems.forEach((changedItem) => {
-			const cellId = changedItem.el.getAttribute('data-cell-id');
-			const item = items.toArray().find(item => item.cell.cellGuid === cellId);
+			const cellId = changedItem.el.getAttribute('data-card-guid');
+			const item = items.toArray().find(item => item.metadata.guid === cellId);
 
 			if (item && this.activeView) {
-				const update: INotebookViewCell = {
-					guid: this.activeView.guid,
+				const update: INotebookViewCard = {
+					guid: item.guid,
 					x: changedItem.x,
 					y: changedItem.y,
 					width: changedItem.w,
 					height: changedItem.h
 				};
 
-				if (action === 'added') {
-					update.hidden = false;
-				} else if (action === 'removed') {
-					update.hidden = true;
-				}
-
-				this.views.updateCell(item.cell, this.activeView, update);
+				this.views.updateCard(item.metadata, update, this.activeView);
 			}
 		});
 	}

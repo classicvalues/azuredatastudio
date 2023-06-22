@@ -9,7 +9,7 @@ import { FilterableColumn } from 'sql/base/browser/ui/table/interfaces';
 import { addDisposableListener, EventType, EventHelper, $, isAncestor, clearNode, append } from 'vs/base/browser/dom';
 import { DisposableStore, dispose, IDisposable } from 'vs/base/common/lifecycle';
 import { withNullAsUndefined } from 'vs/base/common/types';
-import { instanceOfIDisposableDataProvider } from 'sql/base/common/dataProvider';
+import { IDisposableDataProvider, instanceOfIDisposableDataProvider } from 'sql/base/common/dataProvider';
 import { IContextViewProvider } from 'vs/base/browser/ui/contextview/contextview';
 import { IInputBoxStyles, InputBox } from 'sql/base/browser/ui/inputBox/inputBox';
 import { trapKeyboardNavigation } from 'sql/base/browser/dom';
@@ -34,7 +34,16 @@ export interface ITableFilterOptions {
 	 * The message to be displayed when the filter is disabled and the user tries to open the filter menu.
 	 */
 	disabledFilterMessage?: string;
+	/**
+	 * The columns are refreshed by default to add the filter menu button to the headers.
+	 * Set to false to prevent the grid from being re-drawn multiple times by different plugins.
+	 */
+	refreshColumns?: boolean;
 }
+
+const DefaultTableFilterOptions: ITableFilterOptions = {
+	refreshColumns: true
+};
 
 export interface ITableFilterStyles extends IButtonStyles, IInputBoxStyles, IListStyles, ICountBadgetyles {
 }
@@ -44,6 +53,8 @@ interface NotificationProvider {
 }
 
 const ShowFilterText: string = localize('headerFilter.showFilter', "Show Filter");
+
+export const FilterButtonWidth: number = 34;
 
 export class HeaderFilter<T extends Slick.SlickData> {
 
@@ -73,8 +84,9 @@ export class HeaderFilter<T extends Slick.SlickData> {
 	private disposableStore = new DisposableStore();
 	private columnButtonMapping: Map<string, HTMLElement> = new Map<string, HTMLElement>();
 	private previouslyFocusedElement: HTMLElement;
+	private listContainer?: HTMLElement;
 
-	constructor(private readonly contextViewProvider: IContextViewProvider, private readonly notificationProvider?: NotificationProvider, private readonly options?: ITableFilterOptions) {
+	constructor(private readonly contextViewProvider: IContextViewProvider, private readonly notificationProvider?: NotificationProvider, private readonly options: ITableFilterOptions = DefaultTableFilterOptions) {
 	}
 
 	public init(grid: Slick.Grid<T>): void {
@@ -82,9 +94,11 @@ export class HeaderFilter<T extends Slick.SlickData> {
 		this.handler.subscribe(this.grid.onHeaderCellRendered, (e: Event, args: Slick.OnHeaderCellRenderedEventArgs<T>) => this.handleHeaderCellRendered(e, args))
 			.subscribe(this.grid.onBeforeHeaderCellDestroy, (e: Event, args: Slick.OnBeforeHeaderCellDestroyEventArgs<T>) => this.handleBeforeHeaderCellDestroy(e, args))
 			.subscribe(this.grid.onClick, (e: DOMEvent) => this.handleBodyMouseDown(e as MouseEvent))
-			.subscribe(this.grid.onColumnsResized, () => this.columnsResized())
-			.subscribe(this.grid.onKeyDown, async (e: DOMEvent) => { await this.handleGridKeyDown(e as KeyboardEvent); });
-		this.grid.setColumns(this.grid.getColumns());
+			.subscribe(this.grid.onColumnsResized, () => this.columnsResized());
+
+		if (this.options.refreshColumns !== false) {
+			this.grid.setColumns(this.grid.getColumns());
+		}
 
 		this.disposableStore.add(addDisposableListener(document.body, 'mousedown', e => this.handleBodyMouseDown(e), true));
 		this.disposableStore.add(addDisposableListener(document.body, 'keydown', e => this.handleKeyDown(e)));
@@ -95,6 +109,16 @@ export class HeaderFilter<T extends Slick.SlickData> {
 		this.disposableStore.dispose();
 	}
 
+	public async showMenu(): Promise<void> {
+		const cell = this.grid.getActiveCell();
+		if (cell) {
+			const column = this.grid.getColumns()[cell.cell] as FilterableColumn<T>;
+			if (column.filterable !== false && this.columnButtonMapping[column.id]) {
+				await this.showFilter(this.columnButtonMapping[column.id]);
+			}
+		}
+	}
+
 	private handleKeyDown(e: KeyboardEvent): void {
 		const event = new StandardKeyboardEvent(e);
 		if (this.menu && event.keyCode === KeyCode.Escape) {
@@ -103,23 +127,6 @@ export class HeaderFilter<T extends Slick.SlickData> {
 				this.previouslyFocusedElement?.focus();
 			}
 			EventHelper.stop(e, true);
-		}
-	}
-
-	private async handleGridKeyDown(e: KeyboardEvent): Promise<void> {
-		const event = new StandardKeyboardEvent(e);
-		// The shortcut key to open the filter menu is provided so that this feature is keyboard accessible.
-		// The buttons added to the column headers are set to not keyboard focusable so that they won't interfere with the slickgrid's internal focus management.
-		// F3 key is chosen because it is known for search related features
-		if (event.keyCode === KeyCode.F3) {
-			const cell = this.grid.getActiveCell();
-			if (cell) {
-				const column = this.grid.getColumns()[cell.cell] as FilterableColumn<T>;
-				if (column.filterable !== false && this.columnButtonMapping[column.id]) {
-					await this.showFilter(this.columnButtonMapping[column.id]);
-					EventHelper.stop(e, true);
-				}
-			}
 		}
 	}
 
@@ -174,7 +181,7 @@ export class HeaderFilter<T extends Slick.SlickData> {
 	}
 
 	private createButtonMenuItem(title: string, command: HeaderFilterCommands, iconClass: string): Button {
-		const buttonContainer = append(this.menu, $(''));
+		const buttonContainer = append(this.menu, $('.slick-header-menu-image-button-container'));
 		const button = new Button(buttonContainer);
 		button.icon = { id: `slick-header-menuicon ${iconClass}` };
 		button.label = title;
@@ -228,7 +235,7 @@ export class HeaderFilter<T extends Slick.SlickData> {
 		let filterItems: Array<string>;
 		const dataView = this.grid.getData() as Slick.DataProvider<T>;
 		if (instanceOfIDisposableDataProvider(dataView)) {
-			filterItems = await dataView.getColumnValues(this.columnDef);
+			filterItems = await (dataView as IDisposableDataProvider<T>).getColumnValues(this.columnDef);
 		} else {
 			const filterApplied = this.grid.getColumns().findIndex((col) => {
 				const filterableColumn = col as FilterableColumn<T>;
@@ -244,12 +251,23 @@ export class HeaderFilter<T extends Slick.SlickData> {
 			}
 		}
 
+		// Sort the list to make it easier to find a string
+		filterItems.sort();
+
+		// Promote undefined (NULL) to be always at the top of the list
+		const nullValueIndex = filterItems.indexOf(undefined);
+		if (nullValueIndex !== -1) {
+			filterItems.splice(nullValueIndex, 1);
+			filterItems.unshift(undefined);
+		}
+
 		this.listData = [];
 		for (let i = 0; i < filterItems.length; i++) {
 			const filtered = workingFilters.some(x => x === filterItems[i]);
 			// work item to remove the 'Error:' string check: https://github.com/microsoft/azuredatastudio/issues/15206
-			if (filterItems[i] && filterItems[i].indexOf('Error:') < 0) {
-				this.listData.push(new TableFilterListElement(filterItems[i], filtered));
+			const filterItem = filterItems[i];
+			if (!filterItem || filterItem.indexOf('Error:') < 0) {
+				this.listData.push(new TableFilterListElement(filterItem, filtered));
 			}
 		}
 
@@ -261,8 +279,8 @@ export class HeaderFilter<T extends Slick.SlickData> {
 
 		this.filteredListData = this.listData;
 
-		const filter = append(this.menu, $('.filter'));
-		this.list = new List<TableFilterListElement>('TableFilter', filter, new TableFilterListDelegate(), [new TableFilterListRenderer()], {
+		this.listContainer = append(this.menu, $('.filter'));
+		this.list = new List<TableFilterListElement>('TableFilter', this.listContainer, new TableFilterListDelegate(), [new TableFilterListRenderer()], {
 			multipleSelectionSupport: false,
 			keyboardSupport: true,
 			mouseSupport: true,
@@ -330,29 +348,26 @@ export class HeaderFilter<T extends Slick.SlickData> {
 		}
 		this.previouslyFocusedElement = document.activeElement as HTMLElement;
 		await this.createFilterMenu(filterButton);
-		// Get the absolute coordinates of the filter button
-		const offset = jQuery(filterButton).offset();
-		// Calculate the position of menu item
-		let menuleft = offset.left - this.menu.offsetWidth + filterButton.offsetWidth;
-		let menutop = offset.top + filterButton.offsetHeight;
-		// Make sure the entire menu is on screen.
-		// If there is not enough vertical space under the filter button, we will move up the menu.
-		// If the left of the menu is off screen (negative value), we will show the menu next to the left edge of window.
+		// Try to fit the menu in the screen.
 		// We don't really consider the case when there is not enough space to show the entire menu since in that case the application is not usable already.
-		if (menutop + this.menu.offsetHeight > window.innerHeight) {
-			menutop = window.innerHeight - this.menu.offsetHeight;
-		}
-		menuleft = menuleft > 0 ? menuleft : 0;
+
+		const offset = jQuery(filterButton).offset();
+		// If there is not enough vertical space under the filter button, we will move up the menu.
+		const menuTop = offset.top + this.menu.offsetHeight <= window.innerHeight ? offset.top : window.innerHeight - this.menu.offsetHeight;
+		// Make sure the menu is on the screen horizontally.
+		const menuLeft = offset.left + filterButton.offsetWidth + this.menu.offsetWidth <= window.innerWidth ? offset.left + filterButton.offsetWidth : window.innerWidth - this.menu.offsetWidth;
 
 		this.contextViewProvider.showContextView({
 			getAnchor: () => {
 				return {
-					x: menuleft,
-					y: menutop
+					x: menuLeft,
+					y: menuTop
 				};
 			},
 			render: (container: HTMLElement) => {
 				container.appendChild(this.menu);
+				// Set the list size to its container size so that scrolling works correctly..
+				this.list.layout(this.listContainer.clientHeight);
 				return {
 					dispose: () => {
 						this.disposeMenu();
@@ -384,6 +399,11 @@ export class HeaderFilter<T extends Slick.SlickData> {
 		// first add it to the document so that we can get the actual size of the menu
 		// later, it will be added to the correct container
 		this.menu = append(document.body, $('.slick-header-menu'));
+		const MenuVerticalPadding = 10;
+		const MenuBarHeight = 30;
+		const DefaultMenuHeight = 350;
+		// Make sure the menu can fit in the screen.
+		this.menu.style.height = `${Math.min(DefaultMenuHeight, window.innerHeight - MenuBarHeight) - MenuVerticalPadding}px`;
 
 		this.sortAscButton = this.createButtonMenuItem(localize('table.sortAscending', "Sort Ascending"), 'sort-asc', 'ascending');
 		this.sortDescButton = this.createButtonMenuItem(localize('table.sortDescending', "Sort Descending"), 'sort-desc', 'descending');
@@ -453,7 +473,7 @@ export class HeaderFilter<T extends Slick.SlickData> {
 		this.hideMenu();
 		const dataView = this.grid.getData();
 		if (instanceOfIDisposableDataProvider(dataView)) {
-			await dataView.filter(this.grid.getColumns());
+			await (dataView as IDisposableDataProvider<T>).filter(this.grid.getColumns());
 			this.grid.invalidateAllRows();
 			this.grid.updateRowCount();
 			this.grid.render();
@@ -529,8 +549,18 @@ class TableFilterListElement {
 	constructor(val: string, checked: boolean) {
 		this.value = val;
 		this._checked = checked;
+
+		// Handle the values that are visually hard to differentiate.
+		if (val === undefined) {
+			this.displayText = localize('tableFilter.nullDisplayText', "(NULL)");
+		} else if (val === '') {
+			this.displayText = localize('tableFilter.blankStringDisplayText', "(Blanks)");
+		} else {
+			this.displayText = val;
+		}
 	}
 
+	public displayText: string;
 	public value: string;
 
 	public onCheckStateChanged = this._onCheckStateChanged.event;
@@ -591,9 +621,11 @@ class TableFilterListRenderer implements IListRenderer<TableFilterListElement, T
 			templateData.checkbox.checked = e;
 		}));
 		templateData.checkbox.checked = element.checked;
-		templateData.checkbox.setAttribute('aria-label', element.value);
-		templateData.text.innerText = element.value;
-		templateData.label.title = element.value;
+		templateData.checkbox.setAttribute('aria-label', element.displayText);
+		templateData.text.innerText = element.displayText;
+		templateData.label.title = element.displayText;
+		// Use italic to match the style that NULL value is displayed in the grid.
+		templateData.label.style.fontStyle = element.displayText === element.value ? 'normal' : 'italic';
 	}
 
 	disposeElement?(element: TableFilterListElement, index: number, templateData: TableFilterListItemTemplate, height: number): void {

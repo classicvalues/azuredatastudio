@@ -3,9 +3,8 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { localize } from 'vs/nls';
 import { Separator } from 'vs/base/common/actions';
-import { IMenuService, MenuId, IMenu, SubmenuItemAction } from 'vs/platform/actions/common/actions';
+import { IMenuService, IMenu, SubmenuItemAction } from 'vs/platform/actions/common/actions';
 import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IWorkspacesService } from 'vs/platform/workspaces/common/workspaces';
 import { isMacintosh } from 'vs/base/common/platform';
@@ -25,6 +24,7 @@ import { INativeHostService } from 'vs/platform/native/electron-sandbox/native';
 import { IHostService } from 'vs/workbench/services/host/browser/host';
 import { IPreferencesService } from 'vs/workbench/services/preferences/common/preferences';
 import { ICommandService } from 'vs/platform/commands/common/commands';
+import { OpenRecentAction } from 'vs/workbench/browser/actions/windowActions';
 
 export class NativeMenubarControl extends MenubarControl {
 
@@ -48,18 +48,6 @@ export class NativeMenubarControl extends MenubarControl {
 	) {
 		super(menuService, workspacesService, contextKeyService, keybindingService, configurationService, labelService, updateService, storageService, notificationService, preferencesService, environmentService, accessibilityService, hostService, commandService);
 
-		if (isMacintosh) {
-			this.menus['Preferences'] = this._register(this.menuService.createMenu(MenuId.MenubarPreferencesMenu, this.contextKeyService));
-			this.topLevelTitles['Preferences'] = localize('mPreferences', "Preferences");
-		}
-
-		for (const topLevelMenuName of Object.keys(this.topLevelTitles)) {
-			const menu = this.menus[topLevelMenuName];
-			if (menu) {
-				this._register(menu.onDidChange(() => this.updateMenubar()));
-			}
-		}
-
 		(async () => {
 			this.recentlyOpened = await this.workspacesService.getRecentlyOpened();
 
@@ -67,6 +55,17 @@ export class NativeMenubarControl extends MenubarControl {
 		})();
 
 		this.registerListeners();
+	}
+
+	protected override setupMainMenu(): void {
+		super.setupMainMenu();
+
+		for (const topLevelMenuName of Object.keys(this.topLevelTitles)) {
+			const menu = this.menus[topLevelMenuName];
+			if (menu) {
+				this.mainMenuDisposables.add(menu.onDidChange(() => this.updateMenubar()));
+			}
+		}
 	}
 
 	protected doUpdateMenubar(): void {
@@ -105,9 +104,9 @@ export class NativeMenubarControl extends MenubarControl {
 	}
 
 	private populateMenuItems(menu: IMenu, menuToPopulate: IMenubarMenu, keybindings: { [id: string]: IMenubarKeybinding | undefined }) {
-		let groups = menu.getActions();
+		const groups = menu.getActions();
 
-		for (let group of groups) {
+		for (const group of groups) {
 			const [, actions] = group;
 
 			actions.forEach(menuItem => {
@@ -121,7 +120,7 @@ export class NativeMenubarControl extends MenubarControl {
 					const submenu = { items: [] };
 
 					if (!this.menus[menuItem.item.submenu.id]) {
-						const menu = this.menus[menuItem.item.submenu.id] = this.menuService.createMenu(menuItem.item.submenu, this.contextKeyService);
+						const menu = this.menus[menuItem.item.submenu.id] = this._register(this.menuService.createMenu(menuItem.item.submenu, this.contextKeyService));
 						this._register(menu.onDidChange(() => this.updateMenubar()));
 					}
 
@@ -129,7 +128,7 @@ export class NativeMenubarControl extends MenubarControl {
 					this.populateMenuItems(menuToDispose, submenu, keybindings);
 
 					if (submenu.items.length > 0) {
-						let menubarSubmenuItem: IMenubarMenuItemSubmenu = {
+						const menubarSubmenuItem: IMenubarMenuItemSubmenu = {
 							id: menuItem.id,
 							label: title,
 							submenu: submenu
@@ -140,12 +139,12 @@ export class NativeMenubarControl extends MenubarControl {
 
 					menuToDispose.dispose();
 				} else {
-					if (menuItem.id === 'workbench.action.openRecent') {
+					if (menuItem.id === OpenRecentAction.ID) {
 						const actions = this.getOpenRecentActions().map(this.transformOpenRecentAction);
 						menuToPopulate.items.push(...actions);
 					}
 
-					let menubarMenuItem: IMenubarMenuItemAction = {
+					const menubarMenuItem: IMenubarMenuItemAction = {
 						id: menuItem.id,
 						label: title
 					};

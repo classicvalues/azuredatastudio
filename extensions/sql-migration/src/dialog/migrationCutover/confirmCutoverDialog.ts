@@ -7,10 +7,12 @@ import * as azdata from 'azdata';
 import * as vscode from 'vscode';
 import { MigrationCutoverDialogModel } from './migrationCutoverDialogModel';
 import * as constants from '../../constants/strings';
-import { SqlManagedInstance } from '../../api/azure';
+import { getMigrationTargetInstance, SqlManagedInstance } from '../../api/azure';
 import { IconPathHelper } from '../../constants/iconPathHelper';
-import { convertByteSizeToReadableUnit, get12HourTime } from '../../api/utils';
-
+import { convertByteSizeToReadableUnit, get12HourTime, MigrationTargetType } from '../../api/utils';
+import * as styles from '../../constants/styles';
+import { getMigrationTargetTypeEnum, isBlobMigration } from '../../constants/helper';
+import { ServiceTier } from '../../models/stateMachine';
 export class ConfirmCutoverDialog {
 	private _dialogObject!: azdata.window.Dialog;
 	private _view!: azdata.ModelView;
@@ -21,51 +23,45 @@ export class ConfirmCutoverDialog {
 	}
 
 	async initialize(): Promise<void> {
-
-		let tab = azdata.window.createTab('');
+		const tab = azdata.window.createTab('');
 		tab.registerContent(async (view: azdata.ModelView) => {
 			this._view = view;
 
 			const completeCutoverText = view.modelBuilder.text().withProps({
 				value: constants.COMPLETE_CUTOVER,
-				CSSStyles: {
-					'font-size': '20px',
-					'font-weight': 'bold',
-					'margin-bottom': '0px'
-				}
+				CSSStyles: { ...styles.PAGE_TITLE_CSS }
 			}).component();
 
 			const sourceDatabaseText = view.modelBuilder.text().withProps({
-				value: this.migrationCutoverModel._migration.migrationContext.properties.sourceDatabaseName,
+				value: this.migrationCutoverModel.migration.properties.sourceDatabaseName,
 				CSSStyles: {
-					'font-size': '10px',
-					'margin': '5px 0px 10px 0px'
+					...styles.SMALL_NOTE_CSS,
+					'margin': '4px 0px 8px'
 				}
 			}).component();
 
 			const separator = this._view.modelBuilder.separator().withProps({ width: '800px' }).component();
-
 			const helpMainText = this._view.modelBuilder.text().withProps({
 				value: constants.CUTOVER_HELP_MAIN,
-				CSSStyles: {
-					'font-size': '13px',
-				}
+				CSSStyles: { ...styles.BODY_CSS }
 			}).component();
 
 			const helpStepsText = this._view.modelBuilder.text().withProps({
 				value: this.migrationCutoverModel.confirmCutoverStepsString(),
 				CSSStyles: {
-					'font-size': '13px',
+					...styles.BODY_CSS,
+					'padding': '8px'
 				}
 			}).component();
 
-
-			const fileContainer = this.migrationCutoverModel.isBlobMigration() ? this.createBlobFileContainer() : this.createNewtorkShareFileContainer();
+			const fileContainer = isBlobMigration(this.migrationCutoverModel.migration)
+				? this.createBlobFileContainer()
+				: this.createNetworkShareFileContainer();
 
 			const confirmCheckbox = this._view.modelBuilder.checkBox().withProps({
 				CSSStyles: {
-					'font-size': '13px',
-					'margin-bottom': '8px'
+					...styles.BODY_CSS,
+					'margin-bottom': '12px'
 				},
 				label: constants.CONFIRM_CUTOVER_CHECKBOX,
 			}).component();
@@ -77,23 +73,26 @@ export class ConfirmCutoverDialog {
 			const cutoverWarning = this._view.modelBuilder.infoBox().withProps({
 				text: constants.COMPLETING_CUTOVER_WARNING,
 				style: 'warning',
-				CSSStyles: {
-					'font-size': '13px',
-				}
+				CSSStyles: { ...styles.BODY_CSS }
 			}).component();
 
-
 			let infoDisplay = 'none';
-			if (this.migrationCutoverModel._migration.targetManagedInstance.id.toLocaleLowerCase().includes('managedinstances')
-				&& (<SqlManagedInstance>this.migrationCutoverModel._migration.targetManagedInstance)?.sku?.tier === 'BusinessCritical') {
-				infoDisplay = 'inline';
+			if (getMigrationTargetTypeEnum(this.migrationCutoverModel.migration) === MigrationTargetType.SQLMI) {
+				const targetInstance = await getMigrationTargetInstance(
+					this.migrationCutoverModel.serviceContext.azureAccount!,
+					this.migrationCutoverModel.serviceContext.subscription!,
+					this.migrationCutoverModel.migration);
+
+				if ((<SqlManagedInstance>targetInstance)?.sku?.tier === ServiceTier.BusinessCritical) {
+					infoDisplay = 'inline';
+				}
 			}
 
-			const businessCriticalinfoBox = this._view.modelBuilder.infoBox().withProps({
+			const businessCriticalInfoBox = this._view.modelBuilder.infoBox().withProps({
 				text: constants.BUSINESS_CRITICAL_INFO,
 				style: 'information',
 				CSSStyles: {
-					'font-size': '13px',
+					...styles.BODY_CSS,
 					'display': infoDisplay
 				}
 			}).component();
@@ -109,26 +108,21 @@ export class ConfirmCutoverDialog {
 				fileContainer,
 				confirmCheckbox,
 				cutoverWarning,
-				businessCriticalinfoBox
+				businessCriticalInfoBox
 			]).component();
-
 
 			this._dialogObject.okButton.enabled = false;
 			this._dialogObject.okButton.label = constants.COMPLETE_CUTOVER;
-			this._disposables.push(this._dialogObject.okButton.onClick((e) => {
-				this.migrationCutoverModel.startCutover();
-				vscode.window.showInformationMessage(constants.CUTOVER_IN_PROGRESS(this.migrationCutoverModel._migration.migrationContext.properties.sourceDatabaseName));
+			this._disposables.push(this._dialogObject.okButton.onClick(async (e) => {
+				await this.migrationCutoverModel.startCutover();
+				void vscode.window.showInformationMessage(
+					constants.CUTOVER_IN_PROGRESS(
+						this.migrationCutoverModel.migration.properties.sourceDatabaseName));
 			}));
 
 			const formBuilder = view.modelBuilder.formContainer().withFormItems(
-				[
-					{
-						component: container
-					}
-				],
-				{
-					horizontal: false
-				}
+				[{ component: container }],
+				{ horizontal: false }
 			);
 			const form = formBuilder.withLayout({ width: '100%' }).component();
 
@@ -144,17 +138,15 @@ export class ConfirmCutoverDialog {
 	}
 
 	private createBlobFileContainer(): azdata.FlexContainer {
-		const container = this._view.modelBuilder.flexContainer().component();
-
+		const container = this._view.modelBuilder.flexContainer().withProps({
+			CSSStyles: { 'margin': '8px 0' }
+		}).component();
 		const containerHeading = this._view.modelBuilder.text().withProps({
 			value: constants.PENDING_BACKUPS(this.migrationCutoverModel.getPendingLogBackupsCount() ?? 0),
 			width: 250,
-			CSSStyles: {
-				'font-size': '13px',
-				'line-height': '18px',
-				'font-weight': 'bold'
-			}
+			CSSStyles: { ...styles.LABEL_CSS }
 		}).component();
+		container.addItem(containerHeading, { flex: '0' });
 
 		const refreshButton = this._view.modelBuilder.button().withProps({
 			iconPath: IconPathHelper.refresh,
@@ -163,50 +155,37 @@ export class ConfirmCutoverDialog {
 			width: 70,
 			height: 20,
 			label: constants.REFRESH,
-			CSSStyles: {
-				'margin-top': '13px'
-			}
 		}).component();
-
-
-		container.addItem(containerHeading, {
-			flex: '0'
-		});
-
-		refreshButton.onDidClick(async e => {
-			refreshLoader.loading = true;
-			try {
-				await this.migrationCutoverModel.fetchStatus();
-				containerHeading.value = constants.PENDING_BACKUPS(this.migrationCutoverModel.getPendingLogBackupsCount() ?? 0);
-			} catch (e) {
-				this._dialogObject.message = {
-					level: azdata.window.MessageLevel.Error,
-					text: e.toString()
-				};
-			} finally {
-				refreshLoader.loading = false;
-			}
-		});
-
-		container.addItem(refreshButton, {
-			flex: '0'
-		});
+		this._disposables.push(
+			refreshButton.onDidClick(async e => {
+				try {
+					refreshLoader.loading = true;
+					await this.migrationCutoverModel.fetchStatus();
+					containerHeading.value = constants.PENDING_BACKUPS(this.migrationCutoverModel.getPendingLogBackupsCount() ?? 0);
+				} catch (e) {
+					this._dialogObject.message = {
+						level: azdata.window.MessageLevel.Error,
+						text: e.message
+					};
+				} finally {
+					refreshLoader.loading = false;
+				}
+			}));
+		container.addItem(refreshButton, { flex: '0' });
 
 		const refreshLoader = this._view.modelBuilder.loadingComponent().withProps({
 			loading: false,
 			CSSStyles: {
-				'margin-top': '8px',
-				'margin-left': '5px'
+				'margin-top': '-4px',
+				'margin-left': '8px'
 			}
 		}).component();
+		container.addItem(refreshLoader, { flex: '0' });
 
-		container.addItem(refreshLoader, {
-			flex: '0'
-		});
 		return container;
 	}
 
-	private createNewtorkShareFileContainer(): azdata.FlexContainer {
+	private createNetworkShareFileContainer(): azdata.FlexContainer {
 		const container = this._view.modelBuilder.flexContainer().withLayout({
 			flexFlow: 'column'
 		}).component();
@@ -224,30 +203,23 @@ export class ConfirmCutoverDialog {
 			iconWidth: 8,
 			iconPath: IconPathHelper.expandButtonClosed,
 			CSSStyles: {
-				'font-size': '13px',
-				'line-height': '18px',
-				'font-weight': 'bold',
-				'margin': '16px 10px 0px 0px'
+				...styles.LABEL_CSS,
+				'margin': '16px 8px 0px 0px'
 			}
 		}).component();
 
-		containerHeading.onDidClick(async e => {
+		this._disposables.push(containerHeading.onDidClick(async e => {
 			if (expanded) {
 				containerHeading.iconPath = IconPathHelper.expandButtonClosed;
 				containerHeading.iconHeight = 12;
-				fileTable.updateCssStyles({
-					'display': 'none'
-				});
-
+				await fileTable.updateCssStyles({ 'display': 'none' });
 			} else {
 				containerHeading.iconPath = IconPathHelper.expandButtonOpen;
 				containerHeading.iconHeight = 8;
-				fileTable.updateCssStyles({
-					'display': 'inline'
-				});
+				await fileTable.updateCssStyles({ 'display': 'inline' });
 			}
 			expanded = !expanded;
-		});
+		}));
 
 		const refreshButton = this._view.modelBuilder.button().withProps({
 			iconPath: IconPathHelper.refresh,
@@ -256,35 +228,29 @@ export class ConfirmCutoverDialog {
 			width: 70,
 			height: 20,
 			label: constants.REFRESH,
-			CSSStyles: {
-				'margin-top': '13px'
-			}
+			CSSStyles: { 'margin-top': '13px' }
 		}).component();
 
-		headingRow.addItem(containerHeading, {
-			flex: '0'
-		});
+		headingRow.addItem(containerHeading, { flex: '0' });
 
-		refreshButton.onDidClick(async e => {
-			refreshLoader.loading = true;
-			try {
-				await this.migrationCutoverModel.fetchStatus();
-				containerHeading.label = constants.PENDING_BACKUPS(this.migrationCutoverModel.getPendingLogBackupsCount() ?? 0);
-				lastScanCompleted.value = constants.LAST_SCAN_COMPLETED(get12HourTime(new Date()));
-				this.refreshFileTable(fileTable);
-			} catch (e) {
-				this._dialogObject.message = {
-					level: azdata.window.MessageLevel.Error,
-					text: e.toString()
-				};
-			} finally {
-				refreshLoader.loading = false;
-			}
-		});
-
-		headingRow.addItem(refreshButton, {
-			flex: '0'
-		});
+		this._disposables.push(
+			refreshButton.onDidClick(async e => {
+				try {
+					refreshLoader.loading = true;
+					await this.migrationCutoverModel.fetchStatus();
+					containerHeading.label = constants.PENDING_BACKUPS(this.migrationCutoverModel.getPendingLogBackupsCount() ?? 0);
+					lastScanCompleted.value = constants.LAST_SCAN_COMPLETED(get12HourTime(new Date()));
+					this.refreshFileTable(fileTable);
+				} catch (e) {
+					this._dialogObject.message = {
+						level: azdata.window.MessageLevel.Error,
+						text: e.message
+					};
+				} finally {
+					refreshLoader.loading = false;
+				}
+			}));
+		headingRow.addItem(refreshButton, { flex: '0' });
 
 		const refreshLoader = this._view.modelBuilder.loadingComponent().withProps({
 			loading: false,
@@ -294,20 +260,13 @@ export class ConfirmCutoverDialog {
 				'height': '13px'
 			}
 		}).component();
-
-		headingRow.addItem(refreshLoader, {
-			flex: '0'
-		});
-
+		headingRow.addItem(refreshLoader, { flex: '0' });
 		container.addItem(headingRow);
 
 		const lastScanCompleted = this._view.modelBuilder.text().withProps({
 			value: constants.LAST_SCAN_COMPLETED(get12HourTime(new Date())),
-			CSSStyles: {
-				'font-size': '12px',
-			}
+			CSSStyles: { ...styles.NOTE_CSS }
 		}).component();
-
 		container.addItem(lastScanCompleted);
 
 		const fileTable = this._view.modelBuilder.table().withProps({
@@ -331,19 +290,17 @@ export class ConfirmCutoverDialog {
 			data: [],
 			width: 400,
 			height: 150,
-			CSSStyles: {
-				'display': 'none'
-			}
+			CSSStyles: { 'display': 'none' }
 		}).component();
 		container.addItem(fileTable);
 		this.refreshFileTable(fileTable);
 		return container;
 	}
 
-	private refreshFileTable(filetable: azdata.TableComponent) {
-		const pendingFiles = this.migrationCutoverModel.getPendingfiles();
+	private refreshFileTable(fileTable: azdata.TableComponent) {
+		const pendingFiles = this.migrationCutoverModel.getPendingFiles();
 		if (pendingFiles.length > 0) {
-			filetable.data = pendingFiles.map(f => {
+			fileTable.data = pendingFiles.map(f => {
 				return [
 					f.fileName,
 					f.status,
@@ -351,9 +308,7 @@ export class ConfirmCutoverDialog {
 				];
 			});
 		} else {
-			filetable.data = [
-				[constants.NO_PENDING_BACKUPS]
-			];
+			fileTable.data = [[constants.NO_PENDING_BACKUPS]];
 		}
 
 	}

@@ -3,16 +3,16 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as nls from 'vs/nls';
-import { IUndoRedoService, IWorkspaceUndoRedoElement, UndoRedoElementType, IUndoRedoElement, IPastFutureElements, ResourceEditStackSnapshot, UriComparisonKeyComputer, IResourceUndoRedoElement, UndoRedoGroup, UndoRedoSource } from 'vs/platform/undoRedo/common/undoRedo';
-import { URI } from 'vs/base/common/uri';
 import { onUnexpectedError } from 'vs/base/common/errors';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
-import Severity from 'vs/base/common/severity';
+import { Disposable, IDisposable, isDisposable } from 'vs/base/common/lifecycle';
 import { Schemas } from 'vs/base/common/network';
+import Severity from 'vs/base/common/severity';
+import { URI } from 'vs/base/common/uri';
+import * as nls from 'vs/nls';
+import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
+import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 import { INotificationService } from 'vs/platform/notification/common/notification';
-import { IDisposable, Disposable, isDisposable } from 'vs/base/common/lifecycle';
+import { IPastFutureElements, IResourceUndoRedoElement, IUndoRedoElement, IUndoRedoService, IWorkspaceUndoRedoElement, ResourceEditStackSnapshot, UndoRedoElementType, UndoRedoGroup, UndoRedoSource, UriComparisonKeyComputer } from 'vs/platform/undoRedo/common/undoRedo';
 
 const DEBUG = false;
 
@@ -90,7 +90,7 @@ class RemovedResources {
 			dest.push(element.resourceLabel);
 		}
 
-		let messages: string[] = [];
+		const messages: string[] = [];
 		if (externalRemoval.length > 0) {
 			messages.push(
 				nls.localize(
@@ -156,7 +156,7 @@ class WorkspaceStackElement {
 		this.invalidatedResources = null;
 	}
 
-	public canSplit(): this is WorkspaceStackElement & { actual: { split(): IResourceUndoRedoElement[]; } } {
+	public canSplit(): this is WorkspaceStackElement & { actual: { split(): IResourceUndoRedoElement[] } } {
 		return (typeof this.actual.split === 'function');
 	}
 
@@ -226,7 +226,7 @@ class ResourceEditStack {
 	}
 
 	public toString(): string {
-		let result: string[] = [];
+		const result: string[] = [];
 		result.push(`* ${this.strResource}:`);
 		for (let i = 0; i < this._past.length; i++) {
 			result.push(`   * [UNDO] ${this._past[i]}`);
@@ -495,7 +495,7 @@ export class UndoRedoService implements IUndoRedoService {
 	private _print(label: string): void {
 		console.log(`------------------------------------`);
 		console.log(`AFTER ${label}: `);
-		let str: string[] = [];
+		const str: string[] = [];
 		for (const element of this._editStacks) {
 			str.push(element[1].toString());
 		}
@@ -564,7 +564,7 @@ export class UndoRedoService implements IUndoRedoService {
 		return null;
 	}
 
-	private _splitPastWorkspaceElement(toRemove: WorkspaceStackElement & { actual: { split(): IResourceUndoRedoElement[]; } }, ignoreResources: RemovedResources | null): void {
+	private _splitPastWorkspaceElement(toRemove: WorkspaceStackElement & { actual: { split(): IResourceUndoRedoElement[] } }, ignoreResources: RemovedResources | null): void {
 		const individualArr = toRemove.actual.split();
 		const individualMap = new Map<string, ResourceStackElement>();
 		for (const _element of individualArr) {
@@ -583,7 +583,7 @@ export class UndoRedoService implements IUndoRedoService {
 		}
 	}
 
-	private _splitFutureWorkspaceElement(toRemove: WorkspaceStackElement & { actual: { split(): IResourceUndoRedoElement[]; } }, ignoreResources: RemovedResources | null): void {
+	private _splitFutureWorkspaceElement(toRemove: WorkspaceStackElement & { actual: { split(): IResourceUndoRedoElement[] } }, ignoreResources: RemovedResources | null): void {
 		const individualArr = toRemove.actual.split();
 		const individualMap = new Map<string, ResourceStackElement>();
 		for (const _element of individualArr) {
@@ -709,7 +709,7 @@ export class UndoRedoService implements IUndoRedoService {
 
 	private _onError(err: Error, element: StackElement): void {
 		onUnexpectedError(err);
-		// An error occured while undoing or redoing => drop the undo/redo stack for all affected resources
+		// An error occurred while undoing or redoing => drop the undo/redo stack for all affected resources
 		for (const strResource of element.strResources) {
 			this.removeElements(strResource);
 		}
@@ -1109,8 +1109,8 @@ export class UndoRedoService implements IUndoRedoService {
 			Severity.Info,
 			nls.localize('confirmDifferentSource', "Would you like to undo '{0}'?", element.label),
 			[
-				nls.localize('confirmDifferentSource.ok', "Undo"),
-				nls.localize('cancel', "Cancel"),
+				nls.localize('confirmDifferentSource.yes', "Yes"),
+				nls.localize('confirmDifferentSource.no', "No"),
 			],
 			{
 				cancelId: 1

@@ -3,10 +3,10 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Registry } from 'vs/platform/registry/common/platform';
-import { IConfigurationRegistry, Extensions as ConfigurationExtensions, ConfigurationScope } from 'vs/platform/configuration/common/configurationRegistry';
+import { isWeb, isWindows } from 'vs/base/common/platform';
 import { localize } from 'vs/nls';
-import { isWindows, isWeb } from 'vs/base/common/platform';
+import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from 'vs/platform/configuration/common/configurationRegistry';
+import { Registry } from 'vs/platform/registry/common/platform';
 import * as locConstants from 'sql/base/common/locConstants'; // {{SQL CARBON EDIT}}
 
 const configurationRegistry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
@@ -28,7 +28,11 @@ configurationRegistry.registerConfiguration({
 				localize('manual', "Disable automatic background update checks. Updates will be available if you manually check for updates."),
 				localize('start', "Check for updates only on startup. Disable automatic background update checks."),
 				locConstants.updateConfigContributionDefault // {{SQL CARBON EDIT}} Change product name to ADS
-			]
+			],
+			policy: {
+				name: 'UpdateMode',
+				minimumVersion: '1.67',
+			}
 		},
 		'update.channel': {
 			type: 'string',

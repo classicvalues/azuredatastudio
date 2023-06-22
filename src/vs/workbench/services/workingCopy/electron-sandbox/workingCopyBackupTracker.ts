@@ -8,7 +8,7 @@ import { IWorkingCopyBackupService } from 'vs/workbench/services/workingCopy/com
 import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
 import { IFilesConfigurationService, AutoSaveMode } from 'vs/workbench/services/filesConfiguration/common/filesConfigurationService';
 import { IWorkingCopyService } from 'vs/workbench/services/workingCopy/common/workingCopyService';
-import { IWorkingCopy, WorkingCopyCapabilities } from 'vs/workbench/services/workingCopy/common/workingCopy';
+import { IWorkingCopy, IWorkingCopyIdentifier, WorkingCopyCapabilities } from 'vs/workbench/services/workingCopy/common/workingCopy';
 import { ILifecycleService, ShutdownReason } from 'vs/workbench/services/lifecycle/common/lifecycle';
 import { ConfirmResult, IFileDialogService, IDialogService, getFileNamesMessage } from 'vs/platform/dialogs/common/dialogs';
 import Severity from 'vs/base/common/severity';
@@ -24,8 +24,8 @@ import { IEnvironmentService } from 'vs/platform/environment/common/environment'
 import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cancellation';
 import { IProgressService, ProgressLocation } from 'vs/platform/progress/common/progress';
 import { Promises, raceCancellation } from 'vs/base/common/async';
-import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { IWorkingCopyEditorService } from 'vs/workbench/services/workingCopy/common/workingCopyEditorService';
+import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
 
 export class NativeWorkingCopyBackupTracker extends WorkingCopyBackupTracker implements IWorkbenchContribution {
 
@@ -41,23 +41,44 @@ export class NativeWorkingCopyBackupTracker extends WorkingCopyBackupTracker imp
 		@ILogService logService: ILogService,
 		@IEnvironmentService private readonly environmentService: IEnvironmentService,
 		@IProgressService private readonly progressService: IProgressService,
-		@IEditorGroupsService private readonly editorGroupService: IEditorGroupsService,
 		@IWorkingCopyEditorService workingCopyEditorService: IWorkingCopyEditorService,
-		@IEditorService editorService: IEditorService
+		@IEditorService editorService: IEditorService,
+		@IEditorGroupsService editorGroupService: IEditorGroupsService
 	) {
-		super(workingCopyBackupService, workingCopyService, logService, lifecycleService, filesConfigurationService, workingCopyEditorService, editorService);
+		super(workingCopyBackupService, workingCopyService, logService, lifecycleService, filesConfigurationService, workingCopyEditorService, editorService, editorGroupService);
 	}
 
-	protected onBeforeShutdown(reason: ShutdownReason): boolean | Promise<boolean> {
+	protected async onFinalBeforeShutdown(reason: ShutdownReason): Promise<boolean> {
 
-		// Dirty working copies need treatment on shutdown
-		const dirtyWorkingCopies = this.workingCopyService.dirtyWorkingCopies;
-		if (dirtyWorkingCopies.length) {
-			return this.onBeforeShutdownWithDirty(reason, dirtyWorkingCopies);
+		// Important: we are about to shutdown and handle dirty working copies
+		// and backups. We do not want any pending backup ops to interfer with
+		// this because there is a risk of a backup being scheduled after we have
+		// acknowledged to shutdown and then might end up with partial backups
+		// written to disk, or even empty backups or deletes after writes.
+		// (https://github.com/microsoft/vscode/issues/138055)
+		this.cancelBackupOperations();
+
+		// For the duration of the shutdown handling, suspend backup operations
+		// and only resume after we have handled backups. Similar to above, we
+		// do not want to trigger backup tracking during our shutdown handling
+		// but we must resume, in case of a veto afterwards.
+		const { resume } = this.suspendBackupOperations();
+
+		try {
+
+			// Dirty working copies need treatment on shutdown
+			const dirtyWorkingCopies = this.workingCopyService.dirtyWorkingCopies;
+			if (dirtyWorkingCopies.length) {
+				return await this.onBeforeShutdownWithDirty(reason, dirtyWorkingCopies);
+			}
+
+			// No dirty working copies
+			else {
+				return await this.onBeforeShutdownWithoutDirty();
+			}
+		} finally {
+			resume();
 		}
-
-		// No dirty working copies
-		return this.onBeforeShutdownWithoutDirty();
 	}
 
 	protected async onBeforeShutdownWithDirty(reason: ShutdownReason, dirtyWorkingCopies: readonly IWorkingCopy[]): Promise<boolean> {
@@ -88,12 +109,13 @@ export class NativeWorkingCopyBackupTracker extends WorkingCopyBackupTracker imp
 
 	private async handleDirtyBeforeShutdown(dirtyWorkingCopies: readonly IWorkingCopy[], reason: ShutdownReason): Promise<boolean> {
 
-		// Trigger backup if configured
+		// Trigger backup if configured and enabled for shutdown reason
 		let backups: IWorkingCopy[] = [];
 		let backupError: Error | undefined = undefined;
-		if (this.filesConfigurationService.isHotExitEnabled) {
+		const backup = await this.shouldBackupBeforeShutdown(reason);
+		if (backup) {
 			try {
-				const backupResult = await this.backupBeforeShutdown(dirtyWorkingCopies, reason);
+				const backupResult = await this.backupBeforeShutdown(dirtyWorkingCopies);
 				backups = backupResult.backups;
 				backupError = backupResult.error;
 
@@ -115,7 +137,7 @@ export class NativeWorkingCopyBackupTracker extends WorkingCopyBackupTracker imp
 				return false; // do not block shutdown during extension development (https://github.com/microsoft/vscode/issues/115028)
 			}
 
-			this.showErrorDialog(localize('backupTrackerBackupFailed', "The following dirty editors could not be saved to the back up location."), remainingDirtyWorkingCopies, backupError);
+			this.showErrorDialog(localize('backupTrackerBackupFailed', "The following editors with unsaved changes could not be saved to the back up location."), remainingDirtyWorkingCopies, backupError);
 
 			return true; // veto (the backup failed)
 		}
@@ -131,73 +153,71 @@ export class NativeWorkingCopyBackupTracker extends WorkingCopyBackupTracker imp
 				return false; // do not block shutdown during extension development (https://github.com/microsoft/vscode/issues/115028)
 			}
 
-			this.showErrorDialog(localize('backupTrackerConfirmFailed', "The following dirty editors could not be saved or reverted."), remainingDirtyWorkingCopies, error);
+			this.showErrorDialog(localize('backupTrackerConfirmFailed', "The following editors with unsaved changes could not be saved or reverted."), remainingDirtyWorkingCopies, error);
 
 			return true; // veto (save or revert failed)
 		}
 	}
 
-	private showErrorDialog(msg: string, workingCopies: readonly IWorkingCopy[], error?: Error): void {
-		const dirtyWorkingCopies = workingCopies.filter(workingCopy => workingCopy.isDirty());
-
-		const advice = localize('backupErrorDetails', "Try saving or reverting the dirty editors first and then try again.");
-		const detail = dirtyWorkingCopies.length
-			? getFileNamesMessage(dirtyWorkingCopies.map(x => x.name)) + '\n' + advice
-			: advice;
-
-		this.dialogService.show(Severity.Error, msg, [localize('ok', 'OK')], { detail });
-
-		this.logService.error(error ? `[backup tracker] ${msg}: ${error}` : `[backup tracker] ${msg}`);
-	}
-
-	private async backupBeforeShutdown(dirtyWorkingCopies: readonly IWorkingCopy[], reason: ShutdownReason): Promise<{ backups: IWorkingCopy[], error?: Error }> {
-
-		// When quit is requested skip the confirm callback and attempt to backup all workspaces.
-		// When quit is not requested the confirm callback should be shown when the window being
-		// closed is the only VS Code window open, except for on Mac where hot exit is only
-		// ever activated when quit is requested.
-
-		let doBackup: boolean | undefined;
-		if (this.environmentService.isExtensionDevelopment) {
-			doBackup = true; // always backup closing extension development window without asking to speed up debugging
+	private async shouldBackupBeforeShutdown(reason: ShutdownReason): Promise<boolean> {
+		let backup: boolean | undefined;
+		if (!this.filesConfigurationService.isHotExitEnabled) {
+			backup = false; // never backup when hot exit is disabled via settings
+		} else if (this.environmentService.isExtensionDevelopment) {
+			backup = true; // always backup closing extension development window without asking to speed up debugging
 		} else {
+
+			// When quit is requested skip the confirm callback and attempt to backup all workspaces.
+			// When quit is not requested the confirm callback should be shown when the window being
+			// closed is the only VS Code window open, except for on Mac where hot exit is only
+			// ever activated when quit is requested.
+
 			switch (reason) {
 				case ShutdownReason.CLOSE:
 					if (this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY && this.filesConfigurationService.hotExitConfiguration === HotExitConfiguration.ON_EXIT_AND_WINDOW_CLOSE) {
-						doBackup = true; // backup if a folder is open and onExitAndWindowClose is configured
+						backup = true; // backup if a folder is open and onExitAndWindowClose is configured
 					} else if (await this.nativeHostService.getWindowCount() > 1 || isMacintosh) {
-						doBackup = false; // do not backup if a window is closed that does not cause quitting of the application
+						backup = false; // do not backup if a window is closed that does not cause quitting of the application
 					} else {
-						doBackup = true; // backup if last window is closed on win/linux where the application quits right after
+						backup = true; // backup if last window is closed on win/linux where the application quits right after
 					}
 					break;
 
 				case ShutdownReason.QUIT:
-					doBackup = true; // backup because next start we restore all backups
+					backup = true; // backup because next start we restore all backups
 					break;
 
 				case ShutdownReason.RELOAD:
-					doBackup = true; // backup because after window reload, backups restore
+					backup = true; // backup because after window reload, backups restore
 					break;
 
 				case ShutdownReason.LOAD:
 					if (this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY && this.filesConfigurationService.hotExitConfiguration === HotExitConfiguration.ON_EXIT_AND_WINDOW_CLOSE) {
-						doBackup = true; // backup if a folder is open and onExitAndWindowClose is configured
+						backup = true; // backup if a folder is open and onExitAndWindowClose is configured
 					} else {
-						doBackup = false; // do not backup because we are switching contexts
+						backup = false; // do not backup because we are switching contexts
 					}
 					break;
 			}
 		}
 
-		if (!doBackup) {
-			return { backups: [] };
-		}
-
-		return this.doBackupBeforeShutdown(dirtyWorkingCopies);
+		return backup;
 	}
 
-	private async doBackupBeforeShutdown(dirtyWorkingCopies: readonly IWorkingCopy[]): Promise<{ backups: IWorkingCopy[], error?: Error }> {
+	private showErrorDialog(msg: string, workingCopies: readonly IWorkingCopy[], error?: Error): void {
+		const dirtyWorkingCopies = workingCopies.filter(workingCopy => workingCopy.isDirty());
+
+		const advice = localize('backupErrorDetails', "Try saving or reverting the editors with unsaved changes first and then try again.");
+		const detail = dirtyWorkingCopies.length
+			? getFileNamesMessage(dirtyWorkingCopies.map(x => x.name)) + '\n' + advice
+			: advice;
+
+		this.dialogService.show(Severity.Error, msg, undefined, { detail });
+
+		this.logService.error(error ? `[backup tracker] ${msg}: ${error}` : `[backup tracker] ${msg}`);
+	}
+
+	private async backupBeforeShutdown(dirtyWorkingCopies: readonly IWorkingCopy[]): Promise<{ backups: IWorkingCopy[]; error?: Error }> {
 		const backups: IWorkingCopy[] = [];
 		let error: Error | undefined = undefined;
 
@@ -206,9 +226,9 @@ export class NativeWorkingCopyBackupTracker extends WorkingCopyBackupTracker imp
 			// Perform a backup of all dirty working copies unless a backup already exists
 			try {
 				await Promises.settled(dirtyWorkingCopies.map(async workingCopy => {
-					const contentVersion = this.getContentVersion(workingCopy);
 
 					// Backup exists
+					const contentVersion = this.getContentVersion(workingCopy);
 					if (this.workingCopyBackupService.hasBackupSync(workingCopy, contentVersion)) {
 						backups.push(workingCopy);
 					}
@@ -216,7 +236,14 @@ export class NativeWorkingCopyBackupTracker extends WorkingCopyBackupTracker imp
 					// Backup does not exist
 					else {
 						const backup = await workingCopy.backup(token);
+						if (token.isCancellationRequested) {
+							return;
+						}
+
 						await this.workingCopyBackupService.backup(workingCopy, backup.content, contentVersion, backup.meta, token);
+						if (token.isCancellationRequested) {
+							return;
+						}
 
 						backups.push(workingCopy);
 					}
@@ -224,7 +251,10 @@ export class NativeWorkingCopyBackupTracker extends WorkingCopyBackupTracker imp
 			} catch (backupError) {
 				error = backupError;
 			}
-		}, localize('backupBeforeShutdown', "Waiting for dirty editors to backup..."));
+		},
+			localize('backupBeforeShutdownMessage', "Backing up editors with unsaved changes is taking a bit longer..."),
+			localize('backupBeforeShutdownDetail', "Click 'Cancel' to stop waiting and to save or revert editors with unsaved changes.")
+		);
 
 		return { backups, error };
 	}
@@ -293,7 +323,7 @@ export class NativeWorkingCopyBackupTracker extends WorkingCopyBackupTracker imp
 			if (result !== false) {
 				await Promises.settled(dirtyWorkingCopies.map(workingCopy => workingCopy.isDirty() ? workingCopy.save(saveOptions) : Promise.resolve(true)));
 			}
-		}, localize('saveBeforeShutdown', "Waiting for dirty editors to save..."));
+		}, localize('saveBeforeShutdown', "Saving editors with unsaved changes is taking a bit longer..."));
 	}
 
 	private doRevertAllBeforeShutdown(dirtyWorkingCopies: IWorkingCopy[]): Promise<void> {
@@ -308,54 +338,85 @@ export class NativeWorkingCopyBackupTracker extends WorkingCopyBackupTracker imp
 			}
 
 			// If we still have dirty working copies, revert those directly
-			// unless the revert operation was not successful (e.g. cancelled)
 			await Promises.settled(dirtyWorkingCopies.map(workingCopy => workingCopy.isDirty() ? workingCopy.revert(revertOptions) : Promise.resolve()));
-		}, localize('revertBeforeShutdown', "Waiting for dirty editors to revert..."));
+		}, localize('revertBeforeShutdown', "Reverting editors with unsaved changes is taking a bit longer..."));
 	}
 
-	private withProgressAndCancellation(promiseFactory: (token: CancellationToken) => Promise<void>, title: string): Promise<void> {
-		const cts = new CancellationTokenSource();
+	private async noVeto(backupsToDiscard: IWorkingCopyIdentifier[]): Promise<boolean> {
 
-		return this.progressService.withProgress({
-			location: ProgressLocation.Notification,
-			cancellable: true, // for issues such as https://github.com/microsoft/vscode/issues/112278
-			delay: 800, // delay notification so that it only appears when operation takes a long time
-			title
-		}, () => raceCancellation(promiseFactory(cts.token), cts.token), () => cts.dispose(true));
-	}
+		// Discard backups from working copies the
+		// user either saved or reverted
+		await this.discardBackupsBeforeShutdown(backupsToDiscard);
 
-	private noVeto(backupsToDiscard: IWorkingCopy[]): boolean | Promise<boolean> {
-		if (!this.editorGroupService.isRestored()) {
-			return false; // if editors have not restored, we are very likely not up to speed with backups and thus should not discard them
-		}
-
-		return Promises.settled(backupsToDiscard.map(workingCopy => this.workingCopyBackupService.discardBackup(workingCopy))).then(() => false, () => false);
+		return false; // no veto (no dirty)
 	}
 
 	private async onBeforeShutdownWithoutDirty(): Promise<boolean> {
 
-		// If we have proceeded enough that editors and dirty state
-		// has restored, we make sure that no backups lure around
-		// given we have no known dirty working copy. This helps
-		// to clean up stale backups as for example reported in
-		// https://github.com/microsoft/vscode/issues/92962
+		// We are about to shutdown without dirty editors
+		// and will discard any backups that are still
+		// around that have not been handled depending
+		// on the window state.
 		//
-		// However, we never want to discard backups that we know
-		// were not restored in the session.
-		if (this.editorGroupService.isRestored()) {
-			try {
+		// Empty window: discard even unrestored backups to
+		// prevent empty windows from restoring that cannot
+		// be closed (workaround for not having implemented
+		// https://github.com/microsoft/vscode/issues/127163
+		// and a fix for what users have reported in issue
+		// https://github.com/microsoft/vscode/issues/126725)
+		//
+		// Workspace/Folder window: do not discard unrestored
+		// backups to give a chance to restore them in the
+		// future. Since we do not restore workspace/folder
+		// windows with backups, this is fine.
 
-				// Backups without `typeId` are handed in the legacy backup
-				// restorer still and thus we explicitly don't want to keep
-				// them on shutdown, otherwise they would always come back.
-				// TODO@bpasero remove this check once typeId has been adopted.
-				const backupsToKeep = Array.from(this.unrestoredBackups).filter(unrestoredBackup => unrestoredBackup.typeId.length > 0);
-				await this.workingCopyBackupService.discardBackups(backupsToKeep);
+		await this.discardBackupsBeforeShutdown({ except: this.contextService.getWorkbenchState() === WorkbenchState.EMPTY ? [] : Array.from(this.unrestoredBackups) });
+
+		return false; // no veto (no dirty)
+	}
+
+	private discardBackupsBeforeShutdown(backupsToDiscard: IWorkingCopyIdentifier[]): Promise<void>;
+	private discardBackupsBeforeShutdown(backupsToKeep: { except: IWorkingCopyIdentifier[] }): Promise<void>;
+	private async discardBackupsBeforeShutdown(arg1: IWorkingCopyIdentifier[] | { except: IWorkingCopyIdentifier[] }): Promise<void> {
+
+		// We never discard any backups before we are ready
+		// and have resolved all backups that exist. This
+		// is important to not loose backups that have not
+		// been handled.
+		if (!this.isReady) {
+			return;
+		}
+
+		await this.withProgressAndCancellation(async () => {
+
+			// When we shutdown either with no dirty working copies left
+			// or with some handled, we start to discard these backups
+			// to free them up. This helps to get rid of stale backups
+			// as reported in https://github.com/microsoft/vscode/issues/92962
+			//
+			// However, we never want to discard backups that we know
+			// were not restored in the session.
+			try {
+				if (Array.isArray(arg1)) {
+					await Promises.settled(arg1.map(workingCopy => this.workingCopyBackupService.discardBackup(workingCopy)));
+				} else {
+					await this.workingCopyBackupService.discardBackups(arg1);
+				}
 			} catch (error) {
 				this.logService.error(`[backup tracker] error discarding backups: ${error}`);
 			}
-		}
+		}, localize('discardBackupsBeforeShutdown', "Discarding backups is taking a bit longer..."));
+	}
 
-		return false; // no veto (no dirty)
+	private withProgressAndCancellation(promiseFactory: (token: CancellationToken) => Promise<void>, title: string, detail?: string): Promise<void> {
+		const cts = new CancellationTokenSource();
+
+		return this.progressService.withProgress({
+			location: ProgressLocation.Dialog, 	// use a dialog to prevent the user from making any more changes now (https://github.com/microsoft/vscode/issues/122774)
+			cancellable: true, 					// allow to cancel (https://github.com/microsoft/vscode/issues/112278)
+			delay: 800, 						// delay so that it only appears when operation takes a long time
+			title,
+			detail
+		}, () => raceCancellation(promiseFactory(cts.token), cts.token), () => cts.dispose(true));
 	}
 }

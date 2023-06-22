@@ -10,14 +10,19 @@ const path = require("path");
 const glob = require("glob");
 const rename = require("gulp-rename");
 const ext = require("./extensions");
-//imports for langpack refresh.
-const event_stream_1 = require("event-stream");
 const i18n = require("./i18n");
 const fs = require("fs");
 const File = require("vinyl");
 const rimraf = require("rimraf");
 const gulp = require("gulp");
 const vfs = require("vinyl-fs");
+/**
+ * If you need to compile this file for any changes, please run: yarn tsc -p ./build/tsconfig.json
+ */
+//List of extensions that we changed from vscode, so we can exclude them from having "Microsoft." appended in front.
+const alteredVSCodeExtensions = [
+    'git'
+];
 const root = path.dirname(path.dirname(__dirname));
 // Modified packageLocalExtensionsStream from extensions.ts, but for langpacks.
 function packageLangpacksStream() {
@@ -66,7 +71,7 @@ function updateMainI18nFile(existingTranslationFilePath, originalFilePath, messa
             delete objectContents[`${contentKey}`];
         }
     }
-    messages.contents = Object.assign(Object.assign({}, objectContents), messages.contents);
+    messages.contents = { ...objectContents, ...messages.contents };
     result[''] = [
         '--------------------------------------------------------------------------------------------',
         'Copyright (c) Microsoft Corporation. All rights reserved.',
@@ -96,7 +101,7 @@ function modifyI18nPackFiles(existingTranslationFolder, resultingTranslationPath
     let mainPack = { version: i18n.i18nPackVersion, contents: {} };
     let extensionsPacks = {};
     let errors = [];
-    return (0, event_stream_1.through)(function (xlf) {
+    return es.through(function (xlf) {
         let rawResource = path.basename(xlf.relative, '.xlf');
         let resource = rawResource.substring(0, rawResource.lastIndexOf('.'));
         let contents = xlf.contents.toString();
@@ -134,10 +139,11 @@ function modifyI18nPackFiles(existingTranslationFolder, resultingTranslationPath
             for (let extension in extensionsPacks) {
                 const translatedExtFile = i18n.createI18nFile(`extensions/${extension}`, extensionsPacks[extension]);
                 this.queue(translatedExtFile);
-                //handle edge case for 'Microsoft.sqlservernotebook' where extension name is the same as extension ID.
-                //(Other extensions need to have publisher appended in front as their ID.)
-                const adsExtensionId = (extension === 'Microsoft.sqlservernotebook') ? extension : 'Microsoft.' + extension;
-                resultingTranslationPaths.push({ id: adsExtensionId, resourceName: `extensions/${extension}.i18n.json` });
+                // exclude altered vscode extensions from having a new path even if we provide a new I18n file.
+                if (alteredVSCodeExtensions.indexOf(extension) === -1) {
+                    let adsExtensionId = 'Microsoft.' + extension;
+                    resultingTranslationPaths.push({ id: adsExtensionId, resourceName: `extensions/${extension}.i18n.json` });
+                }
             }
             this.queue(null);
         })
@@ -161,36 +167,44 @@ const textFields = {
 const VSCODEExtensions = [
     "bat",
     "configuration-editing",
+    "csharp",
+    "dart",
     "docker",
-    "extension-editing",
-    "git-ui",
+    "fsharp",
     "git",
-    "github-authentication",
+    "git-base",
     "github",
+    "github-authentication",
+    "html",
     "image-preview",
-    "json-language-features",
+    "ipynb",
+    "javascript",
     "json",
+    "json-language-features",
+    "julia",
     "markdown-basics",
     "markdown-language-features",
+    "markdown-math",
     "merge-conflict",
     "microsoft-authentication",
+    "notebook-renderers",
     "powershell",
     "python",
     "r",
     "search-result",
+    "simple-browser",
     "sql",
     "theme-abyss",
     "theme-defaults",
     "theme-kimbie-dark",
-    "theme-monokai-dimmed",
     "theme-monokai",
+    "theme-monokai-dimmed",
     "theme-quietlight",
     "theme-red",
     "theme-seti",
     "theme-solarized-dark",
     "theme-solarized-light",
     "theme-tomorrow-night-blue",
-    "typescript-basics",
     "xml",
     "yaml"
 ];
@@ -232,7 +246,7 @@ function refreshLangpacks() {
         try {
             fs.statSync(locExtFolder);
         }
-        catch (_a) {
+        catch {
             console.log('Language is not included in ADS yet: ' + langId);
             continue;
         }
@@ -295,7 +309,7 @@ function refreshLangpacks() {
                             }
                             fs.statSync(path.join(translationDataFolder, curr.path.replace('./translations', '')));
                         }
-                        catch (_a) {
+                        catch {
                             nonExistantExtensions.push(curr);
                         }
                     }
@@ -349,7 +363,7 @@ function renameVscodeLangpacks() {
         try {
             fs.statSync(locVSCODEFolder);
         }
-        catch (_a) {
+        catch {
             console.log('vscode pack is not in ADS yet: ' + langId);
             continue;
         }

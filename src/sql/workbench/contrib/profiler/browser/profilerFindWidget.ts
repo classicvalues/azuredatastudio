@@ -18,13 +18,13 @@ import { Widget } from 'vs/base/browser/ui/widget';
 import { Sash, ISashEvent, Orientation, IVerticalSashLayoutProvider } from 'vs/base/browser/ui/sash/sash';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { IOverlayWidget, IOverlayWidgetPosition, OverlayWidgetPositionPreference } from 'vs/editor/browser/editorBrowser';
-import { FIND_IDS, CONTEXT_FIND_INPUT_FOCUSED } from 'vs/editor/contrib/find/findModel';
-import { FindReplaceState, FindReplaceStateChangedEvent } from 'vs/editor/contrib/find/findState';
 import { IContextKeyService, IContextKey } from 'vs/platform/contextkey/common/contextkey';
 import { IColorTheme, IThemeService } from 'vs/platform/theme/common/themeService';
 import * as colors from 'vs/platform/theme/common/colorRegistry';
 import { IEditorAction } from 'vs/editor/common/editorCommon';
 import { IDisposable } from 'vs/base/common/lifecycle';
+import { FindReplaceState, FindReplaceStateChangedEvent } from 'vs/editor/contrib/find/browser/findState';
+import { CONTEXT_FIND_INPUT_FOCUSED, FIND_IDS } from 'vs/editor/contrib/find/browser/findModel';
 
 const NLS_FIND_INPUT_LABEL = nls.localize('label.find', "Find");
 const NLS_FIND_INPUT_PLACEHOLDER = nls.localize('placeholder.find', "Find");
@@ -127,9 +127,9 @@ export class FindWidget extends Widget implements IOverlayWidget, IVerticalSashL
 			if (FIND_WIDGET_INITIAL_WIDTH + 28 - MAX_MATCHES_COUNT_WIDTH >= editorWidth + 50) {
 				collapsedFindWidget = true;
 			}
-			dom.toggleClass(this._domNode, 'collapsed-find-widget', collapsedFindWidget);
-			dom.toggleClass(this._domNode, 'narrow-find-widget', narrowFindWidget);
-			dom.toggleClass(this._domNode, 'reduced-find-widget', reducedFindWidget);
+			this._domNode.classList.toggle('collapsed-find-widget', collapsedFindWidget);
+			this._domNode.classList.toggle('narrow-find-widget', narrowFindWidget);
+			this._domNode.classList.toggle('reduced-find-widget', reducedFindWidget);
 
 			if (!narrowFindWidget && !collapsedFindWidget) {
 				// the minimal left offset of findwidget is 15px.
@@ -204,7 +204,7 @@ export class FindWidget extends Widget implements IOverlayWidget, IVerticalSashL
 		}
 		if (e.searchString || e.matchesCount || e.matchesPosition) {
 			let showRedOutline = (this._state.searchString.length > 0 && this._state.matchesCount === 0);
-			dom.toggleClass(this._domNode, 'no-results', showRedOutline);
+			this._domNode.classList.toggle('no-results', showRedOutline);
 
 			this._updateMatchesCount();
 		}
@@ -262,6 +262,7 @@ export class FindWidget extends Widget implements IOverlayWidget, IVerticalSashL
 			setTimeout(() => {
 				this._domNode.classList.add('visible');
 				this._domNode.setAttribute('aria-hidden', 'false');
+				this._domNode.style.display = '';
 				if (!animate) {
 					this._domNode.classList.add('noanimation');
 					setTimeout(() => {
@@ -281,6 +282,7 @@ export class FindWidget extends Widget implements IOverlayWidget, IVerticalSashL
 
 			this._domNode.classList.remove('visible');
 			this._domNode.setAttribute('aria-hidden', 'true');
+			this._domNode.style.display = 'none';
 			if (focusTheEditor) {
 				this._tableController.focus();
 			}
@@ -471,6 +473,7 @@ export class FindWidget extends Widget implements IOverlayWidget, IVerticalSashL
 		this._domNode = document.createElement('div');
 		this._domNode.className = 'editor-widget find-widget';
 		this._domNode.setAttribute('aria-hidden', 'true');
+		this._domNode.style.display = 'none';
 
 		this._domNode.appendChild(findPart);
 
@@ -552,7 +555,7 @@ class SimpleButton extends Widget {
 	}
 
 	public setEnabled(enabled: boolean): void {
-		dom.toggleClass(this._domNode, 'disabled', !enabled);
+		this._domNode.classList.toggle('disabled', !enabled);
 		this._domNode.setAttribute('aria-disabled', String(!enabled));
 		this._domNode.tabIndex = enabled ? 0 : -1;
 	}
@@ -562,6 +565,6 @@ class SimpleButton extends Widget {
 	}
 
 	public toggleClass(className: string, shouldHaveIt: boolean): void {
-		dom.toggleClass(this._domNode, className, shouldHaveIt);
+		this._domNode.classList.toggle(className, shouldHaveIt);
 	}
 }

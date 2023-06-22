@@ -28,7 +28,10 @@ import { Tenant, TenantListDelegate, TenantPickerListRenderer } from 'sql/workbe
 
 export class AccountPicker extends Disposable {
 	public static ACCOUNTPICKERLIST_HEIGHT = 47;
+	public static ACCOUNTTENANTLIST_HEIGHT = 32;
 	public viewModel: AccountPickerViewModel;
+	public initialAccount: string;
+	public initialTenant: string;
 	private _accountList?: List<azdata.Account>;
 	private _rootContainer?: HTMLElement;
 
@@ -97,7 +100,7 @@ export class AccountPicker extends Disposable {
 	public createAccountPickerComponent() {
 		// Create an account list
 		const accountDelegate = new AccountListDelegate(AccountPicker.ACCOUNTPICKERLIST_HEIGHT);
-		const tenantDelegate = new TenantListDelegate(AccountPicker.ACCOUNTPICKERLIST_HEIGHT);
+		const tenantDelegate = new TenantListDelegate(AccountPicker.ACCOUNTTENANTLIST_HEIGHT);
 
 		const accountRenderer = new AccountPickerListRenderer();
 		const tenantRenderer = new TenantPickerListRenderer();
@@ -188,6 +191,9 @@ export class AccountPicker extends Disposable {
 		this.viewModel.initialize()
 			.then((accounts: azdata.Account[]) => {
 				this.updateAccountList(accounts);
+				// Need to set account selection after account list has been updated
+				this.setAccountSelection();
+				this.setTenantSelection();
 			});
 	}
 
@@ -198,12 +204,50 @@ export class AccountPicker extends Disposable {
 		}
 	}
 
+	public setInitialTenant(tenant: string): void {
+		this.initialTenant = tenant;
+	}
+
+	public setInitialAccount(account: string): void {
+		this.initialAccount = account;
+	}
+
 	// PRIVATE HELPERS /////////////////////////////////////////////////////
+
+	private setAccountSelection(): void {
+		let index = 0;
+		let accountFound = false;
+		while (index < this._accountList.length) {
+			if (this.initialAccount === this._accountList.element(index).key.accountId) {
+				accountFound = true;
+				break;
+			}
+			index++
+		}
+		if (accountFound) {
+			this._accountList.setSelection([index]);
+		}
+	}
+
+	private setTenantSelection(): void {
+		let index = 0;
+		let tenantFound = false;
+		while (index < this._tenantList.length) {
+			if (this.initialTenant === this._tenantList.element(index).id) {
+				tenantFound = true;
+				break;
+			}
+			index++
+		}
+		if (tenantFound) {
+			this._tenantList.setSelection([index]);
+		}
+	}
 
 	private createLabelElement(content: string, isHeader?: boolean) {
 		let className = 'dialog-label';
 		if (isHeader) {
-			className += ' header';
+			className += '.header';
 		}
 		const element = DOM.$(`.${className}`);
 		element.innerText = content;
@@ -212,9 +256,12 @@ export class AccountPicker extends Disposable {
 
 	private onAccountSelectionChange(account: azdata.Account | undefined) {
 		this.viewModel.selectedAccount = account;
-		if (account && account.isStale) {
+		if (!account) {
+			DOM.hide(this._tenantContainer!);
+		} else if (account && account.isStale) {
 			this._refreshAccountAction!.account = account;
 			DOM.show(this._refreshContainer!);
+			DOM.hide(this._tenantContainer!);
 		} else if (account) {
 			DOM.hide(this._refreshContainer!);
 
@@ -284,7 +331,7 @@ export class AccountPicker extends Disposable {
 			const label = DOM.append(row, DOM.$('div.label'));
 
 			// TODO: Pick between the light and dark logo
-			label.innerText = tenant.displayName;
+			label.innerText = tenant.displayName.concat(' (', tenant.id, ')');
 		}
 		return null;
 	}

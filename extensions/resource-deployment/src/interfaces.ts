@@ -77,10 +77,6 @@ export interface DialogDeploymentProvider extends DeploymentProviderBase {
 	dialog: DialogInfo;
 }
 
-export interface BdcWizardDeploymentProvider extends DeploymentProviderBase {
-	bdcWizard: BdcWizardInfo;
-}
-
 export interface NotebookWizardDeploymentProvider extends DeploymentProviderBase {
 	notebookWizard: NotebookWizardInfo;
 }
@@ -111,10 +107,6 @@ export interface AzureSQLDBDeploymentProvider extends DeploymentProviderBase {
 
 export function instanceOfDialogDeploymentProvider(obj: any): obj is DialogDeploymentProvider {
 	return obj && 'dialog' in obj;
-}
-
-export function instanceOfWizardDeploymentProvider(obj: any): obj is BdcWizardDeploymentProvider {
-	return obj && 'bdcWizard' in obj;
 }
 
 export function instanceOfNotebookWizardDeploymentProvider(obj: any): obj is NotebookWizardDeploymentProvider {
@@ -151,12 +143,8 @@ export interface DeploymentProviderBase {
 	when: string;
 }
 
-export type DeploymentProvider = DialogDeploymentProvider | BdcWizardDeploymentProvider | NotebookWizardDeploymentProvider | NotebookDeploymentProvider | WebPageDeploymentProvider | DownloadDeploymentProvider | CommandDeploymentProvider | AzureSQLVMDeploymentProvider | AzureSQLDBDeploymentProvider;
+export type DeploymentProvider = DialogDeploymentProvider | NotebookWizardDeploymentProvider | NotebookDeploymentProvider | WebPageDeploymentProvider | DownloadDeploymentProvider | CommandDeploymentProvider | AzureSQLVMDeploymentProvider | AzureSQLDBDeploymentProvider;
 
-export interface BdcWizardInfo {
-	notebook: string | NotebookPathInfo;
-	type: BdcDeploymentType;
-}
 /**
  * An object that configures Script and Done buttons of the wizard.
  */
@@ -183,7 +171,6 @@ export interface NotebookWizardInfo extends WizardInfoBase {
 }
 
 export interface WizardInfoBase extends FieldInfoBase {
-	type?: DeploymentType;
 	/**
 	 * 	done button attributes.
 	 */
@@ -242,6 +229,10 @@ export function instanceOfDynamicEnablementInfo(obj: any): obj is DynamicEnablem
 	return (<DynamicEnablementInfo>obj)?.target !== undefined && (<DynamicEnablementInfo>obj)?.value !== undefined;
 }
 
+export function instanceOfDynamicOptionsInfo(obj: any): obj is DynamicOptionsInfo {
+	return (<DynamicOptionsInfo>obj)?.target !== undefined && (<DynamicOptionsInfo>obj)?.alternates !== undefined;
+}
+
 export interface DialogInfoBase {
 	title: string;
 	name: string;
@@ -290,9 +281,20 @@ export interface DynamicEnablementInfo {
 	value: string
 }
 
+export interface DynamicOptionsInfo {
+	target: string,
+	alternates: DynamicOptionsAlternates[]
+}
+
+export interface DynamicOptionsAlternates {
+	selection: string
+	alternateValues: string[] | azdata.CategoryValue[],
+	defaultValue: string
+}
+
 export interface ValueProviderInfo {
 	providerId: string,
-	triggerField: string
+	triggerFields: string[]
 }
 
 export interface FieldInfoBase {
@@ -340,6 +342,7 @@ export interface FieldInfo extends SubFieldInfo, FieldInfoBase {
 	links?: azdata.LinkArea[];
 	editable?: boolean; // for editable drop-down,
 	enabled?: boolean | DynamicEnablementInfo;
+	dynamicOptions?: DynamicOptionsInfo;
 	isEvaluated?: boolean;
 	validations?: ValidationInfo[];
 	valueProvider?: ValueProviderInfo;
@@ -445,7 +448,6 @@ export enum ToolType {
 	AzCli,
 	KubeCtl,
 	Docker,
-	Azdata
 }
 
 export const enum ToolStatus {
@@ -480,16 +482,6 @@ export interface ITool {
 	isEulaAccepted(): Promise<boolean>;
 	promptForEula(): Promise<boolean>;
 }
-
-export const enum BdcDeploymentType {
-	NewAKS = 'new-aks',
-	ExistingAKS = 'existing-aks',
-	ExistingKubeAdm = 'existing-kubeadm',
-	ExistingARO = 'existing-aro',
-	ExistingOpenShift = 'existing-openshift'
-}
-
-export type DeploymentType = BdcDeploymentType;
 
 export interface Command {
 	command: string;

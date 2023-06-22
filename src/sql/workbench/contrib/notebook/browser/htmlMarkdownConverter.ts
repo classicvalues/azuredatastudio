@@ -9,6 +9,7 @@ import * as path from 'vs/base/common/path';
 import * as turndownPluginGfm from 'sql/workbench/contrib/notebook/browser/turndownPluginGfm';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { findPathRelativeToContent, NotebookLinkHandler } from 'sql/workbench/contrib/notebook/browser/notebookLinkHandler';
+import { FileAccess } from 'vs/base/common/network';
 
 // These replacements apply only to text. Here's how it's handled from Turndown:
 // if (node.nodeType === 3) {
@@ -35,7 +36,7 @@ const markdownReplacements = [
 export class HTMLMarkdownConverter {
 	private turndownService: TurndownService;
 
-	constructor(private notebookUri: URI, @IConfigurationService private configurationService: IConfigurationService,) {
+	constructor(private notebookUri: URI, @IConfigurationService private configurationService: IConfigurationService) {
 		this.turndownService = new TurndownService({ 'emDelimiter': '_', 'bulletListMarker': '-', 'headingStyle': 'atx', blankReplacement: blankReplacement });
 		this.setTurndownOptions();
 	}
@@ -44,9 +45,18 @@ export class HTMLMarkdownConverter {
 		return this.turndownService.turndown(html, { gfm: true });
 	}
 
+	private setTableTurndownOptions() {
+		if (this.configurationService.getValue('notebook.renderTablesInHtml')) {
+			this.turndownService.keep(['table', 'tr', 'th', 'td']);
+			this.turndownService.use(turndownPluginGfm.gfmHtmlTables);
+		} else {
+			this.turndownService.use(turndownPluginGfm.gfm);
+		}
+	}
+
 	private setTurndownOptions() {
 		this.turndownService.keep(['style']);
-		this.turndownService.use(turndownPluginGfm.gfm);
+		this.setTableTurndownOptions();
 		this.turndownService.addRule('pre', {
 			filter: 'pre',
 			replacement: function (content, node) {
@@ -121,9 +131,11 @@ export class HTMLMarkdownConverter {
 			filter: 'img',
 			replacement: (content, node) => {
 				if (node?.src) {
-					let imgPath = URI.parse(node.src);
+					// Image URIs are converted to vscode-file URIs for the underlying HTML so that they can be loaded by ADS,
+					// but we want to convert them back to their file URI when converting back to markdown for displaying to the user
+					let imgUri = FileAccess.asFileUri(URI.parse(node.src));
 					const notebookFolder: string = this.notebookUri ? path.join(path.dirname(this.notebookUri.fsPath), path.sep) : '';
-					let relativePath = findPathRelativeToContent(notebookFolder, imgPath);
+					let relativePath = findPathRelativeToContent(notebookFolder, imgUri);
 					if (relativePath) {
 						return `![${node.alt}](${relativePath})`;
 					}

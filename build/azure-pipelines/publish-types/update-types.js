@@ -1,8 +1,8 @@
+"use strict";
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require("fs");
 const cp = require("child_process");
@@ -63,8 +63,8 @@ function getNewFileHeader(tag) {
         ``,
         `/*---------------------------------------------------------------------------------------------`,
         ` *  Copyright (c) Microsoft Corporation. All rights reserved.`,
-        ` *  Licensed under the MIT License.`,
-        ` *  See https://github.com/Microsoft/azuredatastudio/blob/main/LICENSE.txt for license information.`,
+        ` *  Licensed under the Source EULA.`,
+        ` *  See https://github.com/microsoft/azuredatastudio/blob/main/LICENSE.txt for license information.`,
         ` *--------------------------------------------------------------------------------------------*/`,
         ``,
         `/**`,

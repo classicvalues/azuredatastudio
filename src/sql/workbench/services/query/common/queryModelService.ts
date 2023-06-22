@@ -13,6 +13,7 @@ import * as azdata from 'azdata';
 
 import * as nls from 'vs/nls';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
+import { ILogService } from 'vs/platform/log/common/log';
 import { Event, Emitter } from 'vs/base/common/event';
 import * as strings from 'vs/base/common/strings';
 import * as types from 'vs/base/common/types';
@@ -34,18 +35,23 @@ export interface QueryEvent {
 export class QueryInfo {
 	public queryRunner?: EditQueryRunner;
 	public dataService?: DataService;
-	public queryEventQueue?: QueryEvent[];
-	public range?: Array<IRange>;
+	public queryEventQueue: QueryEvent[] = [];
+	public batchRanges: Array<IRange> = [];
 	public selectionSnippet?: string;
 
 	// Notes if the angular components have obtained the DataService. If not, all messages sent
 	// via the data service will be lost.
-	public dataServiceReady?: boolean;
+	public dataServiceReady: boolean = false;
 
-	constructor() {
-		this.dataServiceReady = false;
-		this.queryEventQueue = [];
-		this.range = [];
+	constructor() { }
+
+	public set uri(newUri: string) {
+		if (this.queryRunner) {
+			this.queryRunner.uri = newUri;
+		}
+		if (this.dataService) {
+			this.dataService.uri = newUri;
+		}
 	}
 }
 
@@ -75,7 +81,8 @@ export class QueryModelService implements IQueryModelService {
 	// CONSTRUCTOR /////////////////////////////////////////////////////////
 	constructor(
 		@IInstantiationService private _instantiationService: IInstantiationService,
-		@INotificationService private _notificationService: INotificationService
+		@INotificationService private _notificationService: INotificationService,
+		@ILogService private _logService: ILogService
 	) {
 		this._queryInfoMap = new Map<string, QueryInfo>();
 		this._onRunQueryStart = new Emitter<string>();
@@ -221,7 +228,7 @@ export class QueryModelService implements IQueryModelService {
 
 			// If the query is not in progress, we can reuse the query runner
 			queryRunner = existingRunner!;
-			info.range = [];
+			info.batchRanges = [];
 			info.selectionSnippet = undefined;
 		} else {
 			// We do not have a query runner for this editor, so create a new one
@@ -264,7 +271,7 @@ export class QueryModelService implements IQueryModelService {
 						text: strings.format(nls.localize('runQueryBatchStartLine', "Line {0}"), b.range.startLineNumber)
 					};
 				}
-				info.range!.push(b.range);
+				info.batchRanges.push(b.range);
 			}
 			let message = {
 				message: messageText,
@@ -280,14 +287,13 @@ export class QueryModelService implements IQueryModelService {
 		});
 		queryRunner.onQueryEnd(totalMilliseconds => {
 			this._onRunQueryComplete.fire(queryRunner.uri);
-
 			// fire extensibility API event
 			let event: IQueryEvent = {
 				type: 'queryStop',
 				uri: queryRunner.uri,
 				queryInfo:
 				{
-					range: info.range!,
+					batchRanges: info.batchRanges,
 					messages: info.queryRunner!.messages
 				}
 			};
@@ -305,7 +311,7 @@ export class QueryModelService implements IQueryModelService {
 				uri: queryRunner.uri,
 				queryInfo:
 				{
-					range: info.range!,
+					batchRanges: info.batchRanges,
 					messages: info.queryRunner!.messages
 				}
 			};
@@ -321,7 +327,7 @@ export class QueryModelService implements IQueryModelService {
 				uri: queryRunner.uri,
 				queryInfo:
 				{
-					range: info.range!,
+					batchRanges: info.batchRanges,
 					messages: info.queryRunner!.messages
 				}
 			};
@@ -337,10 +343,25 @@ export class QueryModelService implements IQueryModelService {
 				uri: planInfo.fileUri,
 				queryInfo:
 				{
-					range: info.range!,
+					batchRanges: info.batchRanges,
 					messages: info.queryRunner!.messages
 				},
 				params: planInfo
+			};
+			this._onQueryEvent.fire(event);
+		});
+
+		queryRunner.onExecutionPlanAvailable(qp2Info => {
+			// fire extensibility API event
+			let event: IQueryEvent = {
+				type: 'executionPlan',
+				uri: qp2Info.fileUri,
+				queryInfo:
+				{
+					batchRanges: info.batchRanges,
+					messages: info.queryRunner!.messages
+				},
+				params: qp2Info.planGraphs
 			};
 			this._onQueryEvent.fire(event);
 		});
@@ -351,7 +372,7 @@ export class QueryModelService implements IQueryModelService {
 				uri: queryRunner.uri,
 				queryInfo:
 				{
-					range: info.range!,
+					batchRanges: info.batchRanges,
 					messages: info.queryRunner!.messages
 				},
 				params: resultSetInfo
@@ -407,6 +428,27 @@ export class QueryModelService implements IQueryModelService {
 		if (this._queryInfoMap.has(ownerUri)) {
 			this._queryInfoMap.delete(ownerUri);
 		}
+	}
+
+	public async changeConnectionUri(newUri: string, oldUri: string): Promise<void> {
+		// Get existing query runner
+		let queryRunner = this.internalGetQueryRunner(oldUri);
+		if (!queryRunner) {
+			// Nothing to do if we don't have a query runner currently (no connection)
+			return;
+		}
+		else if (this._queryInfoMap.has(newUri)) {
+			this._logService.error(`New URI '${newUri}' already has query info associated with it.`);
+			throw new Error(nls.localize('queryModelService.uriAlreadyHasQuery', '{0} already has an existing query', newUri));
+		}
+
+		await queryRunner.changeConnectionUri(newUri, oldUri);
+
+		// remove the old key and set new key with same query info as old uri. (Info existence is checked in internalGetQueryRunner)
+		let info = this._queryInfoMap.get(oldUri);
+		info.uri = newUri;
+		this._queryInfoMap.set(newUri, info);
+		this._queryInfoMap.delete(oldUri);
 	}
 
 	// EDIT DATA METHODS /////////////////////////////////////////////////////
@@ -472,7 +514,7 @@ export class QueryModelService implements IQueryModelService {
 					uri: ownerUri,
 					queryInfo:
 					{
-						range: info.range!,
+						batchRanges: info.batchRanges,
 						messages: info.queryRunner!.messages
 					},
 				};
@@ -489,7 +531,7 @@ export class QueryModelService implements IQueryModelService {
 					uri: ownerUri,
 					queryInfo:
 					{
-						range: info.range!,
+						batchRanges: info.batchRanges,
 						messages: info.queryRunner!.messages
 					},
 				};

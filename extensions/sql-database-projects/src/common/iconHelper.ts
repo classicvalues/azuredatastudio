@@ -16,12 +16,16 @@ export class IconPathHelper {
 	public static databaseProject: IconPath;
 	public static colorfulSqlProject: IconPath;
 	public static sqlEdgeProject: IconPath;
+	public static azureSqlDbProject: IconPath;
 
 	public static dataSourceGroup: IconPath;
 	public static dataSourceSql: IconPath;
 
 	public static referenceGroup: IconPath;
 	public static referenceDatabase: IconPath;
+
+	public static sqlCmdVariablesGroup: IconPath;
+	public static sqlCmdVariable: IconPath;
 
 	public static refresh: IconPath;
 	public static folder_blue: IconPath;
@@ -48,12 +52,16 @@ export class IconPathHelper {
 		IconPathHelper.databaseProject = IconPathHelper.makeIcon('databaseProject');
 		IconPathHelper.colorfulSqlProject = IconPathHelper.makeIcon('colorfulSqlProject', true);
 		IconPathHelper.sqlEdgeProject = IconPathHelper.makeIcon('sqlEdgeProject', true);
+		IconPathHelper.azureSqlDbProject = IconPathHelper.makeIcon('azure', true);
 
 		IconPathHelper.dataSourceGroup = IconPathHelper.makeIcon('dataSourceGroup');
 		IconPathHelper.dataSourceSql = IconPathHelper.makeIcon('dataSource-sql');
 
 		IconPathHelper.referenceGroup = IconPathHelper.makeIcon('referenceGroup');
 		IconPathHelper.referenceDatabase = IconPathHelper.makeIcon('reference-database');
+
+		IconPathHelper.sqlCmdVariablesGroup = IconPathHelper.makeIcon('symbol-string');
+		IconPathHelper.sqlCmdVariable = IconPathHelper.makeIcon('symbol-variable');
 
 		IconPathHelper.refresh = IconPathHelper.makeIcon('refresh', true);
 		IconPathHelper.folder_blue = IconPathHelper.makeIcon('folder_blue', true);

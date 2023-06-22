@@ -10,12 +10,13 @@ import * as constants from './constants';
 import * as path from 'path';
 import * as glob from 'fast-glob';
 import * as dataworkspace from 'dataworkspace';
-import * as mssql from '../../../mssql';
+import * as mssql from 'mssql';
 import * as vscodeMssql from 'vscode-mssql';
-import { promises as fs } from 'fs';
-import { Project } from '../models/project';
-import * as childProcess from 'child_process';
 import * as fse from 'fs-extra';
+import * as which from 'which';
+import { promises as fs } from 'fs';
+import { ISqlProject, SqlTargetPlatform } from 'sqldbproj';
+import { SystemDatabase } from './typeHelper';
 
 export interface ValidationResult {
 	errorMessage: string;
@@ -153,22 +154,47 @@ export function convertSlashesForSqlProj(filePath: string): string {
 }
 
 /**
+ * Converts a SystemDatabase enum to its string value
+ * @param systemDb
+ * @returns
+ */
+export function systemDatabaseToString(systemDb: SystemDatabase): string {
+	if (systemDb === mssql.SystemDatabase.Master || systemDb === vscodeMssql.SystemDatabase.Master) {
+		return constants.master;
+	} else {
+		return constants.msdb;
+	}
+}
+
+export function getSystemDatabase(name: string): SystemDatabase {
+	if (getAzdataApi()) {
+		return name === constants.master ? mssql.SystemDatabase.Master : mssql.SystemDatabase.MSDB;
+	} else {
+		return name === constants.master ? vscodeMssql.SystemDatabase.Master : vscodeMssql.SystemDatabase.MSDB;
+	}
+}
+
+/**
  * Read SQLCMD variables from xmlDoc and return them
  * @param xmlDoc xml doc to read SQLCMD variables from. Format must be the same that sqlproj and publish profiles use
+ * @param publishProfile true if reading from publish profile
  */
-export function readSqlCmdVariables(xmlDoc: any): Record<string, string> {
-	let sqlCmdVariables: Record<string, string> = {};
+export function readSqlCmdVariables(xmlDoc: Document, publishProfile: boolean): Map<string, string> {
+	let sqlCmdVariables: Map<string, string> = new Map();
 	for (let i = 0; i < xmlDoc.documentElement.getElementsByTagName(constants.SqlCmdVariable)?.length; i++) {
 		const sqlCmdVar = xmlDoc.documentElement.getElementsByTagName(constants.SqlCmdVariable)[i];
-		const varName = sqlCmdVar.getAttribute(constants.Include);
+		const varName = sqlCmdVar.getAttribute(constants.Include)!;
 
-		if (sqlCmdVar.getElementsByTagName(constants.DefaultValue)[0] !== undefined) {
+		// Publish profiles only support Value, so don't use DefaultValue even if it's there
+		// SSDT uses the Value (like <Value>$(SqlCmdVar__1)</Value>) where there
+		// are local variable values you can set in VS in the properties. Since we don't support that in ADS, only DefaultValue is supported for sqlproj.
+		if (!publishProfile && sqlCmdVar.getElementsByTagName(constants.DefaultValue)[0] !== undefined) {
 			// project file path
-			sqlCmdVariables[varName] = sqlCmdVar.getElementsByTagName(constants.DefaultValue)[0].childNodes[0].nodeValue;
+			sqlCmdVariables.set(varName, sqlCmdVar.getElementsByTagName(constants.DefaultValue)[0].childNodes[0].nodeValue!);
 		}
 		else {
 			// profile path
-			sqlCmdVariables[varName] = sqlCmdVar.getElementsByTagName(constants.Value)[0].childNodes[0].nodeValue;
+			sqlCmdVariables.set(varName, sqlCmdVar.getElementsByTagName(constants.Value)[0].childNodes[0].nodeValue!);
 		}
 	}
 
@@ -225,25 +251,24 @@ export function formatSqlCmdVariable(name: string): string {
  * Checks if it's a valid sqlcmd variable name
  * https://docs.microsoft.com/en-us/sql/ssms/scripting/sqlcmd-use-with-scripting-variables?redirectedfrom=MSDN&view=sql-server-ver15#guidelines-for-scripting-variable-names-and-values
  * @param name variable name to validate
- */
-export function isValidSqlCmdVariableName(name: string | undefined): boolean {
+ * @returns null if valid, otherwise an error message describing why input is invalid
+*/
+export function validateSqlCmdVariableName(name: string | undefined): string | null {
 	// remove $() around named if it's there
-	name = removeSqlCmdVariableFormatting(name);
+	const cleanedName = removeSqlCmdVariableFormatting(name);
 
 	// can't contain whitespace
-	if (!name || name.trim() === '' || name.includes(' ')) {
-		return false;
+	if (!cleanedName || cleanedName.trim() === '' || cleanedName.includes(' ')) {
+		return constants.sqlcmdVariableNameCannotContainWhitespace(name ?? '');
 	}
 
 	// can't contain these characters
-	if (name.includes('$') || name.includes('@') || name.includes('#') || name.includes('"') || name.includes('\'') || name.includes('-')) {
-		return false;
+	if (constants.illegalSqlCmdChars.some(c => cleanedName?.includes(c))) {
+		return constants.sqlcmdVariableNameCannotContainIllegalChars(name ?? '');
 	}
 
 	// TODO: tsql parsing to check if it's a reserved keyword or invalid tsql https://github.com/microsoft/azuredatastudio/issues/12204
-	// TODO: give more detail why variable name was invalid https://github.com/microsoft/azuredatastudio/issues/12231
-
-	return true;
+	return null;
 }
 
 /**
@@ -275,6 +300,7 @@ export function getDataWorkspaceExtensionApi(): dataworkspace.IExtension {
 
 export type IDacFxService = mssql.IDacFxService | vscodeMssql.IDacFxService;
 export type ISchemaCompareService = mssql.ISchemaCompareService | vscodeMssql.ISchemaCompareService;
+export type ISqlProjectsService = mssql.ISqlProjectsService | vscodeMssql.ISqlProjectsService;
 
 export async function getDacFxService(): Promise<IDacFxService> {
 	if (getAzdataApi()) {
@@ -298,35 +324,49 @@ export async function getSchemaCompareService(): Promise<ISchemaCompareService> 
 	}
 }
 
+export async function getSqlProjectsService(): Promise<ISqlProjectsService> {
+	if (getAzdataApi()) {
+		const ext = vscode.extensions.getExtension(mssql.extension.name) as vscode.Extension<mssql.IExtension>;
+		const api = await ext.activate();
+		return api.sqlProjects;
+	} else {
+		const api = await getVscodeMssqlApi();
+		return api.sqlProjects;
+	}
+}
+
 export async function getVscodeMssqlApi(): Promise<vscodeMssql.IExtension> {
 	const ext = vscode.extensions.getExtension(vscodeMssql.extension.name) as vscode.Extension<vscodeMssql.IExtension>;
 	return ext.activate();
 }
 
+export type AzureResourceServiceFactory = () => Promise<vscodeMssql.IAzureResourceService>;
+export async function defaultAzureResourceServiceFactory(): Promise<vscodeMssql.IAzureResourceService> {
+	const vscodeMssqlApi = await getVscodeMssqlApi();
+	return vscodeMssqlApi.azureResourceService;
+}
+
+export type AzureAccountServiceFactory = () => Promise<vscodeMssql.IAzureAccountService>;
+export async function defaultAzureAccountServiceFactory(): Promise<vscodeMssql.IAzureAccountService> {
+	const vscodeMssqlApi = await getVscodeMssqlApi();
+	return vscodeMssqlApi.azureAccountService;
+}
+
 /*
  * Returns the default deployment options from DacFx, filtered to appropriate options for the given project.
  */
-export async function getDefaultPublishDeploymentOptions(project: Project): Promise<mssql.DeploymentOptions | vscodeMssql.DeploymentOptions> {
+export async function getDefaultPublishDeploymentOptions(project: ISqlProject): Promise<mssql.DeploymentOptions | vscodeMssql.DeploymentOptions> {
 	const schemaCompareService = await getSchemaCompareService();
 	const result = await schemaCompareService.schemaCompareGetDefaultOptions();
-	const deploymentOptions = result.defaultDeploymentOptions;
-	// re-include database-scoped credentials
-	if (getAzdataApi()) {
-		deploymentOptions.excludeObjectTypes = (deploymentOptions as mssql.DeploymentOptions).excludeObjectTypes.filter(x => x !== mssql.SchemaObjectType.DatabaseScopedCredentials);
-	} else {
-		deploymentOptions.excludeObjectTypes = (deploymentOptions as vscodeMssql.DeploymentOptions).excludeObjectTypes.filter(x => x !== vscodeMssql.SchemaObjectType.DatabaseScopedCredentials);
-	}
-
 	// this option needs to be true for same database references validation to work
 	if (project.databaseReferences.length > 0) {
-		deploymentOptions.includeCompositeObjects = true;
+		result.defaultDeploymentOptions.booleanOptionsDictionary.includeCompositeObjects.value = true;
 	}
 	return result.defaultDeploymentOptions;
 }
 
 export interface IPackageInfo {
 	name: string;
-	fullName: string;
 	version: string;
 	aiKey: string;
 }
@@ -336,16 +376,23 @@ export function getPackageInfo(packageJson?: any): IPackageInfo | undefined {
 		packageJson = require('../../package.json');
 	}
 
-	if (packageJson) {
-		return {
-			name: packageJson.name,
-			fullName: `${packageJson.publisher}.${packageJson.name}`,
-			version: packageJson.version,
-			aiKey: packageJson.aiKey
-		};
+	const vscodePackageJson = require('../../package.vscode.json');
+	const azdataApi = getAzdataApi();
+
+	if (!packageJson || !azdataApi && !vscodePackageJson) {
+		return undefined;
 	}
 
-	return undefined;
+	// When the extension is compiled and packaged, the content of package.json get copied here in the extension.js. This happens before the
+	// package.vscode.json values replace the corresponding values in the package.json for the sql-database-projects-vscode extension
+	// so we need to read these values directly from the package.vscode.json to get the correct extension and publisher names
+	const extensionName = azdataApi ? packageJson.name : vscodePackageJson.name;
+
+	return {
+		name: extensionName,
+		version: packageJson.version,
+		aiKey: packageJson.aiKey
+	};
 }
 
 /**
@@ -411,41 +458,6 @@ export async function createFolderIfNotExist(folderPath: string): Promise<void> 
 	}
 }
 
-export async function executeCommand(cmd: string, outputChannel: vscode.OutputChannel, timeout: number = 5 * 60 * 1000): Promise<string> {
-	return new Promise<string>((resolve, reject) => {
-		if (outputChannel) {
-			outputChannel.appendLine(`    > ${cmd}`);
-		}
-		let child = childProcess.exec(cmd, {
-			timeout: timeout
-		}, (err, stdout) => {
-			if (err) {
-				reject(err);
-			} else {
-				resolve(stdout);
-			}
-		});
-
-		// Add listeners to print stdout and stderr if an output channel was provided
-
-		if (child?.stdout) {
-			child.stdout.on('data', data => { outputDataChunk(outputChannel, data, '    stdout: '); });
-		}
-		if (child?.stderr) {
-			child.stderr.on('data', data => { outputDataChunk(outputChannel, data, '    stderr: '); });
-		}
-	});
-}
-
-export function outputDataChunk(outputChannel: vscode.OutputChannel, data: string | Buffer, header: string): void {
-	data.toString().split(/\r?\n/)
-		.forEach(line => {
-			if (outputChannel) {
-				outputChannel.appendLine(header + line);
-			}
-		});
-}
-
 export async function retry<T>(
 	name: string,
 	attempt: () => Promise<T>,
@@ -472,9 +484,330 @@ export async function retry<T>(
 			}
 
 		} catch (err) {
-			outputChannel.appendLine(constants.retryMessage(name, err));
+			outputChannel.appendLine(constants.retryMessage(name, getErrorMessage(err)));
 		}
 	}
 
 	return undefined;
+}
+
+/**
+ * Detects whether the specified command-line command is available on the current machine
+ */
+export async function detectCommandInstallation(command: string): Promise<boolean> {
+	try {
+		const found = await which(command);
+
+		if (found) {
+			return true;
+		}
+	} catch (err) {
+		console.log(getErrorMessage(err));
+	}
+
+	return false;
+}
+
+export function validateSqlServerPortNumber(port: string | undefined): boolean {
+	if (!port) {
+		return false;
+	}
+	const valueAsNum = +port;
+	return !isNaN(valueAsNum) && valueAsNum > 0 && valueAsNum < 65535;
+}
+
+export function isEmptyString(input: string | undefined): boolean {
+	return input === undefined || input === '';
+}
+
+export function isValidSQLPassword(password: string, userName: string = 'sa'): boolean {
+	// Validate SQL Server password
+	const containsUserName = password && userName !== undefined && password.toUpperCase().includes(userName.toUpperCase());
+	// Instead of using one RegEx, I am separating it to make it more readable.
+	const hasUpperCase = /[A-Z]/.test(password) ? 1 : 0;
+	const hasLowerCase = /[a-z]/.test(password) ? 1 : 0;
+	const hasNumbers = /\d/.test(password) ? 1 : 0;
+	const hasNonAlphas = /\W/.test(password) ? 1 : 0;
+	return !containsUserName && password.length >= 8 && password.length <= 128 && (hasUpperCase + hasLowerCase + hasNumbers + hasNonAlphas >= 3);
+}
+
+export async function showErrorMessageWithOutputChannel(errorMessageFunc: (error: string) => string, error: any, outputChannel: vscode.OutputChannel): Promise<void> {
+	const result = await vscode.window.showErrorMessage(errorMessageFunc(getErrorMessage(error)), constants.checkoutOutputMessage);
+	if (result === constants.checkoutOutputMessage) {
+		outputChannel.show();
+	}
+}
+
+export async function showInfoMessageWithOutputChannel(message: string, outputChannel: vscode.OutputChannel): Promise<void> {
+	const result = await vscode.window.showInformationMessage(message, constants.checkoutOutputMessage);
+	if (result === constants.checkoutOutputMessage) {
+		outputChannel.show();
+	}
+}
+
+/**
+ * Returns the results of the glob pattern
+ * @param pattern Glob pattern to search for
+ */
+export async function globWithPattern(pattern: string): Promise<string[]> {
+	const forwardSlashPattern = pattern.replace(/\\/g, '/');
+	return await glob(forwardSlashPattern);
+}
+
+/**
+ * Recursively gets all the sql files at any depth in a folder
+ * @param folderPath
+ * @param ignoreBinObj ignore sql files in bin and obj folders
+ */
+export async function getSqlFilesInFolder(folderPath: string, ignoreBinObj?: boolean): Promise<string[]> {
+	// path needs to use forward slashes for glob to work
+	folderPath = folderPath.replace(/\\/g, '/');
+	const sqlFilter = path.posix.join(folderPath, '**', '*.sql');
+
+	if (ignoreBinObj) {
+		// don't add files in bin and obj folders
+		const binIgnore = path.posix.join(folderPath, 'bin', '**', '*.sql');
+		const objIgnore = path.posix.join(folderPath, 'obj', '**', '*.sql');
+
+		return await glob(sqlFilter, { ignore: [binIgnore, objIgnore] });
+	} else {
+		return await glob(sqlFilter);
+	}
+}
+
+/**
+ * Recursively gets all the folders at any depth in the given folder
+ * @param folderPath
+ * @param ignoreBinObj ignore bin and obj folders
+ */
+export async function getFoldersInFolder(folderPath: string, ignoreBinObj?: boolean): Promise<string[]> {
+	// path needs to use forward slashes for glob to work
+	const escapedPath = glob.escapePath(folderPath.replace(/\\/g, '/'));
+	const folderFilter = path.posix.join(escapedPath, '/**');
+
+	if (ignoreBinObj) {
+		// don't add bin and obj folders
+		const binIgnore = path.posix.join(escapedPath, 'bin');
+		const objIgnore = path.posix.join(escapedPath, 'obj');
+		return await glob(folderFilter, { onlyDirectories: true, ignore: [binIgnore, objIgnore] });
+	} else {
+		return await glob(folderFilter, { onlyDirectories: true });
+	}
+}
+
+/**
+ * Gets the folders between the startFolder to the file
+ * @param startFolder
+ * @param endFile
+ * @returns array of folders between startFolder and endFile
+ */
+export function getFoldersToFile(startFolder: string, endFile: string): string[] {
+	let folders: string[] = [];
+
+	const endFolderPath = path.dirname(endFile);
+
+	const relativePath = convertSlashesForSqlProj(endFolderPath.substring(startFolder.length));
+	const pathSegments = trimChars(relativePath, ' \\').split(constants.SqlProjPathSeparator);
+	let folderPath = convertSlashesForSqlProj(startFolder) + constants.SqlProjPathSeparator;
+
+	for (let segment of pathSegments) {
+		if (segment) {
+			folderPath += segment + constants.SqlProjPathSeparator;
+			folders.push(getPlatformSafeFileEntryPath(folderPath));
+		}
+	}
+
+	return folders;
+}
+
+/**
+ * Gets the folders between the startFolder and endFolder
+ * @param startFolder
+ * @param endFolder
+ * @returns array of folders between startFolder and endFolder
+ */
+export function getFoldersAlongPath(startFolder: string, endFolder: string): string[] {
+	let folders: string[] = [];
+
+	const relativePath = convertSlashesForSqlProj(endFolder.substring(startFolder.length));
+	const pathSegments = trimChars(relativePath, ' \\').split(constants.SqlProjPathSeparator);
+	let folderPath = convertSlashesForSqlProj(startFolder) + constants.SqlProjPathSeparator;
+
+	for (let segment of pathSegments) {
+		if (segment) {
+			folderPath += segment + constants.SqlProjPathSeparator;
+			folders.push(getPlatformSafeFileEntryPath(folderPath));
+		}
+	}
+
+	return folders;
+}
+
+/**
+ * Returns SQL version number from docker image name which is in the beginning of the image name
+ * @param imageName docker image name
+ * @returns SQL server version
+ */
+export function findSqlVersionInImageName(imageName: string): number | undefined {
+
+	// Regex to find the version in the beginning of the image name
+	// e.g. 2017-CU16-ubuntu, 2019-latest
+	const regex = new RegExp('^([0-9]+)[-].+$');
+
+	if (regex.test(imageName)) {
+		const finds = regex.exec(imageName);
+		if (finds) {
+
+			// 0 is the full match and 1 is the number with pattern inside the first ()
+			return +finds[1];
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Returns SQL version number from target platform name
+ * @param targetPlatform target platform
+ * @returns SQL server version
+ */
+export function findSqlVersionInTargetPlatform(targetPlatform: string): number | undefined {
+
+	// Regex to find the version in target platform
+	// e.g. SQL Server 2019
+	const regex = new RegExp('([0-9]+)$');
+
+	if (regex.test(targetPlatform)) {
+		const finds = regex.exec(targetPlatform);
+		if (finds) {
+
+			// 0 is the full match and 1 is the number with pattern inside the first ()
+			return +finds[1];
+		}
+	}
+	return undefined;
+}
+
+export function throwIfNotConnected(connectionResult: azdataType.ConnectionResult): void {
+	if (!connectionResult.connected) {
+		throw new Error(`${connectionResult.errorMessage} (${connectionResult.errorCode})`);
+	}
+}
+
+/**
+ * Checks whether or not the provided file contains a create table statement
+ * @param fullPath full path to file to check
+ * @param projectTargetVersion target version of sql project containing this file
+ * @returns true if file includes a create table statement, false if it doesn't
+ */
+export async function fileContainsCreateTableStatement(fullPath: string, projectTargetVersion: string): Promise<boolean> {
+	let containsCreateTableStatement = false;
+
+	if (getAzdataApi() && await exists(fullPath)) {
+		const dacFxService = await getDacFxService() as mssql.IDacFxService;
+		try {
+			const result = await dacFxService.parseTSqlScript(fullPath, projectTargetVersion);
+			containsCreateTableStatement = result.containsCreateTableStatement;
+		} catch (e) {
+			console.error(getErrorMessage(e));
+		}
+	}
+
+	return containsCreateTableStatement;
+}
+
+/**
+ * Gets target platform based on the server edition/version
+ * @param serverInfo server information
+ * @returns target platform for the database project
+ */
+export async function getTargetPlatformFromServerVersion(serverInfo: azdataType.ServerInfo | vscodeMssql.IServerInfo): Promise<SqlTargetPlatform | undefined> {
+	const isCloud = serverInfo.isCloud;
+
+	let targetPlatform;
+	if (isCloud) {
+		const engineEdition = serverInfo.engineEditionId;
+		const azdataApi = getAzdataApi();
+		if (azdataApi) {
+			targetPlatform = engineEdition === azdataApi.DatabaseEngineEdition.SqlDataWarehouse ? SqlTargetPlatform.sqlDW : SqlTargetPlatform.sqlAzure;
+		} else {
+			targetPlatform = engineEdition === vscodeMssql.DatabaseEngineEdition.SqlDataWarehouse ? SqlTargetPlatform.sqlDW : SqlTargetPlatform.sqlAzure;
+		}
+	} else {
+		const serverMajorVersion = serverInfo.serverMajorVersion;
+		targetPlatform = serverMajorVersion ? constants.onPremServerVersionToTargetPlatform.get(serverMajorVersion) : undefined;
+	}
+
+	return targetPlatform;
+}
+
+/**
+ * Determines if a given character is a valid filename character
+ * @param c Character to validate
+ */
+export function isValidFilenameCharacter(c: string): boolean {
+	return getDataWorkspaceExtensionApi().isValidFilenameCharacter(c);
+}
+
+/**
+ * Replaces invalid filename characters in a string with underscores
+ * @param s The string to be sanitized for a filename
+ */
+export function sanitizeStringForFilename(s: string): string {
+	return getDataWorkspaceExtensionApi().sanitizeStringForFilename(s);
+}
+
+/**
+ * Returns true if the string is a valid filename
+ * @param name filename to check
+ */
+export function isValidBasename(name?: string): boolean {
+	return getDataWorkspaceExtensionApi().isValidBasename(name);
+}
+
+/**
+ * Returns specific error message if file name is invalid
+ * @param name filename to check
+ */
+export function isValidBasenameErrorMessage(name?: string): string | undefined {
+	return getDataWorkspaceExtensionApi().isValidBasenameErrorMessage(name);
+}
+
+/**
+ * Checks if the provided file is a publish profile
+ * @param fileName filename to check
+ * @returns True if it is a publish profile, otherwise false
+ */
+export function isPublishProfile(fileName: string): boolean {
+	const hasPublishExtension = fileName.trim().toLowerCase().endsWith(constants.publishProfileExtension);
+	return hasPublishExtension;
+}
+
+/**
+ * Checks to see if a file exists at absoluteFilePath, and writes contents if it doesn't.
+ * If either the file already exists and contents is specified or the file doesn't exist and contents is blank,
+ * then an exception is thrown.
+ * @param absoluteFilePath
+ * @param contents
+ */
+export async function ensureFileExists(absoluteFilePath: string, contents?: string): Promise<void> {
+	if (contents) {
+		// Create the file if contents were passed in and file does not exist yet
+		await fs.mkdir(path.dirname(absoluteFilePath), { recursive: true });
+
+		try {
+			await fs.writeFile(absoluteFilePath, contents, { flag: 'wx' });
+		} catch (error) {
+			if (error.code === 'EEXIST') {
+				// Throw specialized error, if file already exists
+				throw new Error(constants.fileAlreadyExists(path.parse(absoluteFilePath).name));
+			}
+
+			throw error;
+		}
+	} else {
+		// If no contents were provided, then check that file already exists
+		if (!await exists(absoluteFilePath)) {
+			throw new Error(constants.noFileExist(absoluteFilePath));
+		}
+	}
 }

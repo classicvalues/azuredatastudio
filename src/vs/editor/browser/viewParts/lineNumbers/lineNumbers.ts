@@ -8,10 +8,10 @@ import * as platform from 'vs/base/common/platform';
 import { DynamicViewOverlay } from 'vs/editor/browser/view/dynamicViewOverlay';
 import { RenderLineNumbersType, EditorOption } from 'vs/editor/common/config/editorOptions';
 import { Position } from 'vs/editor/common/core/position';
-import { editorActiveLineNumber, editorLineNumbers } from 'vs/editor/common/view/editorColorRegistry';
-import { RenderingContext } from 'vs/editor/common/view/renderingContext';
-import { ViewContext } from 'vs/editor/common/view/viewContext';
-import * as viewEvents from 'vs/editor/common/view/viewEvents';
+import { editorActiveLineNumber, editorLineNumbers } from 'vs/editor/common/core/editorColorRegistry';
+import { RenderingContext } from 'vs/editor/browser/view/renderingContext';
+import { ViewContext } from 'vs/editor/common/viewModel/viewContext';
+import * as viewEvents from 'vs/editor/common/viewEvents';
 import { registerThemingParticipant } from 'vs/platform/theme/common/themeService';
 
 export class LineNumbersOverlay extends DynamicViewOverlay {
@@ -27,6 +27,7 @@ export class LineNumbersOverlay extends DynamicViewOverlay {
 	private _lineNumbersLeft!: number;
 	private _lineNumbersWidth!: number;
 	private _lastCursorModelPosition: Position;
+	private _lastCursorViewPosition: Position;
 	private _renderResult: string[] | null;
 	private _activeLineNumber: number;
 
@@ -37,6 +38,7 @@ export class LineNumbersOverlay extends DynamicViewOverlay {
 		this._readConfig();
 
 		this._lastCursorModelPosition = new Position(1, 1);
+		this._lastCursorViewPosition = new Position(1, 1);
 		this._renderResult = null;
 		this._activeLineNumber = 1;
 		this._context.addEventHandler(this);
@@ -68,7 +70,8 @@ export class LineNumbersOverlay extends DynamicViewOverlay {
 	}
 	public override onCursorStateChanged(e: viewEvents.ViewCursorStateChangedEvent): boolean {
 		const primaryViewPosition = e.selections[0].getPosition();
-		this._lastCursorModelPosition = this._context.model.coordinatesConverter.convertViewPositionToModelPosition(primaryViewPosition);
+		this._lastCursorViewPosition = primaryViewPosition;
+		this._lastCursorModelPosition = this._context.viewModel.coordinatesConverter.convertViewPositionToModelPosition(primaryViewPosition);
 
 		let shouldRender = false;
 		if (this._activeLineNumber !== primaryViewPosition.lineNumber) {
@@ -102,7 +105,7 @@ export class LineNumbersOverlay extends DynamicViewOverlay {
 	// --- end event handlers
 
 	private _getLineRenderLineNumber(viewLineNumber: number): string {
-		const modelPosition = this._context.model.coordinatesConverter.convertViewPositionToModelPosition(new Position(viewLineNumber, 1));
+		const modelPosition = this._context.viewModel.coordinatesConverter.convertViewPositionToModelPosition(new Position(viewLineNumber, 1));
 		if (modelPosition.column !== 1) {
 			return '';
 		}
@@ -110,14 +113,6 @@ export class LineNumbersOverlay extends DynamicViewOverlay {
 
 		if (this._renderCustomLineNumbers) {
 			return this._renderCustomLineNumbers(modelLineNumber);
-		}
-
-		if (this._renderLineNumbers === RenderLineNumbersType.Relative) {
-			const diff = Math.abs(this._lastCursorModelPosition.lineNumber - modelLineNumber);
-			if (diff === 0) {
-				return '<span class="relative-current-line-number">' + modelLineNumber + '</span>';
-			}
-			return String(diff);
 		}
 
 		if (this._renderLineNumbers === RenderLineNumbersType.Interval) {
@@ -144,20 +139,72 @@ export class LineNumbersOverlay extends DynamicViewOverlay {
 		const visibleEndLineNumber = ctx.visibleRange.endLineNumber;
 		const common = '<div class="' + LineNumbersOverlay.CLASS_NAME + lineHeightClassName + '" style="left:' + this._lineNumbersLeft + 'px;width:' + this._lineNumbersWidth + 'px;">';
 
-		const lineCount = this._context.model.getLineCount();
+		let relativeLineNumbers: number[] | null = null;
+		if (this._renderLineNumbers === RenderLineNumbersType.Relative) {
+			relativeLineNumbers = new Array(visibleEndLineNumber - visibleStartLineNumber + 1);
+
+			if (this._lastCursorViewPosition.lineNumber >= visibleStartLineNumber && this._lastCursorViewPosition.lineNumber <= visibleEndLineNumber) {
+				relativeLineNumbers[this._lastCursorViewPosition.lineNumber - visibleStartLineNumber] = this._lastCursorModelPosition.lineNumber;
+			}
+
+			// Iterate up to compute relative line numbers
+			{
+				let value = 0;
+				for (let lineNumber = this._lastCursorViewPosition.lineNumber + 1; lineNumber <= visibleEndLineNumber; lineNumber++) {
+					const modelPosition = this._context.viewModel.coordinatesConverter.convertViewPositionToModelPosition(new Position(lineNumber, 1));
+					const isWrappedLine = (modelPosition.column !== 1);
+					if (!isWrappedLine) {
+						value++;
+					}
+					if (lineNumber >= visibleStartLineNumber) {
+						relativeLineNumbers[lineNumber - visibleStartLineNumber] = isWrappedLine ? 0 : value;
+					}
+				}
+			}
+
+			// Iterate down to compute relative line numbers
+			{
+				let value = 0;
+				for (let lineNumber = this._lastCursorViewPosition.lineNumber - 1; lineNumber >= visibleStartLineNumber; lineNumber--) {
+					const modelPosition = this._context.viewModel.coordinatesConverter.convertViewPositionToModelPosition(new Position(lineNumber, 1));
+					const isWrappedLine = (modelPosition.column !== 1);
+					if (!isWrappedLine) {
+						value++;
+					}
+					if (lineNumber <= visibleEndLineNumber) {
+						relativeLineNumbers[lineNumber - visibleStartLineNumber] = isWrappedLine ? 0 : value;
+					}
+				}
+			}
+		}
+
+		const lineCount = this._context.viewModel.getLineCount();
 		const output: string[] = [];
 		for (let lineNumber = visibleStartLineNumber; lineNumber <= visibleEndLineNumber; lineNumber++) {
 			const lineIndex = lineNumber - visibleStartLineNumber;
 
 			if (!this._renderFinalNewline) {
-				if (lineNumber === lineCount && this._context.model.getLineLength(lineNumber) === 0) {
+				if (lineNumber === lineCount && this._context.viewModel.getLineLength(lineNumber) === 0) {
 					// Do not render last (empty) line
 					output[lineIndex] = '';
 					continue;
 				}
 			}
 
-			const renderLineNumber = this._getLineRenderLineNumber(lineNumber);
+			let renderLineNumber: string;
+			if (relativeLineNumbers) {
+				const relativeLineNumber = relativeLineNumbers[lineIndex];
+				if (this._lastCursorViewPosition.lineNumber === lineNumber) {
+					// current line!
+					renderLineNumber = `<span class="relative-current-line-number">${relativeLineNumber}</span>`;
+				} else if (relativeLineNumber) {
+					renderLineNumber = String(relativeLineNumber);
+				} else {
+					renderLineNumber = '';
+				}
+			} else {
+				renderLineNumber = this._getLineRenderLineNumber(lineNumber);
+			}
 
 			if (renderLineNumber) {
 				if (lineNumber === this._activeLineNumber) {

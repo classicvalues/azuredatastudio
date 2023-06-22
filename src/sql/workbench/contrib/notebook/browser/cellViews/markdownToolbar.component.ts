@@ -5,7 +5,7 @@
 import 'vs/css!./markdownToolbar';
 import * as DOM from 'vs/base/browser/dom';
 import { Button, IButtonStyles } from 'sql/base/browser/ui/button/button';
-import { Component, Input, Inject, ViewChild, ElementRef } from '@angular/core';
+import { Component, Input, Inject, ViewChild, ElementRef, HostListener } from '@angular/core';
 import { localize } from 'vs/nls';
 import { CellEditModes, ICellModel } from 'sql/workbench/services/notebook/browser/models/modelInterfaces';
 import { ITaskbarContent, Taskbar } from 'sql/base/browser/ui/taskbar/taskbar';
@@ -25,6 +25,9 @@ import { escape } from 'vs/base/common/strings';
 import { IImageCalloutDialogOptions, ImageCalloutDialog } from 'sql/workbench/contrib/notebook/browser/calloutDialog/imageCalloutDialog';
 import { TextCellEditModes } from 'sql/workbench/services/notebook/common/contracts';
 import { NotebookLinkHandler } from 'sql/workbench/contrib/notebook/browser/notebookLinkHandler';
+import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
+import { KeyCode } from 'vs/base/common/keyCodes';
+import { FileAccess } from 'vs/base/common/network';
 
 export const MARKDOWN_TOOLBAR_SELECTOR: string = 'markdown-toolbar-component';
 const linksRegex = /\[(?<text>.+)\]\((?<url>[^ ]+)(?: "(?<title>.+)")?\)/;
@@ -36,25 +39,50 @@ const linksRegex = /\[(?<text>.+)\]\((?<url>[^ ]+)(?: "(?<title>.+)")?\)/;
 export class MarkdownToolbarComponent extends AngularDisposable {
 	@ViewChild('mdtoolbar', { read: ElementRef }) private mdtoolbar: ElementRef;
 
-	public previewFeaturesEnabled: boolean = false;
+	@HostListener('document:keydown', ['$event'])
+	async onkeydown(e: KeyboardEvent) {
+		if (this.cellModel?.currentMode === CellEditModes.SPLIT || this.cellModel?.currentMode === CellEditModes.MARKDOWN) {
+			const keyEvent = new StandardKeyboardEvent(e);
+			let markdownTextTransformer = new MarkdownTextTransformer(this._notebookService, this.cellModel);
+			if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.keyCode === KeyCode.KeyB) {
+				// Bold Text
+				DOM.EventHelper.stop(e, true);
+				await markdownTextTransformer.transformText(MarkdownButtonType.BOLD);
+			} else if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.keyCode === KeyCode.KeyI) {
+				// Italicize text
+				DOM.EventHelper.stop(e, true);
+				await markdownTextTransformer.transformText(MarkdownButtonType.ITALIC);
+			} else if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.keyCode === KeyCode.KeyU) {
+				// Underline text
+				DOM.EventHelper.stop(e, true);
+				await markdownTextTransformer.transformText(MarkdownButtonType.UNDERLINE);
+			} else if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.shiftKey && keyEvent.keyCode === KeyCode.KeyK) {
+				// Code Block
+				DOM.EventHelper.stop(e, true);
+				await markdownTextTransformer.transformText(MarkdownButtonType.CODE);
+			} else if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.shiftKey && keyEvent.keyCode === KeyCode.KeyH) {
+				// Highlight Text
+				DOM.EventHelper.stop(e, true);
+				await markdownTextTransformer.transformText(MarkdownButtonType.HIGHLIGHT);
+			}
+		}
+	}
 
-	public buttonBold = localize('buttonBold', "Bold");
-	public buttonItalic = localize('buttonItalic', "Italic");
-	public buttonUnderline = localize('buttonUnderline', "Underline");
-	public buttonHighlight = localize('buttonHighlight', "Highlight");
-	public buttonCode = localize('buttonCode', "Code");
-	public buttonLink = localize('buttonLink', "Link");
-	public buttonList = localize('buttonList', "List");
-	public buttonOrderedList = localize('buttonOrderedList', "Ordered list");
-	public buttonImage = localize('buttonImage', "Image");
+	public bold = localize('bold', "Bold");
+	public italic = localize('italic', "Italic");
+	public underline = localize('underline', "Underline");
+	public highlight = localize('highlight', "Highlight");
+	public insertCode = localize('insertCode', "Insert code");
+	public insertLink = localize('insertLink', "Insert link");
+	public insertList = localize('insertList', "Insert list");
+	public insertOrderedList = localize('insertOrderedList', "Insert ordered list");
+	public insertImage = localize('insertImage', "Insert image");
 	public buttonPreview = localize('buttonPreview', "Markdown preview toggle - off");
-	public dropdownHeading = localize('dropdownHeading', "Heading");
+	public headingDropdownLabel = localize('headingDropdownLabel', "Text Size");
 	public optionHeading1 = localize('optionHeading1', "Heading 1");
 	public optionHeading2 = localize('optionHeading2', "Heading 2");
 	public optionHeading3 = localize('optionHeading3', "Heading 3");
 	public optionParagraph = localize('optionParagraph', "Paragraph");
-	public insertLinkHeading = localize('callout.insertLinkHeading', "Insert link");
-	public insertImageHeading = localize('callout.insertImageHeading', "Insert image");
 
 	public richTextViewButton = localize('richTextViewButton', "Rich Text View");
 	public splitViewButton = localize('splitViewButton', "Split View");
@@ -62,7 +90,6 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 
 	private _taskbarContent: Array<ITaskbarContent>;
 	private _wysiwygTaskbarContent: Array<ITaskbarContent>;
-	private _previewModeTaskbarContent: Array<ITaskbarContent>;
 	private _linkCallout: LinkCalloutDialog;
 
 	@Input() public cellModel: ICellModel;
@@ -81,9 +108,6 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 		@Inject(IConfigurationService) private _configurationService: IConfigurationService
 	) {
 		super();
-		this._register(this._configurationService.onDidChangeConfiguration(e => {
-			this.previewFeaturesEnabled = this._configurationService.getValue('workbench.enablePreviewFeatures');
-		}));
 	}
 
 	ngOnInit() {
@@ -91,50 +115,40 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 	}
 
 	private initActionBar() {
-		this.previewFeaturesEnabled = this._configurationService.getValue('workbench.enablePreviewFeatures');
+		let linkButtonContainer = DOM.$('li.action-item');
+		linkButtonContainer.setAttribute('role', 'presentation');
+		let linkButton = new Button(linkButtonContainer);
+		linkButton.title = this.insertLink;
+		linkButton.element.setAttribute('class', 'action-label codicon insert-link masked-icon');
+		let buttonStyle: IButtonStyles = {
+			buttonBackground: null
+		};
+		linkButton.style(buttonStyle);
 
-		let linkButton: TransformMarkdownAction;
-		let imageButton: TransformMarkdownAction;
-		let linkButtonContainer: HTMLElement;
-		let imageButtonContainer: HTMLElement;
+		this._register(DOM.addDisposableListener(linkButtonContainer, DOM.EventType.CLICK, async e => {
+			await this.onInsertButtonClick(e, MarkdownButtonType.LINK_PREVIEW);
+		}));
 
-		if (this.previewFeaturesEnabled) {
-			linkButtonContainer = DOM.$('li.action-item');
-			linkButtonContainer.setAttribute('role', 'presentation');
-			let linkButton = new Button(linkButtonContainer);
-			linkButton.element.setAttribute('class', 'action-label codicon insert-link masked-icon');
-			let buttonStyle: IButtonStyles = {
-				buttonBackground: null
-			};
-			linkButton.style(buttonStyle);
+		let imageButtonContainer = DOM.$('li.action-item');
+		imageButtonContainer.setAttribute('role', 'presentation');
+		let imageButton = new Button(imageButtonContainer);
+		imageButton.title = this.insertImage;
+		imageButton.element.setAttribute('class', 'action-label codicon insert-image masked-icon');
 
-			this._register(DOM.addDisposableListener(linkButtonContainer, DOM.EventType.CLICK, async e => {
-				await this.onInsertButtonClick(e, MarkdownButtonType.LINK_PREVIEW);
-			}));
+		imageButton.style(buttonStyle);
 
-			imageButtonContainer = DOM.$('li.action-item');
-			imageButtonContainer.setAttribute('role', 'presentation');
-			let imageButton = new Button(imageButtonContainer);
-			imageButton.element.setAttribute('class', 'action-label codicon insert-image masked-icon');
+		this._register(DOM.addDisposableListener(imageButtonContainer, DOM.EventType.CLICK, async e => {
+			await this.onInsertButtonClick(e, MarkdownButtonType.IMAGE_PREVIEW);
+		}));
 
-			imageButton.style(buttonStyle);
-
-			this._register(DOM.addDisposableListener(imageButtonContainer, DOM.EventType.CLICK, async e => {
-				await this.onInsertButtonClick(e, MarkdownButtonType.IMAGE_PREVIEW);
-			}));
-		} else {
-			linkButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.linkText', '', 'insert-link masked-icon', this.buttonLink, this.cellModel, MarkdownButtonType.LINK);
-			imageButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.imageText', '', 'insert-image masked-icon', this.buttonImage, this.cellModel, MarkdownButtonType.IMAGE);
-		}
-
-		let boldButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.boldText', '', 'bold masked-icon', this.buttonBold, this.cellModel, MarkdownButtonType.BOLD);
-		let italicButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.italicText', '', 'italic masked-icon', this.buttonItalic, this.cellModel, MarkdownButtonType.ITALIC);
-		let underlineButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.underlineText', '', 'underline masked-icon', this.buttonUnderline, this.cellModel, MarkdownButtonType.UNDERLINE);
-		let highlightButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.highlightText', '', 'highlight masked-icon', this.buttonHighlight, this.cellModel, MarkdownButtonType.HIGHLIGHT);
-		let codeButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.codeText', '', 'code masked-icon', this.buttonCode, this.cellModel, MarkdownButtonType.CODE);
-		let listButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.listText', '', 'list masked-icon', this.buttonList, this.cellModel, MarkdownButtonType.UNORDERED_LIST);
-		let orderedListButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.orderedText', '', 'ordered-list masked-icon', this.buttonOrderedList, this.cellModel, MarkdownButtonType.ORDERED_LIST);
-		let headingDropdown = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.heading', '', 'heading', this.dropdownHeading, this.cellModel, null);
+		let boldButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.boldText', '', 'bold masked-icon', this.bold, this.cellModel, MarkdownButtonType.BOLD);
+		let italicButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.italicText', '', 'italic masked-icon', this.italic, this.cellModel, MarkdownButtonType.ITALIC);
+		let underlineButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.underlineText', '', 'underline masked-icon', this.underline, this.cellModel, MarkdownButtonType.UNDERLINE);
+		let highlightButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.highlightText', '', 'highlight masked-icon', this.highlight, this.cellModel, MarkdownButtonType.HIGHLIGHT);
+		let codeButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.codeText', '', 'code masked-icon', this.insertCode, this.cellModel, MarkdownButtonType.CODE);
+		let listButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.listText', '', 'list masked-icon', this.insertList, this.cellModel, MarkdownButtonType.UNORDERED_LIST);
+		let orderedListButton = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.orderedText', '', 'ordered-list masked-icon', this.insertOrderedList, this.cellModel, MarkdownButtonType.ORDERED_LIST);
+		let headingDropdown = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.heading', '', 'heading', this.headingDropdownLabel, this.cellModel, null);
 		let heading1 = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.heading1', this.optionHeading1, 'heading 1', this.optionHeading1, this.cellModel, MarkdownButtonType.HEADING1);
 		let heading2 = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.heading2', this.optionHeading2, 'heading 2', this.optionHeading2, this.cellModel, MarkdownButtonType.HEADING2);
 		let heading3 = this._instantiationService.createInstance(TransformMarkdownAction, 'notebook.heading3', this.optionHeading3, 'heading 3', this.optionHeading3, this.cellModel, MarkdownButtonType.HEADING3);
@@ -157,8 +171,8 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 			undefined,
 			this._actionBar.actionRunner,
 			undefined,
-			'masked-pseudo-after dropdown-arrow',
-			this.optionParagraph,
+			'masked-pseudo-after dropdown-arrow heading-dropdown',
+			this.headingDropdownLabel,
 			undefined
 		);
 		dropdownMenuActionViewItem.render(buttonDropdownContainer);
@@ -170,10 +184,10 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 			{ action: underlineButton },
 			{ action: highlightButton },
 			{ action: codeButton },
-			{ action: linkButton },
+			{ element: linkButtonContainer },
 			{ action: listButton },
 			{ action: orderedListButton },
-			{ action: imageButton },
+			{ element: imageButtonContainer },
 			{ element: buttonDropdownContainer },
 			{ action: this._toggleTextViewAction },
 			{ action: this._toggleSplitViewAction },
@@ -194,33 +208,14 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 			{ action: this._toggleMarkdownViewAction }
 		];
 
-		this._previewModeTaskbarContent = [
-			{ action: boldButton },
-			{ action: italicButton },
-			{ action: underlineButton },
-			{ action: highlightButton },
-			{ action: codeButton },
-			{ element: linkButtonContainer },
-			{ action: listButton },
-			{ action: orderedListButton },
-			{ element: imageButtonContainer },
-			{ element: buttonDropdownContainer },
-			{ action: this._toggleTextViewAction },
-			{ action: this._toggleSplitViewAction },
-			{ action: this._toggleMarkdownViewAction }
-		];
-
 		// Hide link and image buttons in WYSIWYG mode
 		if (this.cellModel.showPreview && !this.cellModel.showMarkdown) {
 			this._actionBar.setContent(this._wysiwygTaskbarContent);
 		} else {
-			if (this.previewFeaturesEnabled) {
-				this._actionBar.setContent(this._previewModeTaskbarContent);
-			} else {
-				this._actionBar.setContent(this._taskbarContent);
-			}
+			this._actionBar.setContent(this._taskbarContent);
 		}
 		this._notebookEditor = this._notebookService.findNotebookEditor(this.cellModel?.notebookModel?.notebookUri);
+		this.updateActiveViewAction();
 	}
 
 	public async onInsertButtonClick(event: MouseEvent, type: MarkdownButtonType): Promise<void> {
@@ -244,7 +239,9 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 				let linkUrl = notebookLink.getLinkUrl();
 				// Otherwise, re-focus on the output element, and insert the link directly.
 				this.output?.nativeElement?.focus();
-				document.execCommand('insertHTML', false, `<a href="${escape(linkUrl)}" is-absolute=${notebookLink.isAbsolutePath}>${escape(linkCalloutResult?.insertUnescapedLinkLabel)}</a>`);
+				// Need to encode URI here in order for user to click the proper encoded link in WYSIWYG
+				let encodedLinkURL = notebookLink.getEncodedLinkUrl();
+				document.execCommand('insertHTML', false, `<a href="${encodedLinkURL}" title="${linkUrl}" is-encoded="true" is-absolute=${notebookLink.isAbsolutePath}>${escape(linkCalloutResult?.insertUnescapedLinkLabel)}</a>`);
 				return;
 			}
 		} else if (type === MarkdownButtonType.IMAGE_PREVIEW) {
@@ -263,8 +260,12 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 				await insertFormattedMarkdown(linkCalloutResult?.insertEscapedMarkdown, this.getCellEditorControl());
 			} else if (type === MarkdownButtonType.IMAGE_PREVIEW) {
 				if (imageCalloutResult.embedImage) {
-					let base64String = await this.getFileContentBase64(URI.file(imageCalloutResult.imagePath));
-					let mimeType = await this.getFileMimeType(URI.file(imageCalloutResult.imagePath));
+					// VS Code blocks loading directly from the file protocol - we have to transform it to a vscode-file URI
+					// first. Currently we assume that the path here is always going to be a path since we don't support
+					// embedding images from web links.
+					const uri = FileAccess.asBrowserUri(URI.file(imageCalloutResult.imagePath));
+					let base64String = await this.getFileContentBase64(uri);
+					let mimeType = await this.getFileMimeType(uri);
 					const originalImageName: string = path.basename(imageCalloutResult.imagePath).replace(/\s/g, '');
 					let attachmentName = this.cellModel.addAttachment(mimeType, base64String, originalImageName);
 					if (originalImageName !== attachmentName) {
@@ -282,14 +283,10 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 	}
 
 	public showLinkAndImageButtons() {
-		if (this.previewFeaturesEnabled) {
-			this._actionBar.setContent(this._previewModeTaskbarContent);
-		} else {
-			this._actionBar.setContent(this._taskbarContent);
-		}
+		this._actionBar.setContent(this._taskbarContent);
 	}
 
-	public removeActiveClassFromModeActions() {
+	private removeActiveClassFromModeActions() {
 		const activeClass = ' active';
 		for (let action of [this._toggleTextViewAction, this._toggleSplitViewAction, this._toggleMarkdownViewAction]) {
 			if (action.class.includes(activeClass)) {
@@ -298,9 +295,18 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 		}
 	}
 
+	public updateActiveViewAction() {
+		this.removeActiveClassFromModeActions();
+		const activeClass = ' active';
+		switch (this.cellModel.currentMode) {
+			case CellEditModes.MARKDOWN: this._toggleMarkdownViewAction.class += activeClass; break;
+			case CellEditModes.SPLIT: this._toggleSplitViewAction.class += activeClass; break;
+			case CellEditModes.WYSIWYG: this._toggleTextViewAction.class += activeClass; break;
+		}
+	}
+
 	/**
 	 * Instantiate modal for use as callout when inserting Link or Image into markdown.
-	 * @param calloutStyle Style of callout passed in to determine which callout is rendered.
 	 * Returns markup created after user enters values and submits the callout.
 	 */
 	private async createCallout(type: MarkdownButtonType, triggerElement: HTMLElement): Promise<ILinkCalloutDialogOptions> {
@@ -315,11 +321,11 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 		if (type === MarkdownButtonType.LINK_PREVIEW) {
 			const defaultLabel = this.getCurrentLinkLabel();
 			const defaultLinkUrl = this.getCurrentLinkUrl();
-			this._linkCallout = this._instantiationService.createInstance(LinkCalloutDialog, this.insertLinkHeading, dialogPosition, dialogProperties, defaultLabel, defaultLinkUrl);
+			this._linkCallout = this._instantiationService.createInstance(LinkCalloutDialog, this.insertLink, dialogPosition, dialogProperties, defaultLabel, defaultLinkUrl);
 			this._linkCallout.render();
 			calloutOptions = await this._linkCallout.open();
 		} else if (type === MarkdownButtonType.IMAGE_PREVIEW) {
-			const imageCallout = this._instantiationService.createInstance(ImageCalloutDialog, this.insertImageHeading, dialogPosition, dialogProperties);
+			const imageCallout = this._instantiationService.createInstance(ImageCalloutDialog, this.insertImage, dialogPosition, dialogProperties);
 			imageCallout.render();
 			calloutOptions = await imageCallout.open();
 		}
@@ -369,10 +375,7 @@ export class MarkdownToolbarComponent extends AngularDisposable {
 		if (!this._cellEditor?.getEditor()?.getControl()) {
 			this._cellEditor = this._notebookEditor?.cellEditors?.find(e => e.cellGuid() === this.cellModel?.cellGuid);
 		}
-		if (this._cellEditor?.hasEditor) {
-			return this._cellEditor.getEditor()?.getControl();
-		}
-		return undefined;
+		return this._cellEditor.getEditor()?.getControl();
 	}
 
 	public async getFileContentBase64(fileUri: URI): Promise<string> {

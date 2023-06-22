@@ -6,7 +6,7 @@
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { IStringDictionary } from 'vs/base/common/collections';
 import { Event } from 'vs/base/common/event';
-import { IExtensionRecommendation } from 'vs/workbench/services/extensionManagement/common/extensionManagement';
+import { IExtensionRecommendation } from 'sql/workbench/services/extensionManagement/common/extensionManagement'; // {{SQL CARBON EDIT}} Custom extension recommendation
 
 export type DynamicRecommendation = 'dynamic';
 export type ConfigRecommendation = 'config';
@@ -41,18 +41,19 @@ export interface IExtensionRecommendationsService {
 	getImportantRecommendations(): Promise<string[]>;
 	getOtherRecommendations(): Promise<string[]>;
 	getFileBasedRecommendations(): string[];
-	getExeBasedRecommendations(exe?: string): Promise<{ important: string[], others: string[] }>;
-	getConfigBasedRecommendations(): Promise<{ important: string[], others: string[] }>;
+	getExeBasedRecommendations(exe?: string): Promise<{ important: string[]; others: string[] }>;
+	getConfigBasedRecommendations(): Promise<{ important: string[]; others: string[] }>;
 	getWorkspaceRecommendations(): Promise<string[]>;
 	getKeymapRecommendations(): string[];
 
 	getRecommendedExtensionsByScenario(scenarioType: string): Promise<IExtensionRecommendation[]>; // {{SQL CARBON EDIT}}
 	promptRecommendedExtensionsByScenario(scenarioType: string): void; // {{SQL CARBON EDIT}}
+	getLanguageRecommendations(): string[];
 }
 
 export type IgnoredRecommendationChangeNotification = {
-	extensionId: string,
-	isRecommended: boolean
+	extensionId: string;
+	isRecommended: boolean;
 };
 
 export const IExtensionIgnoredRecommendationsService = createDecorator<IExtensionIgnoredRecommendationsService>('IExtensionIgnoredRecommendationsService');

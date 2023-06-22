@@ -63,7 +63,6 @@ export interface IJupyterServerInstallation {
 	getInstalledCondaPackages(): Promise<PythonPkgDetails[]>;
 	uninstallCondaPackages(packages: PythonPkgDetails[]): Promise<void>;
 	usingConda: boolean;
-	getCondaExePath(): string;
 	executeBufferedCommand(command: string): Promise<string>;
 	executeStreamedCommand(command: string): Promise<void>;
 	/**
@@ -74,6 +73,7 @@ export interface IJupyterServerInstallation {
 	installPipPackages(packages: PythonPkgDetails[], useMinVersionDefault: boolean): Promise<void>;
 	uninstallPipPackages(packages: PythonPkgDetails[]): Promise<void>;
 	pythonExecutable: string;
+	condaExecutable: string | undefined;
 	pythonInstallationPath: string;
 	installedPythonVersion: string;
 }
@@ -88,22 +88,6 @@ export const requiredPowershellPkg: PythonPkgDetails = {
 	version: '0.1.4'
 };
 
-export const requiredSparkPackages: PythonPkgDetails[] = [
-	requiredJupyterPkg,
-	{
-		name: 'cryptography',
-		version: '3.2.1',
-		installExactVersion: true
-	},
-	{
-		name: 'sparkmagic',
-		version: '0.12.9'
-	}, {
-		name: 'pandas',
-		version: '0.24.2'
-	}
-];
-
 export class JupyterServerInstallation implements IJupyterServerInstallation {
 	public extensionPath: string;
 	public pythonBinPath: string;
@@ -113,8 +97,8 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 
 	private _pythonInstallationPath: string;
 	private _pythonExecutable: string;
+	private _condaExecutable: string | undefined;
 	private _usingExistingPython: boolean;
-	private _usingConda: boolean;
 	private _installedPythonVersion: string;
 
 	private _upgradeInProcess: boolean = false;
@@ -133,34 +117,37 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 	private readonly _requiredPackagesSet: Set<string>;
 
 	private readonly _runningOnSAW: boolean;
+	private readonly _tsgopsweb: boolean;
 
 	constructor(extensionPath: string, outputChannel: vscode.OutputChannel) {
 		this.extensionPath = extensionPath;
 		this.outputChannel = outputChannel;
 
 		this._runningOnSAW = vscode.env.appName.toLowerCase().indexOf('saw') > 0;
-		vscode.commands.executeCommand(constants.BuiltInCommands.SetContext, 'notebook:runningOnSAW', this._runningOnSAW);
+		this._tsgopsweb = vscode.env.appName.toLowerCase().indexOf('tsgops') > 0;
+		void vscode.commands.executeCommand(constants.BuiltInCommands.SetContext, 'notebook:runningOnSAW', this._runningOnSAW);
 
 		if (this._runningOnSAW) {
 			this._pythonInstallationPath = `${vscode.env.appRoot}\\ads-python`;
 			this._usingExistingPython = true;
-		} else {
+		} else if (this._tsgopsweb) {
+			this._pythonInstallationPath = `/usr`;
+			this._usingExistingPython = true;
+		}
+		else {
 			this._pythonInstallationPath = JupyterServerInstallation.getPythonInstallPath();
 			this._usingExistingPython = JupyterServerInstallation.getExistingPythonSetting();
 		}
-		this._usingConda = false;
 		this._installInProgress = false;
 
 		this._kernelSetupCache = new Map<string, boolean>();
 		this._requiredKernelPackages = new Map<string, PythonPkgDetails[]>();
 
+		this._requiredKernelPackages.set(constants.ipykernelDisplayName, [requiredJupyterPkg]);
 		this._requiredKernelPackages.set(constants.python3DisplayName, [requiredJupyterPkg]);
 		this._requiredKernelPackages.set(constants.powershellDisplayName, [requiredJupyterPkg, requiredPowershellPkg]);
-		this._requiredKernelPackages.set(constants.pysparkDisplayName, requiredSparkPackages);
-		this._requiredKernelPackages.set(constants.sparkScalaDisplayName, requiredSparkPackages);
-		this._requiredKernelPackages.set(constants.sparkRDisplayName, requiredSparkPackages);
 
-		let allPackages = requiredSparkPackages.concat(requiredPowershellPkg);
+		let allPackages = [requiredJupyterPkg, requiredPowershellPkg];
 		this._requiredKernelPackages.set(constants.allKernelsName, allPackages);
 
 		this._requiredPackagesSet = new Set<string>();
@@ -170,7 +157,7 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 	}
 
 	private async installDependencies(backgroundOperation: azdata.BackgroundOperation, forceInstall: boolean, packages: PythonPkgDetails[]): Promise<void> {
-		vscode.window.showInformationMessage(msgInstallPkgStart);
+		void vscode.window.showInformationMessage(msgInstallPkgStart);
 
 		this.outputChannel.show(true);
 		this.outputChannel.appendLine(msgInstallPkgProgress);
@@ -224,7 +211,7 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 
 		this.outputChannel.appendLine(msgInstallPkgFinish);
 		backgroundOperation.updateStatus(azdata.TaskStatus.Succeeded, msgInstallPkgFinish);
-		vscode.window.showInformationMessage(msgInstallPkgFinish);
+		void vscode.window.showInformationMessage(msgInstallPkgFinish);
 	}
 
 	private installPythonPackage(backgroundOperation: azdata.BackgroundOperation, usingExistingPython: boolean, pythonInstallationPath: string, outputChannel: vscode.OutputChannel): Promise<void> {
@@ -353,9 +340,8 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 		let pythonBinPathSuffix = process.platform === constants.winPlatform ? '' : 'bin';
 
 		this._pythonExecutable = JupyterServerInstallation.getPythonExePath(this._pythonInstallationPath);
+		this._condaExecutable = await JupyterServerInstallation.getCondaExePath(this._pythonInstallationPath);
 		this.pythonBinPath = path.join(this._pythonInstallationPath, pythonBinPathSuffix);
-
-		this._usingConda = this.isCondaInstalled();
 
 		// Store paths to python libraries required to run jupyter.
 		this.pythonEnvVarPath = process.env['PATH'];
@@ -366,7 +352,7 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 			let pythonScriptsPath = path.join(this._pythonInstallationPath, 'Scripts');
 			this.pythonEnvVarPath = pythonScriptsPath + delimiter + this.pythonEnvVarPath;
 
-			if (this._usingConda) {
+			if (this.usingConda) {
 				this.pythonEnvVarPath = [
 					path.join(this._pythonInstallationPath, 'Library', 'mingw-w64', 'bin'),
 					path.join(this._pythonInstallationPath, 'Library', 'usr', 'bin'),
@@ -438,57 +424,62 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 		}
 
 		if (this._installInProgress) {
-			vscode.window.showInformationMessage(msgWaitingForInstall);
+			void vscode.window.showInformationMessage(msgWaitingForInstall);
 			return this._installCompletion.promise;
 		}
 
 		this._installInProgress = true;
 		this._installCompletion = new Deferred<void>();
+		try {
+			this._pythonInstallationPath = installSettings.installPath;
+			this._usingExistingPython = installSettings.existingPython;
+			await this.configurePackagePaths();
 
-		this._pythonInstallationPath = installSettings.installPath;
-		this._usingExistingPython = installSettings.existingPython;
-		await this.configurePackagePaths();
+			azdata.tasks.startBackgroundOperation({
+				displayName: msgTaskName,
+				description: msgTaskName,
+				isCancelable: false,
+				operation: op => {
+					this.installDependencies(op, forceInstall, installSettings.packages)
+						.then(async () => {
+							let notebookConfig = vscode.workspace.getConfiguration(constants.notebookConfigKey);
+							await notebookConfig.update(constants.pythonPathConfigKey, this._pythonInstallationPath, vscode.ConfigurationTarget.Global);
+							await notebookConfig.update(constants.existingPythonConfigKey, this._usingExistingPython, vscode.ConfigurationTarget.Global);
+							await this.configurePackagePaths();
 
-		azdata.tasks.startBackgroundOperation({
-			displayName: msgTaskName,
-			description: msgTaskName,
-			isCancelable: false,
-			operation: op => {
-				this.installDependencies(op, forceInstall, installSettings.packages)
-					.then(async () => {
-						let notebookConfig = vscode.workspace.getConfiguration(constants.notebookConfigKey);
-						await notebookConfig.update(constants.pythonPathConfigKey, this._pythonInstallationPath, vscode.ConfigurationTarget.Global);
-						await notebookConfig.update(constants.existingPythonConfigKey, this._usingExistingPython, vscode.ConfigurationTarget.Global);
-						await this.configurePackagePaths();
+							this._installCompletion.resolve();
+							this._installInProgress = false;
+							if (this._upgradeInProcess) {
+								// Pass in false for restartJupyterServer parameter since the jupyter server has already been shutdown
+								// when removing the old Python version on Windows.
+								if (process.platform === constants.winPlatform) {
+									await vscode.commands.executeCommand('notebook.action.restartJupyterNotebookSessions', false);
+								} else {
+									await vscode.commands.executeCommand('notebook.action.restartJupyterNotebookSessions');
+								}
+								if (this._oldUserInstalledPipPackages.length !== 0) {
+									await this.createInstallPipPackagesHelpNotebook(this._oldUserInstalledPipPackages);
+								}
 
-						this._installCompletion.resolve();
-						this._installInProgress = false;
-						if (this._upgradeInProcess) {
-							// Pass in false for restartJupyterServer parameter since the jupyter server has already been shutdown
-							// when removing the old Python version on Windows.
-							if (process.platform === constants.winPlatform) {
-								await vscode.commands.executeCommand('notebook.action.restartJupyterNotebookSessions', false);
-							} else {
+								await fs.remove(this._oldPythonInstallationPath);
+								this._upgradeInProcess = false;
+							} else if (!installSettings.packageUpgradeOnly) {
 								await vscode.commands.executeCommand('notebook.action.restartJupyterNotebookSessions');
 							}
-							if (this._oldUserInstalledPipPackages.length !== 0) {
-								await this.createInstallPipPackagesHelpNotebook(this._oldUserInstalledPipPackages);
-							}
-
-							await fs.remove(this._oldPythonInstallationPath);
-							this._upgradeInProcess = false;
-						} else if (!installSettings.packageUpgradeOnly) {
-							await vscode.commands.executeCommand('notebook.action.restartJupyterNotebookSessions');
-						}
-					})
-					.catch(err => {
-						let errorMsg = msgDependenciesInstallationFailed(utils.getErrorMessage(err));
-						op.updateStatus(azdata.TaskStatus.Failed, errorMsg);
-						this._installCompletion.reject(errorMsg);
-						this._installInProgress = false;
-					});
-			}
-		});
+						})
+						.catch(err => {
+							let errorMsg = msgDependenciesInstallationFailed(utils.getErrorMessage(err));
+							op.updateStatus(azdata.TaskStatus.Failed, errorMsg);
+							this._installCompletion.reject(new Error(errorMsg));
+							this._installInProgress = false;
+						});
+				}
+			});
+		} catch (err) {
+			let errorMsg = msgDependenciesInstallationFailed(utils.getErrorMessage(err));
+			this._installCompletion.reject(new Error(errorMsg));
+			this._installInProgress = false;
+		}
 		return this._installCompletion.promise;
 	}
 
@@ -496,11 +487,11 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 	 * Opens a dialog for configuring the installation path for the Notebook Python dependencies.
 	 */
 	public async promptForPythonInstall(kernelDisplayName: string): Promise<void> {
-		if (this._runningOnSAW) {
+		if (this._runningOnSAW || this._tsgopsweb) {
 			return Promise.resolve();
 		}
 		if (this._installInProgress) {
-			vscode.window.showInformationMessage(msgWaitingForInstall);
+			void vscode.window.showInformationMessage(msgWaitingForInstall);
 			return this._installCompletion.promise;
 		}
 
@@ -509,7 +500,7 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 		// If the latest version of ADS-Python is not installed, then prompt the user to upgrade
 		if (!this._upgradePrompted && isPythonInstalled && !this._usingExistingPython && utils.compareVersions(await this.getInstalledPythonVersion(this._pythonExecutable), constants.pythonVersion) < 0) {
 			this._upgradePrompted = true;
-			this.promptUserForPythonUpgrade();
+			await this.promptUserForPythonUpgrade();
 		}
 
 		let areRequiredPackagesInstalled = await this.areRequiredPackagesInstalled(kernelDisplayName);
@@ -532,7 +523,7 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 		if (response === yes) {
 			this._oldPythonInstallationPath = path.join(this._pythonInstallationPath, '0.0.1');
 			this._oldPythonExecutable = this._pythonExecutable;
-			vscode.commands.executeCommand(constants.jupyterConfigurePython);
+			void vscode.commands.executeCommand(constants.jupyterConfigurePython);
 		} else if (response === dontAskAgain) {
 			await notebookConfig.update(constants.dontPromptPythonUpdate, true, vscode.ConfigurationTarget.Global);
 		}
@@ -643,12 +634,10 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 
 	public async getInstalledCondaPackages(): Promise<PythonPkgDetails[]> {
 		try {
-			if (!this.isCondaInstalled()) {
+			if (!this.condaExecutable) {
 				return [];
 			}
-
-			let condaExe = this.getCondaExePath();
-			let cmd = `"${condaExe}" list --json`;
+			let cmd = `"${this.condaExecutable}" list --json`;
 			let packagesInfo = await this.executeBufferedCommand(cmd);
 
 			let packages: PythonPkgDetails[] = [];
@@ -666,8 +655,8 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 		}
 	}
 
-	public installCondaPackages(packages: PythonPkgDetails[], useMinVersionDefault: boolean): Promise<void> {
-		if (!packages || packages.length === 0) {
+	public async installCondaPackages(packages: PythonPkgDetails[], useMinVersionDefault: boolean): Promise<void> {
+		if (!this.condaExecutable || !packages || packages.length === 0) {
 			return Promise.resolve();
 		}
 
@@ -676,23 +665,24 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 			const pkgVersionSpecifier = pkg.installExactVersion ? '==' : versionSpecifierDefault;
 			return `"${pkg.name}${pkgVersionSpecifier}${pkg.version}"`;
 		}).join(' ');
-		let condaExe = this.getCondaExePath();
-		let cmd = `"${condaExe}" install -c conda-forge -y ${packagesStr}`;
-		return this.executeStreamedCommand(cmd);
+
+		let cmd = `"${this.condaExecutable}" install -c conda-forge -y ${packagesStr}`;
+		await this.executeStreamedCommand(cmd);
 	}
 
-	public uninstallCondaPackages(packages: PythonPkgDetails[]): Promise<void> {
-		for (let pkg of packages) {
-			if (this._requiredPackagesSet.has(pkg.name)) {
-				this._kernelSetupCache.clear();
-				break;
+	public async uninstallCondaPackages(packages: PythonPkgDetails[]): Promise<void> {
+		if (this.condaExecutable) {
+			for (let pkg of packages) {
+				if (this._requiredPackagesSet.has(pkg.name)) {
+					this._kernelSetupCache.clear();
+					break;
+				}
 			}
-		}
 
-		let condaExe = this.getCondaExePath();
-		let packagesStr = packages.map(pkg => `"${pkg.name}==${pkg.version}"`).join(' ');
-		let cmd = `"${condaExe}" uninstall -y ${packagesStr}`;
-		return this.executeStreamedCommand(cmd);
+			let packagesStr = packages.map(pkg => `"${pkg.name}==${pkg.version}"`).join(' ');
+			let cmd = `"${this.condaExecutable}" uninstall -y ${packagesStr}`;
+			await this.executeStreamedCommand(cmd);
+		}
 	}
 
 	public async executeStreamedCommand(command: string): Promise<void> {
@@ -707,9 +697,29 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 		return this._pythonExecutable;
 	}
 
-	public getCondaExePath(): string {
-		return path.join(this._pythonInstallationPath,
-			process.platform === constants.winPlatform ? 'Scripts\\conda.exe' : 'bin/conda');
+	public get condaExecutable(): string | undefined {
+		return this._condaExecutable;
+	}
+
+	public static async getCondaExePath(pythonInstallationPath: string): Promise<string> {
+		let exeName = process.platform === constants.winPlatform ? 'Scripts\\conda.exe' : 'bin/conda';
+		let condaPath = path.join(pythonInstallationPath, exeName);
+		let condaExists = await fs.pathExists(condaPath);
+		// If conda was not found, then check if we're using a virtual environment
+		if (!condaExists) {
+			let pathParts = pythonInstallationPath.split(path.sep);
+			if (pathParts.length > 1 && pathParts[pathParts.length - 2] === 'envs') {
+				// The root Anaconda folder is 2 folders above the virtual environment's folder
+				// Example: Anaconda3\envs\myEnv\python.exe -> Anaconda3\conda.exe
+				// Docs: https://conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-with-commands
+				condaPath = path.join(pythonInstallationPath, '..', '..', exeName);
+				condaExists = await fs.pathExists(condaPath);
+			}
+			if (!condaExists) {
+				condaPath = undefined;
+			}
+		}
+		return condaPath;
 	}
 
 	/**
@@ -720,17 +730,11 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 	}
 
 	public get usingConda(): boolean {
-		return this._usingConda;
+		return !!this._condaExecutable;
 	}
 
 	public get installedPythonVersion(): string {
 		return this._installedPythonVersion;
-	}
-
-	private isCondaInstalled(): boolean {
-		let condaExePath = this.getCondaExePath();
-		// eslint-disable-next-line no-sync
-		return fs.existsSync(condaExePath);
 	}
 
 	/**
@@ -884,11 +888,11 @@ export class JupyterServerInstallation implements IJupyterServerInstallation {
 					name: 'python3'
 				}
 			},
-			nbformat: 4,
-			nbformat_minor: 5
+			nbformat: constants.NBFORMAT,
+			nbformat_minor: constants.NBFORMAT_MINOR
 		};
 
-		await vscode.commands.executeCommand('_notebook.command.new', {
+		await vscode.commands.executeCommand('notebook.command.new', {
 			initialContent: JSON.stringify(initialContent),
 			defaultKernel: 'Python 3'
 		});

@@ -12,8 +12,6 @@ export const msgNo = localize('msgNo', "No");
 
 // Jupyter Constants ///////////////////////////////////////////////////////
 export const msgSampleCodeDataFrame = localize('msgSampleCodeDataFrame', "This sample code loads the file into a data frame and shows the first 10 results.");
-export const noBDCConnectionError = localize('noBDCConnectionError', "Spark kernels require a connection to a SQL Server Big Data Cluster master instance.");
-export const providerNotValidError = localize('providerNotValidError', "Non-MSSQL providers are not supported for spark kernels.");
 
 //  Book view-let constants
 export const allFiles = localize('allFiles', "All Files");
@@ -97,15 +95,13 @@ export const msgContentFolderError = localize('msgContentFolderError', "Content 
 export const msgSaveFolderError = localize('msgSaveFolderError', "Save location path does not exist.");
 export function msgCreateBookWarningMsg(file: string): string { return localize('msgCreateBookWarningMsg', "Error while trying to access: {0}", file); }
 
-// Add a notebook dialog constants
+// Add a new entry in toc dialog constants
 export const newNotebook = localize('newNotebook', "New Notebook (Preview)");
 export const newMarkdown = localize('newMarkdown', "New Markdown (Preview)");
+export const newSection = localize('newSection', "New Section (Preview)");
 export const fileExtension = localize('fileExtension', "File Extension");
 export const confirmOverwrite = localize('confirmOverwrite', "File already exists. Are you sure you want to overwrite this file?");
 export const title = localize('title', "Title");
 export const fileName = localize('fileName', "File Name");
 export const msgInvalidSaveFolder = localize('msgInvalidSaveFolder', "Save location path is not valid.");
-export function msgDuplicadFileName(file: string): string { return localize('msgDuplicadFileName', "File {0} already exists in the destination folder", file); }
-
-
-
+export function msgDuplicateFileName(file: string): string { return localize('msgDuplicateFileName', "File {0} already exists in the destination folder", file); }

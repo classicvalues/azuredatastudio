@@ -3,19 +3,21 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./paneview';
-import { IDisposable, Disposable, DisposableStore } from 'vs/base/common/lifecycle';
-import { Event, Emitter } from 'vs/base/common/event';
-import { domEvent } from 'vs/base/browser/event';
-import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
-import { KeyCode } from 'vs/base/common/keyCodes';
-import { $, append, trackFocus, EventHelper, clearNode } from 'vs/base/browser/dom';
-import { Color, RGBA } from 'vs/base/common/color';
-import { SplitView, IView } from './splitview';
 import { isFirefox } from 'vs/base/browser/browser';
 import { DataTransfers } from 'vs/base/browser/dnd';
+import { $, addDisposableListener, append, clearNode, EventHelper, EventType, trackFocus } from 'vs/base/browser/dom';
+import { DomEmitter } from 'vs/base/browser/event';
+import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
+import { Gesture, EventType as TouchEventType } from 'vs/base/browser/touch';
 import { Orientation } from 'vs/base/browser/ui/sash/sash';
+import { Color, RGBA } from 'vs/base/common/color';
+import { Emitter, Event } from 'vs/base/common/event';
+import { KeyCode } from 'vs/base/common/keyCodes';
+import { Disposable, DisposableStore, IDisposable } from 'vs/base/common/lifecycle';
+import { ScrollEvent } from 'vs/base/common/scrollable';
+import 'vs/css!./paneview';
 import { localize } from 'vs/nls';
+import { IView, Sizing, SplitView } from './splitview';
 
 export interface IPaneOptions {
 	minimumBodySize?: number;
@@ -37,11 +39,11 @@ export interface IPaneStyles {
 /**
  * A Pane is a structured SplitView view.
  *
- * WARNING: You must call `render()` after you contruct it.
+ * WARNING: You must call `render()` after you construct it.
  * It can't be done automatically at the end of the ctor
  * because of the order of property initialization in TypeScript.
  * Subclasses wouldn't be able to set own properties
- * before the `render()` call, thus forbiding their use.
+ * before the `render()` call, thus forbidding their use.
  */
 export abstract class Pane extends Disposable implements IView {
 
@@ -141,9 +143,7 @@ export abstract class Pane extends Disposable implements IView {
 			return false;
 		}
 
-		if (this.element) {
-			this.element.classList.toggle('expanded', expanded);
-		}
+		this.element?.classList.toggle('expanded', expanded);
 
 		this._expanded = !!expanded;
 		this.updateHeader();
@@ -219,25 +219,25 @@ export abstract class Pane extends Disposable implements IView {
 
 		this.updateHeader();
 
+		const eventDisposables = this._register(new DisposableStore());
+		const onKeyDown = this._register(new DomEmitter(this.header, 'keydown'));
+		const onHeaderKeyDown = Event.map(onKeyDown.event, e => new StandardKeyboardEvent(e), eventDisposables);
 
-		const onHeaderKeyDown = Event.chain(domEvent(this.header, 'keydown'))
-			.map(e => new StandardKeyboardEvent(e));
+		this._register(Event.filter(onHeaderKeyDown, e => e.keyCode === KeyCode.Enter || e.keyCode === KeyCode.Space, eventDisposables)(() => this.setExpanded(!this.isExpanded()), null));
 
-		this._register(onHeaderKeyDown.filter(e => e.keyCode === KeyCode.Enter || e.keyCode === KeyCode.Space)
-			.event(() => this.setExpanded(!this.isExpanded()), null));
+		this._register(Event.filter(onHeaderKeyDown, e => e.keyCode === KeyCode.LeftArrow, eventDisposables)(() => this.setExpanded(false), null));
 
-		this._register(onHeaderKeyDown.filter(e => e.keyCode === KeyCode.LeftArrow)
-			.event(() => this.setExpanded(false), null));
+		this._register(Event.filter(onHeaderKeyDown, e => e.keyCode === KeyCode.RightArrow, eventDisposables)(() => this.setExpanded(true), null));
 
-		this._register(onHeaderKeyDown.filter(e => e.keyCode === KeyCode.RightArrow)
-			.event(() => this.setExpanded(true), null));
+		this._register(Gesture.addTarget(this.header));
 
-		this._register(domEvent(this.header, 'click')
-			(e => {
+		[EventType.CLICK, TouchEventType.Tap].forEach(eventType => {
+			this._register(addDisposableListener(this.header, eventType, e => {
 				if (!e.defaultPrevented) {
 					this.setExpanded(!this.isExpanded());
 				}
-			}, null));
+			}));
+		});
 
 		this.body = append(this.element, $('.pane-body'));
 		this.renderBody(this.body);
@@ -300,18 +300,18 @@ class PaneDraggable extends Disposable {
 
 	private dragOverCounter = 0; // see https://github.com/microsoft/vscode/issues/14470
 
-	private _onDidDrop = this._register(new Emitter<{ from: Pane, to: Pane }>());
+	private _onDidDrop = this._register(new Emitter<{ from: Pane; to: Pane }>());
 	readonly onDidDrop = this._onDidDrop.event;
 
 	constructor(private pane: Pane, private dnd: IPaneDndController, private context: IDndContext) {
 		super();
 
 		pane.draggableElement.draggable = true;
-		this._register(domEvent(pane.draggableElement, 'dragstart')(this.onDragStart, this));
-		this._register(domEvent(pane.dropTargetElement, 'dragenter')(this.onDragEnter, this));
-		this._register(domEvent(pane.dropTargetElement, 'dragleave')(this.onDragLeave, this));
-		this._register(domEvent(pane.dropTargetElement, 'dragend')(this.onDragEnd, this));
-		this._register(domEvent(pane.dropTargetElement, 'drop')(this.onDrop, this));
+		this._register(addDisposableListener(pane.draggableElement, 'dragstart', e => this.onDragStart(e)));
+		this._register(addDisposableListener(pane.dropTargetElement, 'dragenter', e => this.onDragEnter(e)));
+		this._register(addDisposableListener(pane.dropTargetElement, 'dragleave', e => this.onDragLeave(e)));
+		this._register(addDisposableListener(pane.dropTargetElement, 'dragend', e => this.onDragEnd(e)));
+		this._register(addDisposableListener(pane.dropTargetElement, 'drop', e => this.onDrop(e)));
 	}
 
 	private onDragStart(e: DragEvent): void {
@@ -439,11 +439,13 @@ export class PaneView extends Disposable {
 	private splitview: SplitView;
 	private animationTimer: number | undefined = undefined;
 
-	private _onDidDrop = this._register(new Emitter<{ from: Pane, to: Pane }>());
-	readonly onDidDrop: Event<{ from: Pane, to: Pane }> = this._onDidDrop.event;
+	private _onDidDrop = this._register(new Emitter<{ from: Pane; to: Pane }>());
+	readonly onDidDrop: Event<{ from: Pane; to: Pane }> = this._onDidDrop.event;
 
 	orientation: Orientation;
 	readonly onDidSashChange: Event<number>;
+	readonly onDidSashReset: Event<number>;
+	readonly onDidScroll: Event<ScrollEvent>;
 
 	constructor(container: HTMLElement, options: IPaneViewOptions = {}) {
 		super();
@@ -452,7 +454,16 @@ export class PaneView extends Disposable {
 		this.orientation = options.orientation ?? Orientation.VERTICAL;
 		this.element = append(container, $('.monaco-pane-view'));
 		this.splitview = this._register(new SplitView(this.element, { orientation: this.orientation }));
+		this.onDidSashReset = this.splitview.onDidSashReset;
 		this.onDidSashChange = this.splitview.onDidSashChange;
+		this.onDidScroll = this.splitview.onDidScroll;
+
+		const eventDisposables = this._register(new DisposableStore());
+		const onKeyDown = this._register(new DomEmitter(this.element, 'keydown'));
+		const onHeaderKeyDown = Event.map(Event.filter(onKeyDown.event, e => e.target instanceof HTMLElement && e.target.classList.contains('pane-header'), eventDisposables), e => new StandardKeyboardEvent(e), eventDisposables);
+
+		this._register(Event.filter(onHeaderKeyDown, e => e.keyCode === KeyCode.UpArrow, eventDisposables)(() => this.focusPrevious()));
+		this._register(Event.filter(onHeaderKeyDown, e => e.keyCode === KeyCode.DownArrow, eventDisposables)(() => this.focusNext()));
 	}
 
 	addPane(pane: Pane, size: number, index = this.splitview.length): void {
@@ -479,7 +490,7 @@ export class PaneView extends Disposable {
 			return;
 		}
 
-		this.splitview.removeView(index);
+		this.splitview.removeView(index, pane.isExpanded() ? Sizing.Distribute : undefined);
 		const paneItem = this.paneItems.splice(index, 1)[0];
 		paneItem.disposable.dispose();
 	}
@@ -566,6 +577,32 @@ export class PaneView extends Disposable {
 			this.animationTimer = undefined;
 			this.element.classList.remove('animated');
 		}, 200);
+	}
+
+	private getPaneHeaderElements(): HTMLElement[] {
+		return [...this.element.querySelectorAll('.pane-header')] as HTMLElement[];
+	}
+
+	private focusPrevious(): void {
+		const headers = this.getPaneHeaderElements();
+		const index = headers.indexOf(document.activeElement as HTMLElement);
+
+		if (index === -1) {
+			return;
+		}
+
+		headers[Math.max(index - 1, 0)].focus();
+	}
+
+	private focusNext(): void {
+		const headers = this.getPaneHeaderElements();
+		const index = headers.indexOf(document.activeElement as HTMLElement);
+
+		if (index === -1) {
+			return;
+		}
+
+		headers[Math.min(index + 1, headers.length - 1)].focus();
 	}
 
 	override dispose(): void {

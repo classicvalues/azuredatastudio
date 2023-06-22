@@ -3,11 +3,12 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ExtHostConnectionManagementShape, SqlMainContext, MainThreadConnectionManagementShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
+import { ExtHostConnectionManagementShape, MainThreadConnectionManagementShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
 import { IMainContext } from 'vs/workbench/api/common/extHost.protocol';
 import * as azdata from 'azdata';
 import { IDisposable } from 'vs/base/common/lifecycle';
 import { Disposable } from 'vs/workbench/api/common/extHostTypes';
+import { SqlMainContext } from 'vs/workbench/api/common/extHost.protocol';
 
 export class ExtHostConnectionManagement extends ExtHostConnectionManagementShape {
 
@@ -71,6 +72,14 @@ export class ExtHostConnectionManagement extends ExtHostConnectionManagementShap
 
 	public $openConnectionDialog(providers?: string[], initialConnectionProfile?: azdata.IConnectionProfile, connectionCompletionOptions?: azdata.IConnectionCompletionOptions): Thenable<azdata.connection.Connection> {
 		return this._proxy.$openConnectionDialog(providers, initialConnectionProfile, connectionCompletionOptions);
+	}
+
+	public $openChangePasswordDialog(profile: azdata.IConnectionProfile): Thenable<string | undefined> {
+		return this._proxy.$openChangePasswordDialog(profile);
+	}
+
+	public $getEditorConnectionProfileTitle(profile: azdata.IConnectionProfile, getOptionsOnly?: boolean, includeGroupName?: boolean): Thenable<string> {
+		return this._proxy.$getEditorConnectionProfileTitle(profile, getOptionsOnly, includeGroupName);
 	}
 
 	public $listDatabases(connectionId: string): Thenable<string[]> {

@@ -6,21 +6,24 @@
 import { IEditorOptions } from 'vs/editor/common/config/editorOptions';
 import * as nls from 'vs/nls';
 import * as DOM from 'vs/base/browser/dom';
-import { ResourceEditorModel } from 'vs/workbench/common/editor/resourceEditorModel';
+import { TextResourceEditorModel } from 'vs/workbench/common/editor/textResourceEditorModel';
 import * as editorCommon from 'vs/editor/common/editorCommon';
 
-import { BaseTextEditor } from 'vs/workbench/browser/parts/editor/textEditor';
+import { AbstractTextCodeEditor } from 'vs/workbench/browser/parts/editor/textCodeEditor';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { IStorageService } from 'vs/platform/storage/common/storage';
-import { ITextResourceConfigurationService } from 'vs/editor/common/services/textResourceConfigurationService';
-import { EditorOptions, IEditorOpenContext } from 'vs/workbench/common/editor';
+import { IEditorOpenContext } from 'vs/workbench/common/editor';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { UntitledTextEditorInput } from 'vs/workbench/services/untitled/common/untitledTextEditorInput';
 import { CodeEditorWidget } from 'vs/editor/browser/widget/codeEditorWidget';
+import { ITextEditorOptions } from 'vs/platform/editor/common/editor';
+import { EditorInput } from 'vs/workbench/common/editor/editorInput';
+import { ITextResourceConfigurationService } from 'vs/editor/common/services/textResourceConfiguration';
+import { IFileService } from 'vs/platform/files/common/files';
 
 class ProfilerResourceCodeEditor extends CodeEditorWidget {
 
@@ -36,7 +39,7 @@ class ProfilerResourceCodeEditor extends CodeEditorWidget {
 /**
  * Extension of TextResourceEditor that is always readonly rather than only with non UntitledInputs
  */
-export class ProfilerResourceEditor extends BaseTextEditor {
+export class ProfilerResourceEditor extends AbstractTextCodeEditor<editorCommon.ICodeEditorViewState> {
 
 	public static ID = 'profiler.editors.textEditor';
 	constructor(
@@ -46,14 +49,16 @@ export class ProfilerResourceEditor extends BaseTextEditor {
 		@ITextResourceConfigurationService configurationService: ITextResourceConfigurationService,
 		@IThemeService themeService: IThemeService,
 		@IEditorService editorService: IEditorService,
-		@IEditorGroupsService editorGroupService: IEditorGroupsService
-
+		@IEditorGroupsService editorGroupService: IEditorGroupsService,
+		@IFileService fileService: IFileService
 	) {
-		super(ProfilerResourceEditor.ID, telemetryService, instantiationService, storageService, configurationService, themeService, editorService, editorGroupService);
+		super(ProfilerResourceEditor.ID, telemetryService, instantiationService, storageService, configurationService, themeService, editorService, editorGroupService, fileService);
 	}
 
 	public override createEditorControl(parent: HTMLElement, configuration: IEditorOptions): editorCommon.IEditor {
-		return this.instantiationService.createInstance(ProfilerResourceCodeEditor, parent, configuration, {});
+		this.editorControl = this.instantiationService.createInstance(ProfilerResourceCodeEditor, parent, configuration, {});
+
+		return this.editorControl;
 	}
 
 	protected override getConfigurationOverrides(): IEditorOptions {
@@ -65,7 +70,9 @@ export class ProfilerResourceEditor extends BaseTextEditor {
 			options.folding = false;
 			options.renderWhitespace = 'none';
 			options.wordWrap = 'on';
-			options.renderIndentGuides = false;
+			options.guides = {
+				indentation: false
+			};
 			options.rulers = [];
 			options.glyphMargin = true;
 			options.minimap = {
@@ -75,9 +82,9 @@ export class ProfilerResourceEditor extends BaseTextEditor {
 		return options;
 	}
 
-	override async setInput(input: UntitledTextEditorInput, options: EditorOptions, context: IEditorOpenContext): Promise<void> {
+	override async setInput(input: UntitledTextEditorInput, options: ITextEditorOptions, context: IEditorOpenContext): Promise<void> {
 		await super.setInput(input, options, context, CancellationToken.None);
-		const editorModel = await this.input.resolve() as ResourceEditorModel;
+		const editorModel = await this.input.resolve() as TextResourceEditorModel;
 		await editorModel.resolve();
 		this.getControl().setModel(editorModel.textEditorModel);
 	}
@@ -88,5 +95,9 @@ export class ProfilerResourceEditor extends BaseTextEditor {
 
 	public override layout(dimension: DOM.Dimension) {
 		this.getControl().layout(dimension);
+	}
+
+	protected tracksEditorViewState(input: EditorInput): boolean {
+		return input.typeId === ProfilerResourceEditor.ID;
 	}
 }

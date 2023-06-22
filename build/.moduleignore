@@ -12,14 +12,14 @@ fsevents/src/**
 fsevents/test/**
 !fsevents/**/*.node
 
-vscode-sqlite3/binding.gyp
-vscode-sqlite3/benchmark/**
-vscode-sqlite3/cloudformation/**
-vscode-sqlite3/deps/**
-vscode-sqlite3/test/**
-vscode-sqlite3/build/**
-vscode-sqlite3/src/**
-!vscode-sqlite3/build/Release/*.node
+@vscode/sqlite3/binding.gyp
+@vscode/sqlite3/benchmark/**
+@vscode/sqlite3/cloudformation/**
+@vscode/sqlite3/deps/**
+@vscode/sqlite3/test/**
+@vscode/sqlite3/build/**
+@vscode/sqlite3/src/**
+!@vscode/sqlite3/build/Release/*.node
 
 windows-mutex/binding.gyp
 windows-mutex/build/**
@@ -110,6 +110,18 @@ nsfw/src/**
 nsfw/includes/**
 !nsfw/build/Release/*.node
 
+vscode-nsfw/binding.gyp
+vscode-nsfw/build/**
+vscode-nsfw/src/**
+vscode-nsfw/includes/**
+!vscode-nsfw/build/Release/*.node
+
+@parcel/watcher/binding.gyp
+@parcel/watcher/build/**
+@parcel/watcher/prebuilds/**
+@parcel/watcher/src/**
+!@parcel/watcher/build/Release/*.node
+
 vsda/build/**
 vsda/ci/**
 vsda/src/**
@@ -126,6 +138,14 @@ vscode-encrypt/.gitignore
 vscode-encrypt/binding.gyp
 vscode-encrypt/README.md
 !vscode-encrypt/build/Release/vscode-encrypt-native.node
+
+vscode-policy-watcher/build/**
+vscode-policy-watcher/.husky/**
+vscode-policy-watcher/src/**
+vscode-policy-watcher/binding.gyp
+vscode-policy-watcher/README.md
+vscode-policy-watcher/index.d.ts
+!vscode-policy-watcher/build/Release/vscode-policy-watcher.node
 
 vscode-windows-ca-certs/**/*
 !vscode-windows-ca-certs/package.json

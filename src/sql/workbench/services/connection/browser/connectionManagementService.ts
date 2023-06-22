@@ -8,13 +8,13 @@ import * as WorkbenchUtils from 'sql/workbench/common/sqlWorkbenchUtils';
 import {
 	IConnectionManagementService, INewConnectionParams,
 	ConnectionType, IConnectableInput, IConnectionCompletionOptions, IConnectionCallbacks,
-	IConnectionParams, IConnectionResult, RunQueryOnConnectionMode
+	IConnectionParams, IConnectionResult, RunQueryOnConnectionMode, ConnectionElementMovedParams, ConnectionProfileEditedParams
 } from 'sql/platform/connection/common/connectionManagement';
 import { ConnectionStore } from 'sql/platform/connection/common/connectionStore';
 import { ConnectionManagementInfo } from 'sql/platform/connection/common/connectionManagementInfo';
 import * as Utils from 'sql/platform/connection/common/utils';
 import * as Constants from 'sql/platform/connection/common/constants';
-import { ICapabilitiesService, ConnectionProviderProperties, ProviderFeatures } from 'sql/platform/capabilities/common/capabilitiesService';
+import { ICapabilitiesService, ConnectionProviderProperties, ProviderFeatures, ConnectionProviderAndExtensionMap } from 'sql/platform/capabilities/common/capabilitiesService';
 import * as ConnectionContracts from 'sql/workbench/services/connection/browser/connection';
 import { ConnectionStatusManager } from 'sql/platform/connection/common/connectionStatusManager';
 import { DashboardInput } from 'sql/workbench/browser/editor/profiler/dashboardInput';
@@ -23,11 +23,10 @@ import * as TelemetryKeys from 'sql/platform/telemetry/common/telemetryKeys';
 import { IResourceProviderService } from 'sql/workbench/services/resourceProvider/common/resourceProviderService';
 import { IAngularEventingService, AngularEventType } from 'sql/platform/angularEventing/browser/angularEventingService';
 import { Deferred } from 'sql/base/common/promise';
-import { ConnectionOptionSpecialType } from 'sql/workbench/api/common/sqlExtHostTypes';
-import { IAccountManagementService, AzureResource } from 'sql/platform/accounts/common/interfaces';
+import { AzureResource, ConnectionOptionSpecialType } from 'sql/workbench/api/common/sqlExtHostTypes';
+import { IAccountManagementService } from 'sql/platform/accounts/common/interfaces';
 
 import * as azdata from 'azdata';
-
 import * as nls from 'vs/nls';
 import * as errors from 'vs/base/common/errors';
 import { Disposable } from 'vs/base/common/lifecycle';
@@ -42,14 +41,23 @@ import { ILogService } from 'vs/platform/log/common/log';
 import * as interfaces from 'sql/platform/connection/common/interfaces';
 import { IStorageService, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
 import { Memento, MementoObject } from 'vs/workbench/common/memento';
-import { INotificationService } from 'vs/platform/notification/common/notification';
+import { INotificationService, Severity } from 'vs/platform/notification/common/notification';
 import { entries } from 'sql/base/common/collections';
 import { values } from 'vs/base/common/collections';
-import { assign } from 'vs/base/common/objects';
 import { IAdsTelemetryService } from 'sql/platform/telemetry/common/telemetry';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
 import { toErrorMessage } from 'vs/base/common/errorMessage';
 import { IQueryEditorConfiguration } from 'sql/platform/query/common/query';
+import { URI } from 'vs/base/common/uri';
+import { QueryEditorInput } from 'sql/workbench/common/editor/query/queryEditorInput';
+import { ICommandService } from 'vs/platform/commands/common/commands';
+import { IPaneCompositePartService } from 'vs/workbench/services/panecomposite/browser/panecomposite';
+import { ViewContainerLocation } from 'vs/workbench/common/views';
+import { VIEWLET_ID as ExtensionsViewletID } from 'vs/workbench/contrib/extensions/common/extensions';
+import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
+import { IErrorDiagnosticsService } from 'sql/workbench/services/diagnostics/common/errorDiagnosticsService';
+import { PasswordChangeDialog } from 'sql/workbench/services/connection/browser/passwordChangeDialog';
+import { isMssqlAuthProviderEnabled } from 'sql/workbench/services/connection/browser/utils';
 
 export class ConnectionManagementService extends Disposable implements IConnectionManagementService {
 
@@ -67,11 +75,26 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	private _onConnectionChanged = new Emitter<IConnectionParams>();
 	private _onLanguageFlavorChanged = new Emitter<azdata.DidChangeLanguageFlavorParams>();
 	private _connectionGlobalStatus = new ConnectionGlobalStatus(this._notificationService);
+	private _uriToReconnectPromiseMap: { [uri: string]: Promise<IConnectionResult> } = {};
+
+	private _onConnectionProfileCreated = new Emitter<ConnectionProfile>();
+	private _onConnectionProfileDeleted = new Emitter<ConnectionProfile>();
+	private _onConnectionProfileEdited = new Emitter<ConnectionProfileEditedParams>();
+	private _onConnectionProfileMoved = new Emitter<ConnectionElementMovedParams>();
+	private _onConnectionProfileConnected = new Emitter<ConnectionProfile>();
+	private _onConnectionProfileDisconnected = new Emitter<ConnectionProfile>();
+	private _onConnectionProfileGroupCreated = new Emitter<ConnectionProfileGroup>();
+	private _onConnectionProfileGroupDeleted = new Emitter<ConnectionProfileGroup>();
+	private _onConnectionProfileGroupEdited = new Emitter<ConnectionProfileGroup>();
+	private _onConnectionProfileGroupMoved = new Emitter<ConnectionElementMovedParams>();
+
+	private _onRecentConnectionProfileDeleted = new Emitter<ConnectionProfile>();
 
 	private _mementoContext: Memento;
 	private _mementoObj: MementoObject;
 	private _connectionStore: ConnectionStore;
 	private _connectionStatusManager: ConnectionStatusManager;
+	private _connectionsGotUnsupportedVersionWarning: string[] = [];
 
 	private static readonly CONNECTION_MEMENTO = 'ConnectionManagement';
 	private static readonly _azureResources: AzureResource[] =
@@ -87,11 +110,15 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		@IQuickInputService private _quickInputService: IQuickInputService,
 		@INotificationService private _notificationService: INotificationService,
 		@IResourceProviderService private _resourceProviderService: IResourceProviderService,
+		@IErrorDiagnosticsService private _errorDiagnosticsService: IErrorDiagnosticsService,
 		@IAngularEventingService private _angularEventing: IAngularEventingService,
 		@IAccountManagementService private _accountManagementService: IAccountManagementService,
 		@ILogService private _logService: ILogService,
 		@IStorageService private _storageService: IStorageService,
-		@IExtensionService private readonly extensionService: IExtensionService
+		@IExtensionService private readonly _extensionService: IExtensionService,
+		@ICommandService private readonly _commandService: ICommandService,
+		@IPaneCompositePartService private readonly _paneCompositePartService: IPaneCompositePartService,
+		@IDialogService private readonly _dialogService: IDialogService
 	) {
 		super();
 
@@ -99,7 +126,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		this._connectionStatusManager = _instantiationService.createInstance(ConnectionStatusManager);
 		if (this._storageService) {
 			this._mementoContext = new Memento(ConnectionManagementService.CONNECTION_MEMENTO, this._storageService);
-			this._mementoObj = this._mementoContext.getMemento(StorageScope.GLOBAL, StorageTarget.MACHINE);
+			this._mementoObj = this._mementoContext.getMemento(StorageScope.APPLICATION, StorageTarget.MACHINE);
 		}
 
 		this.initializeConnectionProvidersMap();
@@ -178,6 +205,53 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		return this._onLanguageFlavorChanged.event;
 	}
 
+	/**
+	 * Async tree event emitters
+	 */
+	public get onConnectionProfileCreated(): Event<ConnectionProfile> {
+		return this._onConnectionProfileCreated.event;
+	}
+
+	public get onConnectionProfileEdited(): Event<ConnectionProfileEditedParams> {
+		return this._onConnectionProfileEdited.event;
+	}
+
+	public get onConnectionProfileDeleted(): Event<ConnectionProfile> {
+		return this._onConnectionProfileDeleted.event;
+	}
+
+	public get onConnectionProfileMoved(): Event<ConnectionElementMovedParams> {
+		return this._onConnectionProfileMoved.event;
+	}
+
+	public get onConnectionProfileConnected(): Event<ConnectionProfile> {
+		return this._onConnectionProfileConnected.event;
+	}
+
+	public get onConnectionProfileDisconnected(): Event<ConnectionProfile> {
+		return this._onConnectionProfileDisconnected.event;
+	}
+
+	public get onConnectionProfileGroupCreated(): Event<ConnectionProfileGroup> {
+		return this._onConnectionProfileGroupCreated.event;
+	}
+
+	public get onConnectionProfileGroupDeleted(): Event<ConnectionProfileGroup> {
+		return this._onConnectionProfileGroupDeleted.event;
+	}
+
+	public get onConnectionProfileGroupEdited(): Event<ConnectionProfileGroup> {
+		return this._onConnectionProfileGroupEdited.event;
+	}
+
+	public get onConnectionProfileGroupMoved(): Event<ConnectionElementMovedParams> {
+		return this._onConnectionProfileGroupMoved.event;
+	}
+
+	public get onRecentConnectionProfileDeleted(): Event<ConnectionProfile> {
+		return this._onRecentConnectionProfileDeleted.event;
+	}
+
 	public get providerNameToDisplayNameMap(): { readonly [providerDisplayName: string]: string } {
 		return this._providerNameToDisplayNameMap;
 	}
@@ -204,6 +278,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	/**
 	 * Opens the connection dialog
 	 * @param params Include the uri, type of connection
+	 * @param options
 	 * @param model the existing connection profile to create a new one from
 	 */
 	public showConnectionDialog(params?: INewConnectionParams, options?: IConnectionCompletionOptions, model?: Partial<interfaces.IConnectionProfile>, connectionResult?: IConnectionResult): Promise<void> {
@@ -244,8 +319,10 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	 * Load the password for the profile
 	 * @param connectionProfile Connection Profile
 	 */
-	public async addSavedPassword(connectionProfile: interfaces.IConnectionProfile): Promise<interfaces.IConnectionProfile> {
-		await this.fillInOrClearToken(connectionProfile);
+	public async addSavedPassword(connectionProfile: interfaces.IConnectionProfile, skipAccessToken: boolean = false): Promise<interfaces.IConnectionProfile> {
+		if (!skipAccessToken) {
+			await this.fillInOrClearToken(connectionProfile);
+		}
 		return this._connectionStore.addSavedPassword(connectionProfile).then(result => result.profile);
 	}
 
@@ -284,7 +361,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 
 	/**
 	 * Loads the  password and try to connect. If fails, shows the dialog so user can change the connection
-	 * @param Connection Profile
+	 * @param connection Profile
 	 * @param owner of the connection. Can be the editors
 	 * @param options to use after the connection is complete
 	 */
@@ -306,9 +383,14 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 			// Fill in the Azure account token if needed and open the connection dialog if it fails
 			let tokenFillSuccess = await this.fillInOrClearToken(newConnection);
 
+			// If there is no authentication type set, set it using configuration
+			if (!newConnection.authenticationType || newConnection.authenticationType === '') {
+				newConnection.authenticationType = this.getDefaultAuthenticationTypeId(newConnection.providerName);
+			}
+
 			// If the password is required and still not loaded show the dialog
 			if ((!foundPassword && this._connectionStore.isPasswordRequired(newConnection) && !newConnection.password) || !tokenFillSuccess) {
-				return this.showConnectionDialogOnError(connection, owner, { connected: false, errorMessage: undefined, callStack: undefined, errorCode: undefined }, options);
+				return this.showConnectionDialogOnError(connection, owner, { connected: false, errorMessage: undefined, messageDetails: undefined, errorCode: undefined }, options);
 			} else {
 				// Try to connect
 				return this.connectWithOptions(newConnection, owner.uri, options, owner).then(connectionResult => {
@@ -338,10 +420,12 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		options?: IConnectionCompletionOptions): Promise<IConnectionResult> {
 		if (options && options.showConnectionDialogOnError) {
 			let params: INewConnectionParams = options && options.params ? options.params : {
-				connectionType: this._connectionStatusManager.isDefaultTypeUri(owner.uri) ? ConnectionType.default : ConnectionType.editor,
+				connectionType: this._connectionStatusManager.isEditorTypeUri(owner.uri) ? ConnectionType.editor : ConnectionType.default,
 				input: owner,
 				runQueryOnCompletion: RunQueryOnConnectionMode.none,
-				showDashboard: options.showDashboard
+				showDashboard: options.showDashboard,
+				isEditConnection: true,
+				oldProfileId: connection.id
 			};
 			return this.showConnectionDialog(params, options, connection, connectionResult).then(() => {
 				return connectionResult;
@@ -353,7 +437,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 
 	/**
 	 * Load the password and opens a new connection
-	 * @param Connection Profile
+	 * @param connection Profile
 	 * @param uri assigned to the profile (used only when connecting from an editor)
 	 * @param options to be used after the connection is completed
 	 * @param callbacks to call after the connection is completed
@@ -382,6 +466,24 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		return this.tryConnect(connection, input, options);
 	}
 
+	public async fixProfile(profile?: interfaces.IConnectionProfile): Promise<interfaces.IConnectionProfile> {
+		if (profile) {
+			if (profile.authenticationType !== undefined && profile.authenticationType === '') {
+				// we need to set auth type here, because it's value is part of the session key
+				profile.authenticationType = this.getDefaultAuthenticationTypeId(profile.providerName);
+			}
+
+			// If this is Azure MFA Authentication, fix username to azure Account user. Falls back to current user name.
+			// This is required, as by default, server login / administrator is the username.
+			if (profile.authenticationType === 'AzureMFA') {
+				let accounts = await this._accountManagementService?.getAccounts();
+				profile.userName = accounts?.find(a => a.key.accountId === profile.azureAccount)?.displayInfo.displayName
+					?? profile.userName;
+			}
+		}
+		return profile;
+	}
+
 	/**
 	 * If there's already a connection for given profile and purpose, returns the ownerUri for the connection
 	 * otherwise tries to make a connection and returns the owner uri when connection is complete
@@ -396,7 +498,6 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 				saveTheConnection: saveConnection,
 				showConnectionDialogOnError: true,
 				showDashboard: purpose === 'dashboard',
-				params: undefined,
 				showFirewallRuleOnError: true,
 			};
 			return this.connect(connection, ownerUri, options).then(connectionResult => {
@@ -410,6 +511,14 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	}
 
 	/**
+	 * Changes password of the connection profile's user.
+	 */
+	public async changePassword(connection: interfaces.IConnectionProfile, uri: string, newPassword: string):
+		Promise<azdata.PasswordChangeResult> {
+		return this.sendChangePasswordRequest(connection, uri, newPassword);
+	}
+
+	/**
 	 * Opens a new connection and saves the profile in the settings.
 	 * This method doesn't load the password because it only gets called from the
 	 * connection dialog and password should be already in the profile
@@ -420,7 +529,6 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 			options = {
 				saveTheConnection: true,
 				showDashboard: false,
-				params: undefined,
 				showConnectionDialogOnError: false,
 				showFirewallRuleOnError: true
 			};
@@ -431,11 +539,33 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		return this.connectWithOptions(connection, uri, options, callbacks);
 	}
 
+
+	private duplicateEditErrorMessage(connection: interfaces.IConnectionProfile): void {
+		let groupNameBase = ConnectionProfile.displayIdSeparator + 'groupName' + ConnectionProfile.displayNameValueSeparator;
+		let connectionOptionsKey = ConnectionProfile.getDisplayOptionsKey(connection.getOptionsKey());
+		// Must get connection group name here as it may not always be initialized.
+		let connectionGroupName = (connection.groupFullName !== undefined && connection.groupFullName !== '' && connection.groupFullName !== '/') ?
+			(groupNameBase + connection.groupFullName) : (groupNameBase + '<default>');
+		this._logService.error(`Profile edit for '${connection.id}' matches an existing profile with data: '${connectionOptionsKey}'`);
+		throw new Error(nls.localize('connection.duplicateEditErrorMessage', 'Cannot save profile, the selected connection matches an existing profile with the same server info in the same group: \n\n {0}{1}', connectionOptionsKey, connectionGroupName));
+	}
+
 	private async connectWithOptions(connection: interfaces.IConnectionProfile, uri: string, options?: IConnectionCompletionOptions, callbacks?: IConnectionCallbacks): Promise<IConnectionResult> {
 		connection.options['groupId'] = connection.groupId;
 		connection.options['databaseDisplayName'] = connection.databaseName;
 
 		let isEdit = options?.params?.isEditConnection ?? false;
+
+		let matcher: interfaces.ProfileMatcher;
+		if (isEdit) {
+			matcher = (a: interfaces.IConnectionProfile, b: interfaces.IConnectionProfile) => a.id === options.params.oldProfileId;
+
+			//Check to make sure the edits are not identical to another connection.
+			let result = await this._connectionStore.isDuplicateEdit(connection, matcher);
+			if (result) {
+				this.duplicateEditErrorMessage(connection);
+			}
+		}
 
 		if (!uri) {
 			uri = Utils.generateUri(connection);
@@ -454,7 +584,6 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 			options = {
 				saveTheConnection: false,
 				showDashboard: false,
-				params: undefined,
 				showConnectionDialogOnError: false,
 				showFirewallRuleOnError: true
 			};
@@ -466,6 +595,9 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		if (!tokenFillSuccess) {
 			throw new Error(nls.localize('connection.noAzureAccount', "Failed to get Azure account token for connection"));
 		}
+		if (options.saveTheConnection) {
+			connection.options.originalDatabase = connection.databaseName;
+		}
 		return this.createNewConnection(uri, connection).then(async connectionResult => {
 			if (connectionResult && connectionResult.connected) {
 				// The connected succeeded so add it to our active connections now, optionally adding it to the MRU based on
@@ -473,38 +605,44 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 				let connectionMgmtInfo = this._connectionStatusManager.findConnection(uri);
 				if (!connectionMgmtInfo) {
 					this._logService.info(`Could not find connection management info for ${uri} after connection`);
-				}
-				// Currently this could potentially throw an error because it expects there to always be
-				// a connection management info. See https://github.com/microsoft/azuredatastudio/issues/16556
-				this.tryAddActiveConnection(connectionMgmtInfo, connection, options.saveTheConnection);
-
-
-
-				if (callbacks.onConnectSuccess) {
-					callbacks.onConnectSuccess(options.params, connectionResult.connectionProfile);
-				}
-				if (options.saveTheConnection || isEdit) {
-					let matcher: interfaces.ProfileMatcher;
-					if (isEdit) {
-						matcher = (a: interfaces.IConnectionProfile, b: interfaces.IConnectionProfile) => {
-							return a.id === b.id;
-						};
-					}
-
-					await this.saveToSettings(uri, connection, matcher).then(value => {
-						this._onAddConnectionProfile.fire(connection);
-						this.doActionsAfterConnectionComplete(value, options);
-					});
-				} else {
-					connection.saveProfile = false;
-					this.doActionsAfterConnectionComplete(uri, options);
-				}
-				if (connection.savePassword) {
-					return this._connectionStore.savePassword(connection).then(() => {
-						return connectionResult;
-					});
-				} else {
 					return connectionResult;
+				} else {
+					// Currently this could potentially throw an error because it expects there to always be
+					// a connection management info. See https://github.com/microsoft/azuredatastudio/issues/16556
+					this.tryAddActiveConnection(connectionMgmtInfo, connection, options.saveTheConnection);
+
+					if (callbacks.onConnectSuccess) {
+						callbacks.onConnectSuccess(options.params, connectionResult.connectionProfile);
+					}
+					if (options.saveTheConnection || isEdit) {
+
+						await this.saveToSettings(uri, connection, matcher).then(value => {
+							this._onAddConnectionProfile.fire(connection);
+							if (isEdit) {
+								this._onConnectionProfileEdited.fire({
+									oldProfileId: options.params.oldProfileId,
+									profile: <ConnectionProfile>connection
+								});
+							} else {
+								if (options.params === undefined) {
+									this._onConnectionProfileConnected.fire(<ConnectionProfile>connection);
+								} else {
+									this._onConnectionProfileCreated.fire(<ConnectionProfile>connection);
+								}
+							}
+							this.doActionsAfterConnectionComplete(value, options);
+						});
+					} else {
+						connection.saveProfile = false;
+						this.doActionsAfterConnectionComplete(uri, options);
+					}
+					if (connection.savePassword) {
+						return this._connectionStore.savePassword(connection).then(() => {
+							return connectionResult;
+						});
+					} else {
+						return connectionResult;
+					}
 				}
 			} else if (connectionResult && connectionResult.errorMessage) {
 				return this.handleConnectionError(connection, uri, options, callbacks, connectionResult).catch(handleConnectionError => {
@@ -527,20 +665,40 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		});
 	}
 
-	private handleConnectionError(connection: interfaces.IConnectionProfile, uri: string, options: IConnectionCompletionOptions, callbacks: IConnectionCallbacks, connectionResult: IConnectionResult) {
+	private async handleConnectionError(connection: interfaces.IConnectionProfile, uri: string, options: IConnectionCompletionOptions, callbacks: IConnectionCallbacks, connectionResult: IConnectionResult) {
 		let connectionNotAcceptedError = nls.localize('connectionNotAcceptedError', "Connection Not Accepted");
 		if (options.showFirewallRuleOnError && connectionResult.errorCode) {
-			return this.handleFirewallRuleError(connection, connectionResult).then(success => {
-				if (success) {
-					options.showFirewallRuleOnError = false;
-					return this.connectWithOptions(connection, uri, options, callbacks);
-				} else {
+			let firewallRuleErrorHandled = await this.handleFirewallRuleError(connection, connectionResult);
+			if (firewallRuleErrorHandled) {
+				options.showFirewallRuleOnError = false;
+				return this.connectWithOptions(connection, uri, options, callbacks);
+			}
+			else {
+				let connectionErrorHandleResult = await this._errorDiagnosticsService.tryHandleConnectionError(connectionResult, connection.providerName, connection);
+				if (connectionErrorHandleResult.handled) {
+					connectionResult.errorHandled = true;
+					if (connectionErrorHandleResult.options) {
+						//copy over altered connection options from the result if provided.
+						connection.options = connectionErrorHandleResult.options;
+					}
+					if (connectionErrorHandleResult.reconnect) {
+						// Attempt reconnect if requested by provider
+						return this.connectWithOptions(connection, uri, options, callbacks);
+					} else {
+						if (callbacks.onConnectCanceled) {
+							callbacks.onConnectCanceled();
+						}
+						return connectionResult;
+					}
+				}
+				else {
+					// Error not handled by any registered providers so fail the connection
 					if (callbacks.onConnectReject) {
 						callbacks.onConnectReject(connectionNotAcceptedError);
 					}
 					return connectionResult;
 				}
-			});
+			}
 		} else {
 			if (callbacks.onConnectReject) {
 				callbacks.onConnectReject(connectionNotAcceptedError);
@@ -560,42 +718,226 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		});
 	}
 
+	public async openChangePasswordDialog(profile: interfaces.IConnectionProfile): Promise<string | undefined> {
+		let dialog = this._instantiationService.createInstance(PasswordChangeDialog);
+		let result = await dialog.open(profile);
+		return result;
+	}
+
+	public getEditorConnectionProfileTitle(profile: interfaces.IConnectionProfile, getOptionsOnly?: boolean, includeGroupName: boolean = true): string {
+		let result = '';
+		if (profile) {
+			let tempProfile = new ConnectionProfile(this._capabilitiesService, profile);
+			let trimTitle = tempProfile.getOriginalTitle();
+			let idToFind = tempProfile.id;
+			let isChild = false;
+			let totalConnections: ConnectionProfile[] = [];
+			let allConnections = this.getConnections();
+
+			totalConnections = totalConnections.concat(allConnections);
+
+			let initialSearch = totalConnections.filter(inputProfile => {
+				return inputProfile.id === tempProfile.id;
+			});
+
+			let secondarySearch = totalConnections.filter(inputProfile => {
+				return inputProfile.matches(tempProfile)
+			});
+
+			if (initialSearch.length === 0) {
+				if (secondarySearch.length === 1) {
+					// Sometimes the connection id will change for an object explorer connection, especially when connecting from dashboard,
+					// and it will identify as different from the stored one even without changes. Get the info for the stored version as it's the same profile.
+					idToFind = secondarySearch[0].id;
+				}
+			}
+
+			// Handle case where a profile may have been an edited existing connection (the one retrieved may not be up to date)
+			if (initialSearch.length === 1 && !initialSearch[0].matches(tempProfile)) {
+				// Remove the old profile with outdated information.
+				totalConnections = totalConnections.filter(inputProfile => {
+					return inputProfile.id !== tempProfile.id;
+				});
+				// Replace with up to date version of the profile.
+				totalConnections = totalConnections.concat(tempProfile);
+			}
+
+			let newConnectionTitles = [];
+
+			this.generateEditorConnectionTitles(totalConnections);
+			if (includeGroupName) {
+				this.appendGroupName(totalConnections);
+			}
+			newConnectionTitles = totalConnections;
+
+			let searchResult = newConnectionTitles.filter(inputProfile => inputProfile.id === idToFind);
+			let finalTitle = searchResult[0]?.title;
+			if (finalTitle) {
+				let optionsAppend = finalTitle.substring(trimTitle.length);
+				if (getOptionsOnly) {
+					finalTitle = optionsAppend;
+				}
+				else if (!getOptionsOnly && isChild) {
+					finalTitle = tempProfile.getOriginalTitle() + optionsAppend;
+				}
+				else {
+					finalTitle = searchResult[0].getOriginalTitle() + optionsAppend;
+				}
+				result = finalTitle;
+			}
+		}
+		return result;
+	}
+
+	/**
+	 * Change the connection title to display only the unique properties among profiles provided. (used for editors)
+	 */
+	private generateEditorConnectionTitles(inputList: ConnectionProfile[]): void {
+		let profileListMap = new Map<string, number[]>();
+		// Need to reset title to when it was before (as it may have contained a previously generated title)
+		for (let i = 0; i < inputList.length; i++) {
+			inputList[i].title = inputList[i].getOriginalTitle();
+		}
+
+		// Map the indices of profiles that share the same server info
+		for (let i = 0; i < inputList.length; i++) {
+			// do not add if the profile is still loading as that will result in erroneous entries.
+			if (inputList[i].serverCapabilities && inputList[i].hasLoaded()) {
+				let titleKey = inputList[i].getOriginalTitle();
+				if (profileListMap.has(titleKey)) {
+					let profilesForKey = profileListMap.get(titleKey);
+					profilesForKey.push(i);
+					profileListMap.set(titleKey, profilesForKey);
+				}
+				else {
+					profileListMap.set(titleKey, [i]);
+				}
+			}
+		}
+
+		profileListMap.forEach(function (indexes, titleString) {
+			if (profileListMap.get(titleString)?.length > 1) {
+				let combinedOptions = [];
+				let needSpecial = false;
+				if (titleString === inputList[indexes[0]].connectionName) {
+					// check for potential connections with the same name but technically different connections.
+					let listOfDuplicates = indexes.filter(item => inputList[item].getOptionsKey() !== inputList[indexes[0]].getOptionsKey());
+					if (listOfDuplicates.length > 0) {
+						// if we do find duplicates, we will need to include the special properties.
+						needSpecial = true;
+					}
+				}
+				indexes.forEach((indexValue) => {
+					// Add all possible options across all profiles with the same title to an option list.
+					let valueOptions = inputList[indexValue].getConnectionOptionsList(needSpecial, false);
+					combinedOptions = combinedOptions.concat(valueOptions.filter(item => combinedOptions.indexOf(item) < 0));
+				});
+
+				// Generate list of non default option keys for each profile that shares the same server info.
+				let optionKeyMap = new Map<ConnectionProfile, string[]>();
+				let optionValueOccuranceMap = new Map<string, number>();
+				for (let p = 0; p < indexes.length; p++) {
+					optionKeyMap.set(inputList[indexes[p]], []);
+					for (let i = 0; i < combinedOptions.length; i++) {
+						// See if the option is not default for the inputList profile or is.
+						if (inputList[indexes[p]].getConnectionOptionsList(needSpecial, true).indexOf(combinedOptions[i]) > -1) {
+							let optionValue = inputList[indexes[p]].getOptionValue(combinedOptions[i].name);
+							let currentArray = optionKeyMap.get(inputList[indexes[p]]);
+							let valueString = combinedOptions[i].name + ConnectionProfile.displayNameValueSeparator + optionValue;
+							if (!optionValueOccuranceMap.get(valueString)) {
+								optionValueOccuranceMap.set(valueString, 0);
+							}
+							optionValueOccuranceMap.set(valueString, optionValueOccuranceMap.get(valueString) + 1);
+							currentArray.push(valueString);
+							optionKeyMap.set(inputList[indexes[p]], currentArray);
+						}
+					}
+				}
+
+				// Filter out options that are found in ALL the entries with the same server info.
+				optionValueOccuranceMap.forEach(function (count, optionValue) {
+					optionKeyMap.forEach(function (connOptionValues, profile) {
+						if (count === optionKeyMap.size) {
+							optionKeyMap.set(profile, connOptionValues.filter(value => value !== optionValue));
+						}
+					});
+				});
+
+				// Generate the final unique connection string for each profile in the list.
+				optionKeyMap.forEach(function (connOptionValues, profile) {
+					let uniqueOptionString = connOptionValues.join(ConnectionProfile.displayIdSeparator);
+					if (uniqueOptionString.length > 0) {
+						profile.title = profile.getOriginalTitle() + ' (' + uniqueOptionString + ')';
+					}
+				});
+			}
+		});
+	}
+
+	private appendGroupName(inputList: ConnectionProfile[]): void {
+		let profileListMap = new Map<string, number[]>();
+
+		// Map the indices of profiles that share the same server group
+		for (let i = 0; i < inputList.length; i++) {
+			let groupName = inputList[i].groupFullName;
+			if (profileListMap.has(groupName)) {
+				let profilesForKey = profileListMap.get(groupName);
+				profilesForKey.push(i);
+				profileListMap.set(groupName, profilesForKey);
+			}
+			else {
+				profileListMap.set(groupName, [i]);
+			}
+		}
+
+		if (profileListMap.size > 1) {
+			profileListMap.forEach(function (indexes, groupName) {
+				for (let t = 0; t < indexes.length; t++) {
+					if (groupName !== '') {
+						inputList[indexes[t]].title += nls.localize('connection.connTitleGroupSection', ' (Group: {0})', groupName);
+					}
+				}
+			});
+		}
+	}
+
 	private doActionsAfterConnectionComplete(uri: string, options: IConnectionCompletionOptions): void {
 		let connectionManagementInfo = this._connectionStatusManager.findConnection(uri);
 		if (!connectionManagementInfo) {
 			// Currently this could potentially throw an error because it expects there to always be
 			// a connection management info. See https://github.com/microsoft/azuredatastudio/issues/16556
 			this._logService.info(`Could not find connection management info for ${uri} after connection complete`);
-		}
-		if (options.showDashboard) {
-			this.showDashboardForConnectionManagementInfo(connectionManagementInfo.connectionProfile);
-		}
-
-		let connectionProfile = connectionManagementInfo.connectionProfile;
-		this._onConnect.fire(<IConnectionParams>{
-			connectionUri: uri,
-			connectionProfile: connectionProfile
-		});
-
-		let iconProvider = this._iconProviders.get(connectionManagementInfo.providerId);
-		if (iconProvider) {
-			const serverInfo: azdata.ServerInfo | undefined = this.getServerInfo(connectionProfile.id);
-			if (!serverInfo) {
-				this._logService.warn(`Could not find ServerInfo for connection ${connectionProfile.id} when updating icon`);
-				return;
+		} else {
+			if (options.showDashboard) {
+				this.showDashboardForConnectionManagementInfo(connectionManagementInfo.connectionProfile);
 			}
-			const profile: interfaces.IConnectionProfile = connectionProfile.toIConnectionProfile();
-			iconProvider.getConnectionIconId(profile, serverInfo).then(iconId => {
-				if (iconId && this._mementoObj && this._mementoContext) {
-					if (!this._mementoObj.CONNECTION_ICON_ID) {
-						this._mementoObj.CONNECTION_ICON_ID = <any>{};
-					}
-					if (this._mementoObj.CONNECTION_ICON_ID[connectionProfile.id] !== iconId) {
-						this._mementoObj.CONNECTION_ICON_ID[connectionProfile.id] = iconId;
-						this._mementoContext.saveMemento();
-					}
-				}
+
+			let connectionProfile = connectionManagementInfo.connectionProfile;
+			this._onConnect.fire(<IConnectionParams>{
+				connectionUri: uri,
+				connectionProfile: connectionProfile
 			});
+
+			let iconProvider = this._iconProviders.get(connectionManagementInfo.providerId);
+			if (iconProvider) {
+				const serverInfo: azdata.ServerInfo | undefined = this.getServerInfo(connectionProfile.id);
+				if (!serverInfo) {
+					this._logService.warn(`Could not find ServerInfo for connection ${connectionProfile.id} when updating icon`);
+					return;
+				}
+				const profile: interfaces.IConnectionProfile = connectionProfile.toIConnectionProfile();
+				iconProvider.getConnectionIconId(profile, serverInfo).then(iconId => {
+					if (iconId && this._mementoObj && this._mementoContext) {
+						if (!this._mementoObj.CONNECTION_ICON_ID) {
+							this._mementoObj.CONNECTION_ICON_ID = <any>{};
+						}
+						if (this._mementoObj.CONNECTION_ICON_ID[connectionProfile.id] !== iconId) {
+							this._mementoObj.CONNECTION_ICON_ID[connectionProfile.id] = iconId;
+							this._mementoContext.saveMemento();
+						}
+					}
+				});
+			}
 		}
 	}
 
@@ -623,27 +965,20 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	}
 
 	private focusDashboard(profile: interfaces.IConnectionProfile): boolean {
-		let found: boolean = false;
+		const matchingEditor = this._editorService.editors.find(editor => {
+			return editor instanceof DashboardInput && DashboardInput.profileMatches(profile, editor.connectionProfile);
+		}) as DashboardInput;
 
-		this._editorService.editors.map(editor => {
-			if (editor instanceof DashboardInput) {
-				if (DashboardInput.profileMatches(profile, editor.connectionProfile)) {
-					editor.connectionProfile.connectionName = profile.connectionName;
-					editor.connectionProfile.databaseName = profile.databaseName;
-					this._editorService.openEditor(editor)
-						.then(() => {
-							if (!profile.databaseName || Utils.isMaster(profile)) {
-								this._angularEventing.sendAngularEvent(editor.uri, AngularEventType.NAV_SERVER);
-							} else {
-								this._angularEventing.sendAngularEvent(editor.uri, AngularEventType.NAV_DATABASE);
-							}
-							found = true;
-						}, errors.onUnexpectedError);
-				}
-			}
-		});
+		if (matchingEditor) {
+			matchingEditor.connectionProfile.connectionName = profile.connectionName;
+			matchingEditor.connectionProfile.databaseName = profile.databaseName;
+			this._editorService.openEditor(matchingEditor).then(() => {
+				const target = !profile.databaseName || Utils.isServerConnection(profile) ? AngularEventType.NAV_SERVER : AngularEventType.NAV_DATABASE;
+				this._angularEventing.sendAngularEvent(matchingEditor.uri, target);
+			}, errors.onUnexpectedError);
+		}
 
-		return found;
+		return !!matchingEditor;
 	}
 
 	public closeDashboard(uri: string): void {
@@ -651,7 +986,22 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	}
 
 	public getConnectionGroups(providers?: string[]): ConnectionProfileGroup[] {
-		return this._connectionStore.getConnectionProfileGroups(false, providers);
+		const groups = this._connectionStore.getConnectionProfileGroups(false, providers);
+		return groups;
+	}
+
+	public getConnectionGroupById(id: string): ConnectionProfileGroup | undefined {
+		const groups = this.getConnectionGroups();
+		for (let group of groups) {
+			if (group.id === id) {
+				return group;
+			}
+			const subgroup = ConnectionProfileGroup.getSubgroups(group).find(g => g.id === id);
+			if (subgroup) {
+				return subgroup;
+			}
+		}
+		return undefined;
 	}
 
 	public getRecentConnections(providers?: string[]): ConnectionProfile[] {
@@ -665,6 +1015,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 
 	public clearRecentConnection(connectionProfile: interfaces.IConnectionProfile): void {
 		this._connectionStore.removeRecentConnection(connectionProfile);
+		this._onRecentConnectionProfileDeleted.fire(<ConnectionProfile>connectionProfile);
 	}
 
 	public getActiveConnections(providers?: string[]): ConnectionProfile[] {
@@ -680,10 +1031,15 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		}
 	}
 
-	public saveProfileGroup(profile: IConnectionProfileGroup): Promise<string> {
+	public saveProfileGroup(group: IConnectionProfileGroup): Promise<string> {
 		this._telemetryService.sendActionEvent(TelemetryKeys.TelemetryView.Shell, TelemetryKeys.TelemetryAction.AddServerGroup);
-		return this._connectionStore.saveProfileGroup(profile).then(groupId => {
+		return this._connectionStore.saveProfileGroup(group).then(groupId => {
 			this._onAddConnectionProfile.fire(undefined);
+			//Getting id for the new profile group
+			group.id = groupId;
+			const parentGroup = this.getConnectionGroupById(group.parentId);
+			this._onConnectionProfileGroupCreated.fire(ConnectionProfileGroup.createConnectionProfileGroup(group, parentGroup));
+
 			return groupId;
 		});
 	}
@@ -705,9 +1061,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 
 	public hasRegisteredServers(): boolean {
 		const groups: ConnectionProfileGroup[] = this.getConnectionGroups();
-		const hasRegisteredServers: boolean = this.doHasRegisteredServers(groups);
-		groups.forEach(cpg => cpg.dispose());
-		return hasRegisteredServers;
+		return this.doHasRegisteredServers(groups);
 	}
 
 	private doHasRegisteredServers(root: ConnectionProfileGroup[]): boolean {
@@ -757,7 +1111,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	 *
 	 * @param uri the URI of the resource whose language has changed
 	 * @param language the base language
-	 * @param flavor the specific language flavor that's been set
+	 * @param provider
 	 * @throws {Error} if the provider is not in the list of registered providers
 	 */
 	public doChangeLanguageFlavor(uri: string, language: string, provider: string): void {
@@ -792,6 +1146,14 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		return defaultProvider && this._providers.has(defaultProvider) ? defaultProvider : undefined;
 	}
 
+	public getDefaultAuthenticationTypeId(providerName: string): string {
+		// only return the default authentication type if the provider supports the AuthType option.
+		// Other issues with the implementation is tracked here: https://github.com/microsoft/azuredatastudio/issues/20573
+		const authOption = this._capabilitiesService.getCapabilities(providerName)?.connection.connectionOptions?.find(option => option.specialValueType === ConnectionOptionSpecialType.authType);
+		const defaultAuthenticationType = authOption ? WorkbenchUtils.getSqlConfigValue<string>(this._configurationService, Constants.defaultAuthenticationType) : undefined;
+		return defaultAuthenticationType;
+	}
+
 	/**
 	 * Previously, the only resource available for AAD access tokens was for Azure SQL / SQL Server.
 	 * Use that as a default if the provider extension does not configure a different one. If one is
@@ -799,13 +1161,44 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	 * @param connection The connection to fill in or update
 	 */
 	private getAzureResourceForConnection(connection: interfaces.IConnectionProfile): azdata.AzureResource {
+		// check if this is a PowerBI connection which is determined based on connection domain address
+		if (this.isPowerBiConnection(connection)) {
+			return AzureResource.PowerBi;
+		}
+
+		// default to SQL if there are no provides or registered resources
 		let provider = this._providers.get(connection.providerName);
 		if (!provider || !provider.properties || !provider.properties.azureResource) {
+			this._logService.warn(`Connection provider '${connection.providerName}' is incorrectly registered, defaulting to 'SQL' Azure resource. Provider must specify applicable 'azureResource' in 'connectionProvider' configuration.`);
 			return AzureResource.Sql;
 		}
 
+		// lookup the Azure resource based on the provider azureResource properties
 		let result = ConnectionManagementService._azureResources.find(r => AzureResource[r] === provider.properties.azureResource);
 		return result ? result : AzureResource.Sql;
+	}
+
+	/**
+	 * Determine if a connection is to PowerBI based on the servers domain name.
+	 * PowerBi servers will be in one of the hard-coded domains listed in this method, based on the
+	 * Azure cloud being used.  This method can be removed once the connection/AAD service is updated
+	 * to parse the server endpoint using TDS prior to connecting.  But that will need to be part of a
+	 * larger refactoring of the connection & auth functionality.
+	 * @param connection The connection profile that is to be checked.
+	 */
+	private isPowerBiConnection(connection: interfaces.IConnectionProfile): boolean {
+		if (!connection || !connection.serverName || connection.serverName.length === 0) {
+			return false;
+		}
+		let powerBiDomains = [
+			'pbidedicated.windows.net',
+			'pbidedicated.cloudapi.de',
+			'pbidedicated.usgovcloudapi.net',
+			'pbidedicated.chinacloudapi.cn',
+			'pbidedicated.windows-int.net'
+		];
+		let serverName = connection.serverName.toLowerCase();
+		return !!powerBiDomains.find(d => serverName.indexOf(d) >= 0);
 	}
 
 	/**
@@ -814,20 +1207,22 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	 * @param connection The connection to fill in or update
 	 */
 	private async fillInOrClearToken(connection: interfaces.IConnectionProfile): Promise<boolean> {
-		if (connection.authenticationType !== Constants.azureMFA
-			&& connection.authenticationType !== Constants.azureMFAAndUser
-			&& connection.authenticationType !== Constants.dstsAuth) {
+		if (connection.authenticationType !== Constants.AuthenticationType.AzureMFA
+			&& connection.authenticationType !== Constants.AuthenticationType.AzureMFAAndUser
+			&& connection.authenticationType !== Constants.AuthenticationType.DSTSAuth) {
 			connection.options['azureAccountToken'] = undefined;
+			connection.options['expiresOn'] = undefined;
 			return true;
 		}
 
 		let azureResource = this.getAzureResourceForConnection(connection);
 		const accounts = await this._accountManagementService.getAccounts();
 
-		if (connection.authenticationType === Constants.dstsAuth) {
+		if (connection.authenticationType === Constants.AuthenticationType.DSTSAuth) {
 			let dstsAccounts = accounts.filter(a => a.key.providerId.startsWith('dstsAuth'));
 			if (dstsAccounts.length <= 0) {
 				connection.options['azureAccountToken'] = undefined;
+				connection.options['expiresOn'] = undefined;
 				return false;
 			}
 
@@ -843,8 +1238,10 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 
 		const azureAccounts = accounts.filter(a => a.key.providerId.startsWith('azure'));
 		if (azureAccounts && azureAccounts.length > 0) {
-			let accountId = (connection.authenticationType === Constants.azureMFA || connection.authenticationType === Constants.azureMFAAndUser) ? connection.azureAccount : connection.userName;
-			let account = azureAccounts.find(account => account.key.accountId === accountId);
+			let accountId = (connection.authenticationType === Constants.AuthenticationType.AzureMFA || connection.authenticationType === Constants.AuthenticationType.AzureMFAAndUser) ? connection.azureAccount : connection.userName;
+			// For backwards compatibility with ADAL, we need to check if the account ID matches with tenant Id or just the account ID
+			// The OR case can be removed once we no longer support ADAL
+			let account = azureAccounts.find(account => account.key.accountId === accountId || account.key.accountId.split('.')[0] === accountId);
 			if (account) {
 				this._logService.debug(`Getting security token for Azure account ${account.key.accountId}`);
 				if (account.isStale) {
@@ -859,13 +1256,15 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 				}
 				const tenantId = connection.azureTenantId;
 				const token = await this._accountManagementService.getAccountSecurityToken(account, tenantId, azureResource);
-				this._logService.debug(`Got token for tenant ${token}`);
 				if (!token) {
-					this._logService.info(`No security tokens found for account`);
+					this._logService.warn(`No security tokens found for account`);
+				} else {
+					this._logService.debug(`Got access token for tenant ${tenantId} that expires in ${(token.expiresOn - new Date().getTime()) / 1000} seconds`);
+					connection.options['azureAccountToken'] = token.token;
+					connection.options['expiresOn'] = token.expiresOn;
+					connection.options['password'] = '';
+					return true;
 				}
-				connection.options['azureAccountToken'] = token.token;
-				connection.options['password'] = '';
-				return true;
 			} else {
 				this._logService.info(`Could not find Azure account with name ${accountId}`);
 			}
@@ -875,20 +1274,110 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		return false;
 	}
 
+	/**
+	 * Refresh Azure access token if it's expired.
+	 * @param uriOrConnectionProfile connection uri or connection profile
+	 * @returns true if no need to refresh or successfully refreshed token, false if refresh fails or auth mode is not AzureMFA
+	 */
+	public async refreshAzureAccountTokenIfNecessary(uriOrConnectionProfile: string | ConnectionProfile): Promise<boolean> {
+		if (!uriOrConnectionProfile) {
+			this._logService.warn(`refreshAzureAccountTokenIfNecessary: Neither Connection uri nor connection profile received.`);
+			return false;
+		}
+
+		let uri: string;
+		let connectionProfile: ConnectionProfile;
+
+		if (typeof uriOrConnectionProfile === 'string') {
+			uri = uriOrConnectionProfile;
+			connectionProfile = this._connectionStatusManager.getConnectionProfile(uri);
+			if (!connectionProfile) {
+				this._logService.warn(`Connection not found for uri ${uri} when refreshing token`);
+				return false;
+			}
+		} else {
+			connectionProfile = uriOrConnectionProfile;
+			uri = this.getConnectionUri(connectionProfile);
+		}
+
+		// Wait for the pending reconnction promise if any
+		// We expect uri to be defined
+		const previousReconnectPromise = this._uriToReconnectPromiseMap[uri];
+		if (previousReconnectPromise) {
+			this._logService.debug(`Found pending reconnect promise for uri ${uri}, waiting.`);
+			try {
+				const previousConnectionResult = await previousReconnectPromise;
+				if (previousConnectionResult && previousConnectionResult.connected) {
+					this._logService.debug(`Previous pending reconnection for uri ${uri} succeeded.`);
+					return true;
+				}
+				this._logService.debug(`Previous pending reconnection for uri ${uri} failed.`);
+			} catch (err) {
+				this._logService.debug(`Previous pending reconnect promise for uri ${uri} is rejected with error ${err}, will attempt to reconnect if necessary.`);
+			}
+		}
+
+		// We expect connectionProfile to be defined
+		if (connectionProfile && connectionProfile.authenticationType === Constants.AuthenticationType.AzureMFA) {
+			// We do not need to reconnect for MSSQL Provider, if 'SQL Authentication Provider' setting is enabled.
+			// Update the token in case it needs refreshing/reauthentication.
+			if (isMssqlAuthProviderEnabled(connectionProfile.providerName, this._configurationService)) {
+				await this.fillInOrClearToken(connectionProfile);
+				return true;
+			}
+			const expiry = connectionProfile.options.expiresOn;
+			if (typeof expiry === 'number' && !Number.isNaN(expiry)) {
+				const currentTime = new Date().getTime() / 1000;
+				const maxTolerance = 2 * 60; // two minutes
+				if (expiry - currentTime < maxTolerance) {
+					this._logService.debug(`Access token expired for connection ${connectionProfile.id} with uri ${uri}`);
+					try {
+						const connectionResultPromise = this.connect(connectionProfile, uri);
+						this._uriToReconnectPromiseMap[uri] = connectionResultPromise;
+						const connectionResult = await connectionResultPromise;
+						if (!connectionResult) {
+							this._logService.error(`Failed to refresh connection ${connectionProfile.id} with uri ${uri}, invalid connection result.`);
+							throw new Error(nls.localize('connection.invalidConnectionResult', "Connection result is invalid"));
+						} else if (!connectionResult.connected) {
+							this._logService.error(`Failed to refresh connection ${connectionProfile.id} with uri ${uri}, error code: ${connectionResult.errorCode}, error message: ${connectionResult.errorMessage}`);
+							throw new Error(nls.localize('connection.refreshAzureTokenFailure', "Failed to refresh Azure account token for connection"));
+						}
+						this._logService.debug(`Successfully refreshed token for connection ${connectionProfile.id} with uri ${uri}, result: ${connectionResult.connected} ${connectionResult.connectionProfile}, ${this._connectionStatusManager.getConnectionProfile(uri)}`);
+						return true;
+					} finally {
+						delete this._uriToReconnectPromiseMap[uri];
+					}
+				}
+				else {
+					this._logService.debug(`No need to refresh Azure acccount token for connection ${connectionProfile.id} with uri ${uri}`);
+				}
+			} else {
+				this._logService.warn(`Invalid expiry time ${expiry} for connection ${connectionProfile.id} with uri ${uri}`);
+			}
+			return true;
+		}
+		else {
+			return false;
+		}
+	}
+
 	// Request Senders
 	private async sendConnectRequest(connection: interfaces.IConnectionProfile, uri: string): Promise<boolean> {
-		let connectionInfo = assign({}, {
+		let connectionInfo = Object.assign({}, {
 			options: connection.options
 		});
 
-		await this.extensionService.activateByEvent(`onConnect:${connection.providerName}`);
+		await this._extensionService.activateByEvent(`onConnect:${connection.providerName}`);
 
 		return this._providers.get(connection.providerName).onReady.then((provider) => {
 			provider.connect(uri, connectionInfo);
 			this._onConnectRequestSent.fire();
-
+			// Connections are made per URI so while there may possibly be multiple editors with
+			// that URI they all share the same state
+			const editor = this._editorService.findEditors(URI.parse(uri))[0]?.editor;
 			// TODO make this generic enough to handle non-SQL languages too
-			this.doChangeLanguageFlavor(uri, 'sql', connection.providerName);
+			const language = editor instanceof QueryEditorInput && editor.state.isSqlCmdMode ? 'sqlcmd' : 'sql';
+			this.doChangeLanguageFlavor(uri, language, connection.providerName);
 			return true;
 		});
 	}
@@ -902,6 +1391,18 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		return this._providers.get(providerId).onReady.then(provider => {
 			provider.disconnect(uri);
 			return true;
+		});
+	}
+
+	private async sendChangePasswordRequest(connection: interfaces.IConnectionProfile, uri: string, newPassword: string): Promise<azdata.PasswordChangeResult> {
+		let connectionInfo = Object.assign({}, {
+			options: connection.options
+		});
+
+		return this._providers.get(connection.providerName).onReady.then((provider) => {
+			return provider.changePassword(uri, connectionInfo, newPassword).then(result => {
+				return result;
+			})
 		});
 	}
 
@@ -924,12 +1425,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		}
 
 		return this._providers.get(providerId).onReady.then(provider => {
-			return provider.listDatabases(uri).then(result => {
-				if (result && result.databaseNames) {
-					result.databaseNames.sort();
-				}
-				return result;
-			});
+			return provider.listDatabases(uri);
 		});
 	}
 
@@ -978,9 +1474,26 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 			if (this._connectionStatusManager.isDefaultTypeUri(info.ownerUri)) {
 				this._connectionGlobalStatus.setStatusToConnected(info.connectionSummary);
 			}
+
+			const connectionUniqueId = connection.connectionProfile.getOptionsKey();
+			if (info.isSupportedVersion === false
+				&& this._connectionsGotUnsupportedVersionWarning.indexOf(connectionUniqueId) === -1
+				&& this._configurationService.getValue<boolean>('connection.showUnsupportedServerVersionWarning')) {
+				const warningMessage = nls.localize('connection.unsupportedServerVersionWarning', "The server version is not supported by Azure Data Studio, you may still connect to it but some features in Azure Data Studio might not work as expected.");
+				this._connectionsGotUnsupportedVersionWarning.push(connectionUniqueId);
+				this._notificationService.prompt(Severity.Warning,
+					`${warningMessage} ${info.unsupportedVersionMessage ?? ''}`, [
+					{
+						label: nls.localize('connection.neverShowUnsupportedVersionWarning', "Don't show again"),
+						run: () => {
+							this._configurationService.updateValue('connection.showUnsupportedServerVersionWarning', false).catch(e => errors.onUnexpectedError(e));
+						}
+					}
+				]);
+			}
 		} else {
 			connection.connectHandler(false, info.errorMessage, info.errorNumber, info.messages);
-			this._telemetryService.createErrorEvent(TelemetryKeys.TelemetryView.Shell, TelemetryKeys.TelemetryError.DatabaseConnectionError, info.errorNumber.toString())
+			this._telemetryService.createErrorEvent(TelemetryKeys.TelemetryView.Shell, TelemetryKeys.TelemetryError.DatabaseConnectionError, info.errorNumber?.toString())
 				.withConnectionInfo(connection.connectionProfile)
 				.withAdditionalMeasurements({
 					extensionConnectionTimeMs: connection.extensionTimer.elapsed() - connection.serviceTimer.elapsed(),
@@ -1007,19 +1520,30 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	public onIntelliSenseCacheComplete(handle: number, connectionUri: string): void {
 	}
 
-	public changeGroupIdForConnectionGroup(source: ConnectionProfileGroup, target: ConnectionProfileGroup): Promise<void> {
+	public async changeGroupIdForConnectionGroup(source: ConnectionProfileGroup, target: ConnectionProfileGroup): Promise<void> {
 		this._telemetryService.sendActionEvent(TelemetryKeys.TelemetryView.Shell, TelemetryKeys.TelemetryAction.MoveServerConnection);
-		return this._connectionStore.changeGroupIdForConnectionGroup(source, target);
+		await this._connectionStore.changeGroupIdForConnectionGroup(source, target);
+		this._onConnectionProfileGroupMoved.fire({
+			source: source,
+			oldGroupId: source.parentId,
+			newGroupId: target.id
+		});
 	}
 
-	public changeGroupIdForConnection(source: ConnectionProfile, targetGroupId: string): Promise<void> {
+	public async changeGroupIdForConnection(source: ConnectionProfile, targetGroupId: string): Promise<void> {
+		const oldProfileId = source.groupId;
 		let id = Utils.generateUri(source);
 		this._telemetryService.sendActionEvent(TelemetryKeys.TelemetryView.Shell, TelemetryKeys.TelemetryAction.MoveServerGroup);
-		return this._connectionStore.changeGroupIdForConnection(source, targetGroupId).then(result => {
-			this._onAddConnectionProfile.fire(source);
-			if (id && targetGroupId) {
-				source.groupId = targetGroupId;
-			}
+		await this._connectionStore.changeGroupIdForConnection(source, targetGroupId)
+		this._onAddConnectionProfile.fire(source);
+		if (id && targetGroupId) {
+			source.groupId = targetGroupId;
+		}
+		this.changeConnectionUri(Utils.generateUri(source), id);
+		this._onConnectionProfileMoved.fire({
+			source: source,
+			oldGroupId: oldProfileId,
+			newGroupId: targetGroupId,
 		});
 	}
 
@@ -1071,6 +1595,23 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	}
 
 	/**
+	 * Replaces connection info uri with new uri. No-op if the URI does not currently have an associated connection.
+	 */
+	public changeConnectionUri(newUri: string, oldUri: string): void {
+		if (!this._connectionStatusManager.hasConnection(oldUri)) {
+			return;
+		}
+		this._connectionStatusManager.changeConnectionUri(newUri, oldUri);
+		if (!this._uriToProvider[oldUri]) {
+			this._logService.error(`No provider found for old URI : '${oldUri}'`);
+			throw new Error(nls.localize('connectionManagementService.noProviderForUri', 'Could not find provider for uri: {0}', oldUri));
+		}
+		// Provider will persist after disconnect, it is okay to overwrite the map if it exists from a previously deleted connection.
+		this._uriToProvider[newUri] = this._uriToProvider[oldUri];
+		delete this._uriToProvider[oldUri];
+	}
+
+	/**
 	 * Functions to handle the connecting life cycle
 	 */
 
@@ -1086,18 +1627,18 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 				if (connectionMngInfo && connectionMngInfo.deleted) {
 					this._logService.info(`Found deleted connection management info for ${uri} - removing`);
 					this._connectionStatusManager.deleteConnection(uri);
-					resolve({ connected: connectResult, errorMessage: undefined, errorCode: undefined, callStack: undefined, errorHandled: true, connectionProfile: connection });
+					resolve({ connected: connectResult, errorMessage: undefined, errorCode: undefined, messageDetails: undefined, errorHandled: true, connectionProfile: connection });
 				} else {
 					if (errorMessage) {
 						// Connection to the server failed
 						this._logService.info(`Error occurred while connecting, removing connection management info for ${uri}`);
 						this._connectionStatusManager.deleteConnection(uri);
-						resolve({ connected: connectResult, errorMessage: errorMessage, errorCode: errorCode, callStack: callStack, connectionProfile: connection });
+						resolve({ connected: connectResult, errorMessage: errorMessage, errorCode: errorCode, messageDetails: callStack, connectionProfile: connection });
 					} else {
 						if (connectionMngInfo.serverInfo) {
 							connection.options.isCloud = connectionMngInfo.serverInfo.isCloud;
 						}
-						resolve({ connected: connectResult, errorMessage: errorMessage, errorCode: errorCode, callStack: callStack, connectionProfile: connection });
+						resolve({ connected: connectResult, errorMessage: errorMessage, errorCode: errorCode, messageDetails: callStack, connectionProfile: connection });
 					}
 				}
 			});
@@ -1241,10 +1782,10 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		return this._connectionStatusManager.isConnected(fileUri) ? this._connectionStatusManager.findConnection(fileUri) : undefined;
 	}
 
-	public listDatabases(connectionUri: string): Thenable<azdata.ListDatabasesResult | undefined> {
-		const self = this;
-		if (self.isConnected(connectionUri)) {
-			return self.sendListDatabasesRequest(connectionUri);
+	public async listDatabases(connectionUri: string): Promise<azdata.ListDatabasesResult | undefined> {
+		await this.refreshAzureAccountTokenIfNecessary(connectionUri);
+		if (this.isConnected(connectionUri)) {
+			return this.sendListDatabasesRequest(connectionUri);
 		}
 		return Promise.resolve(undefined);
 	}
@@ -1271,6 +1812,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	public editGroup(group: ConnectionProfileGroup): Promise<void> {
 		return this._connectionStore.editGroup(group).then(groupId => {
 			this._onAddConnectionProfile.fire(undefined);
+			this._onConnectionProfileGroupEdited.fire(group);
 		});
 	}
 
@@ -1278,7 +1820,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 	 * Deletes a connection from registered servers.
 	 * Disconnects a connection before removing from settings.
 	 */
-	public deleteConnection(connection: ConnectionProfile): Promise<boolean> {
+	public async deleteConnection(connection: ConnectionProfile): Promise<boolean> {
 		this._telemetryService.createActionEvent(TelemetryKeys.TelemetryView.Shell, TelemetryKeys.TelemetryAction.DeleteConnection)
 			.withAdditionalProperties({
 				provider: connection.providerName
@@ -1291,6 +1833,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 					// Remove profile from configuration
 					return this._connectionStore.deleteConnectionFromConfiguration(connection).then(() => {
 						this._onDeleteConnectionProfile.fire();
+						this._onConnectionProfileDeleted.fire(connection);
 						return true;
 					});
 
@@ -1302,6 +1845,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 			// Remove disconnected profile from settings
 			return this._connectionStore.deleteConnectionFromConfiguration(connection).then(() => {
 				this._onDeleteConnectionProfile.fire();
+				this._onConnectionProfileDeleted.fire(connection);
 				return true;
 			});
 		}
@@ -1330,6 +1874,7 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 			// Remove profiles and groups from config
 			return this._connectionStore.deleteGroupFromConfiguration(group).then(() => {
 				this._onDeleteConnectionProfile.fire();
+				this._onConnectionProfileGroupDeleted.fire(group);
 				return true;
 			});
 		}).catch(() => false);
@@ -1437,18 +1982,13 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		});
 	}
 
-	/**
-	 * Serialize connection with options provider
-	 * TODO this could be a map reduce operation
-	 */
-	public buildConnectionInfo(connectionString: string, provider: string): Thenable<azdata.ConnectionInfo> {
-		let connectionProvider = this._providers.get(provider);
-		if (connectionProvider) {
-			return connectionProvider.onReady.then(e => {
-				return e.buildConnectionInfo(connectionString);
-			});
+	public async buildConnectionInfo(connectionString: string, providerId: string): Promise<azdata.ConnectionInfo> {
+		const connectionProviderInfo = this._providers.get(providerId);
+		if (!connectionProviderInfo) {
+			throw new Error(nls.localize('connection.unknownProvider', "Unknown provider '{0}'", providerId));
 		}
-		return Promise.resolve(undefined);
+		const provider = await connectionProviderInfo.onReady;
+		return provider.buildConnectionInfo(connectionString)
 	}
 
 	public getProviderProperties(providerName: string): ConnectionProviderProperties {
@@ -1499,20 +2039,6 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 		return connections;
 	}
 
-	public getConnection(uri: string): ConnectionProfile {
-		const connections = this.getActiveConnections();
-		if (connections) {
-			for (let connection of connections) {
-				let connectionUri = this.getConnectionUriFromId(connection.id);
-				if (connectionUri === uri) {
-					return connection;
-				}
-			}
-		}
-
-		return undefined;
-	}
-
 	private getConnectionsInGroup(group: ConnectionProfileGroup): ConnectionProfile[] {
 		const connections = [];
 		if (group) {
@@ -1524,5 +2050,34 @@ export class ConnectionManagementService extends Disposable implements IConnecti
 			}
 		}
 		return connections;
+	}
+
+	public async handleUnsupportedProvider(providerId: string): Promise<boolean> {
+		const extensionId = ConnectionProviderAndExtensionMap.get(providerId);
+		const message = extensionId ? nls.localize('connection.extensionNotInstalled', "The extension '{0}' is required in order to connect to this resource. Do you want to install it?", extensionId) :
+			nls.localize('connectionDialog.connectionProviderNotSupported', "The extension that supports provider type '{0}' is not currently installed. Do you want to view the extensions?", providerId);
+		const result = await this._dialogService.confirm({
+			message: message,
+			type: 'question'
+		});
+		if (result.confirmed) {
+			if (extensionId) {
+				const providerRegistered = new Promise<void>(resolve => {
+					const eventHandler = this._capabilitiesService.onCapabilitiesRegistered(e => {
+						if (e.id === providerId) {
+							resolve();
+							eventHandler.dispose();
+						}
+					});
+				});
+				// Install the extension and then wait for the provider to be registered to ensure that everything is ready for the caller to use
+				await this._commandService.executeCommand('workbench.extensions.installExtension', extensionId);
+				await providerRegistered;
+
+			} else {
+				await this._paneCompositePartService.openPaneComposite(ExtensionsViewletID, ViewContainerLocation.Sidebar);
+			}
+		}
+		return result.confirmed;
 	}
 }

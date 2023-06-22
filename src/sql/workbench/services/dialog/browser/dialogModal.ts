@@ -20,7 +20,7 @@ import { DialogMessage } from 'sql/workbench/api/common/sqlExtHostTypes';
 import { IClipboardService } from 'vs/platform/clipboard/common/clipboardService';
 import { append, $ } from 'vs/base/browser/dom';
 import { ILogService } from 'vs/platform/log/common/log';
-import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfigurationService';
+import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfiguration';
 import { IAdsTelemetryService } from 'sql/platform/telemetry/common/telemetry';
 import { onUnexpectedError } from 'vs/base/common/errors';
 import { attachCustomDialogStyler } from 'sql/workbench/common/styler';
@@ -93,7 +93,17 @@ export class DialogModal extends Modal {
 		};
 
 		messageChangeHandler(this._dialog.message);
-		this._dialog.onMessageChange(message => messageChangeHandler(message));
+		this._register(this._dialog.onMessageChange(message => messageChangeHandler(message)));
+		this._register(this._dialog.onLoadingChange((loadingState) => {
+			this.spinner = loadingState;
+		}));
+		this._register(this._dialog.onLoadingTextChange((loadingText) => {
+			this._modalOptions.spinnerTitle = loadingText;
+
+		}));
+		this._register(this._dialog.onLoadingCompletedTextChange((loadingCompletedText) => {
+			this._modalOptions.onSpinnerHideText = loadingCompletedText;
+		}));
 	}
 
 	private addDialogButton(button: DialogButton, onSelect: () => void = () => undefined, registerClickEvent: boolean = true, requireDialogValid: boolean = false): Button {

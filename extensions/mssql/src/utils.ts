@@ -5,26 +5,37 @@
 
 import * as azdata from 'azdata';
 import * as vscode from 'vscode';
-import * as bdc from 'bdc';
 import * as path from 'path';
-import * as crypto from 'crypto';
 import * as os from 'os';
 import * as findRemoveSync from 'find-remove';
-import * as constants from './constants';
 import { promises as fs } from 'fs';
+import { IConfig, ServerProvider } from '@microsoft/ads-service-downloader';
+import { env } from 'process';
 
 const configTracingLevel = 'tracingLevel';
+const configPiiLogging = 'piiLogging';
 const configLogRetentionMinutes = 'logRetentionMinutes';
 const configLogFilesRemovalLimit = 'logFilesRemovalLimit';
 const extensionConfigSectionName = 'mssql';
 const configLogDebugInfo = 'logDebugInfo';
+const parallelMessageProcessingConfig = 'parallelMessageProcessing';
+const enableSqlAuthenticationProviderConfig = 'enableSqlAuthenticationProvider';
+const tableDesignerPreloadConfig = 'tableDesigner.preloadDatabaseModel';
+
+const azureExtensionConfigName = 'azure';
+const azureAuthenticationLibraryConfig = 'authenticationLibrary';
+/**
+ *
+ * @returns Whether the current OS is linux or not
+ */
+export const isLinux = os.platform() === 'linux';
 
 // The function is a duplicate of \src\paths.js. IT would be better to import path.js but it doesn't
 // work for now because the extension is running in different process.
 export function getAppDataPath() {
 	let platform = process.platform;
 	switch (platform) {
-		case 'win32': return process.env['APPDATA'] || path.join(process.env['USERPROFILE'], 'AppData', 'Roaming');
+		case 'win32': return process.env['APPDATA'] || path.join(process.env['USERPROFILE'] || '', 'AppData', 'Roaming');
 		case 'darwin': return path.join(os.homedir(), 'Library', 'Application Support');
 		case 'linux': return process.env['XDG_CONFIG_HOME'] || path.join(os.homedir(), '.config');
 		default: throw new Error('Platform not supported');
@@ -34,7 +45,6 @@ export function getAppDataPath() {
 /**
  * Get a file name that is not already used in the target directory
  * @param filePath source notebook file name
- * @param fileExtension file type
  */
 export function findNextUntitledEditorName(filePath: string): string {
 	const fileExtension = path.extname(filePath);
@@ -55,36 +65,110 @@ export function removeOldLogFiles(logPath: string, prefix: string): JSON {
 }
 
 export function getConfiguration(config: string = extensionConfigSectionName): vscode.WorkspaceConfiguration {
-	return vscode.workspace.getConfiguration(extensionConfigSectionName);
+	return vscode.workspace.getConfiguration(config);
+}
+/**
+ * We need Azure core extension configuration for fetching Authentication Library setting in use.
+ * This is required for 'enableSqlAuthenticationProvider' to be enabled (as it applies to MSAL only).
+ * This can be removed in future when ADAL support is dropped.
+ * @param config Azure core extension configuration section name
+ * @returns Azure core extension config section
+ */
+export function getAzureCoreExtConfiguration(config: string = azureExtensionConfigName): vscode.WorkspaceConfiguration {
+	return vscode.workspace.getConfiguration(config);
 }
 
-export function getConfigLogFilesRemovalLimit(): number {
+export function getConfigLogFilesRemovalLimit(): number | undefined {
 	let config = getConfiguration();
 	if (config) {
 		return Number((config[configLogFilesRemovalLimit]).toFixed(0));
-	}
-	else {
+	} else {
 		return undefined;
 	}
 }
 
-export function getConfigLogRetentionSeconds(): number {
+export function getConfigLogRetentionSeconds(): number | undefined {
 	let config = getConfiguration();
 	if (config) {
 		return Number((config[configLogRetentionMinutes] * 60).toFixed(0));
-	}
-	else {
+	} else {
 		return undefined;
 	}
 }
 
-export function getConfigTracingLevel(): string {
+/**
+ * The tracing level defined in the package.json
+ */
+export enum TracingLevel {
+	All = 'All',
+	Off = 'Off',
+	Critical = 'Critical',
+	Error = 'Error',
+	Warning = 'Warning',
+	Information = 'Information',
+	Verbose = 'Verbose'
+}
+
+export function getConfigTracingLevel(): TracingLevel {
 	let config = getConfiguration();
 	if (config) {
 		return config[configTracingLevel];
+	} else {
+		return TracingLevel.Critical;
+	}
+}
+
+export function getConfigPiiLogging(): boolean {
+	let config = getConfiguration();
+	if (config) {
+		return config[configPiiLogging];
+	} else {
+		return false;
+	}
+}
+
+export function getConfigPreloadDatabaseModel(): boolean {
+	let config = getConfiguration();
+	if (config) {
+		return config.get<boolean>(tableDesignerPreloadConfig, false);
+	} else {
+		return false;
+	}
+}
+
+export function setConfigPreloadDatabaseModel(enable: boolean): void {
+	let config = getConfiguration();
+	if (config) {
+		void config.update(tableDesignerPreloadConfig, enable, true);
+	}
+}
+
+export function getParallelMessageProcessingConfig(): boolean {
+	const config = getConfiguration();
+	if (!config) {
+		return false;
+	}
+	const setting = config.inspect(parallelMessageProcessingConfig);
+	return (azdata.env.quality === azdata.env.AppQuality.dev && setting?.globalValue === undefined && setting?.workspaceValue === undefined) ? true : config[parallelMessageProcessingConfig];
+}
+
+export function getAzureAuthenticationLibraryConfig(): string {
+	const config = getAzureCoreExtConfiguration();
+	if (config) {
+		return config.get<string>(azureAuthenticationLibraryConfig, 'MSAL'); // default Auth library
 	}
 	else {
-		return undefined;
+		return 'MSAL';
+	}
+}
+
+export function getEnableSqlAuthenticationProviderConfig(): boolean {
+	const config = getConfiguration();
+	if (config) {
+		return config.get<boolean>(enableSqlAuthenticationProviderConfig, true); // enabled by default
+	}
+	else {
+		return true;
 	}
 }
 
@@ -94,6 +178,10 @@ export function getLogFileName(prefix: string, pid: number): string {
 
 export function getCommonLaunchArgsAndCleanupOldLogFiles(logPath: string, fileName: string, executablePath: string): string[] {
 	let launchArgs = [];
+	// Application Name determines app storage location or user data path.
+	launchArgs.push('--application-name', 'azuredatastudio');
+	launchArgs.push('--data-path', getAppDataPath());
+
 	launchArgs.push(`--locale`, vscode.env.language);
 
 	launchArgs.push('--log-file');
@@ -101,84 +189,25 @@ export function getCommonLaunchArgsAndCleanupOldLogFiles(logPath: string, fileNa
 	launchArgs.push(logFile);
 
 	console.log(`logFile for ${path.basename(executablePath)} is ${logFile}`);
-	console.log(`This process (ui Extenstion Host) is pid: ${process.pid}`);
+	console.log(`This process (ui Extension Host) is pid: ${process.pid}`);
 	// Delete old log files
 	let deletedLogFiles = removeOldLogFiles(logPath, fileName);
 	console.log(`Old log files deletion report: ${JSON.stringify(deletedLogFiles)}`);
 	launchArgs.push('--tracing-level');
 	launchArgs.push(getConfigTracingLevel());
+	if (getConfigPiiLogging()) {
+		launchArgs.push('--pii-logging');
+	}
+	// Always enable autoflush so that log entries are written immediately to disk, otherwise we can end up with partial logs
+	launchArgs.push('--autoflush-log');
 	return launchArgs;
 }
 
 export function ensure(target: { [key: string]: any }, key: string): any {
 	if (target[key] === void 0) {
-		target[key] = {} as any;
+		target[key] = {};
 	}
 	return target[key];
-}
-
-export interface IPackageInfo {
-	name: string;
-	version: string;
-	aiKey: string;
-}
-
-export function getPackageInfo(packageJson: any): IPackageInfo {
-	if (packageJson) {
-		return {
-			name: packageJson.name,
-			version: packageJson.version,
-			aiKey: packageJson.aiKey
-		};
-	}
-	return undefined;
-}
-
-export function generateUserId(): Promise<string> {
-	return new Promise<string>(resolve => {
-		try {
-			let interfaces = os.networkInterfaces();
-			let mac;
-			for (let key of Object.keys(interfaces)) {
-				let item = interfaces[key][0];
-				if (!item.internal) {
-					mac = item.mac;
-					break;
-				}
-			}
-			if (mac) {
-				resolve(crypto.createHash('sha256').update(mac + os.homedir(), 'utf8').digest('hex'));
-			} else {
-				resolve(generateGuid());
-			}
-		} catch (err) {
-			resolve(generateGuid()); // fallback
-		}
-	});
-}
-
-export function generateGuid(): string {
-	let hexValues: string[] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'];
-	// c.f. rfc4122 (UUID version 4 = xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
-	let oct: string = '';
-	let tmp: number;
-	/* tslint:disable:no-bitwise */
-	for (let a: number = 0; a < 4; a++) {
-		tmp = (4294967296 * Math.random()) | 0;
-		oct += hexValues[tmp & 0xF] +
-			hexValues[tmp >> 4 & 0xF] +
-			hexValues[tmp >> 8 & 0xF] +
-			hexValues[tmp >> 12 & 0xF] +
-			hexValues[tmp >> 16 & 0xF] +
-			hexValues[tmp >> 20 & 0xF] +
-			hexValues[tmp >> 24 & 0xF] +
-			hexValues[tmp >> 28 & 0xF];
-	}
-
-	// 'Set the two most significant bits (bits 6 and 7) of the clock_seq_hi_and_reserved to zero and one, respectively'
-	let clockSequenceHi: string = hexValues[8 + (Math.random() * 4) | 0];
-	return oct.substr(0, 8) + '-' + oct.substr(9, 4) + '-4' + oct.substr(13, 3) + '-' + clockSequenceHi + oct.substr(16, 3) + '-' + oct.substr(19, 12);
-	/* tslint:enable:no-bitwise */
 }
 
 export function verifyPlatform(): Thenable<boolean> {
@@ -194,7 +223,7 @@ export function getErrorMessage(error: Error | any, removeHeader: boolean = fals
 	if (error instanceof Error) {
 		errorMessage = error.message;
 	} else if (error.responseText) {
-		errorMessage = error.responseText;
+		errorMessage = error.responseText as string;
 		if (error.status) {
 			errorMessage += ` (${error.status})`;
 		}
@@ -222,57 +251,7 @@ export function isObjectExplorerContext(object: any): object is azdata.ObjectExp
 }
 
 export function getUserHome(): string {
-	return process.env.HOME || process.env.USERPROFILE;
-}
-
-export function getClusterEndpoints(serverInfo: azdata.ServerInfo): bdc.IEndpointModel[] | undefined {
-	let endpoints: RawEndpoint[] = serverInfo.options[constants.clusterEndpointsProperty];
-	if (!endpoints || endpoints.length === 0) { return []; }
-
-	return endpoints.map(e => {
-		// If endpoint is missing, we're on CTP bits. All endpoints from the CTP serverInfo should be treated as HTTPS
-		let endpoint = e.endpoint ? e.endpoint : `https://${e.ipAddress}:${e.port}`;
-		let updatedEndpoint: bdc.IEndpointModel = {
-			name: e.serviceName,
-			description: e.description,
-			endpoint: endpoint,
-			protocol: e.protocol
-		};
-		return updatedEndpoint;
-	});
-}
-
-export async function isBigDataCluster(connectionId: string): Promise<boolean> {
-	const serverInfo = await azdata.connection.getServerInfo(connectionId);
-
-	return !!serverInfo?.options?.[constants.isBigDataClusterProperty];
-}
-
-export type HostAndIp = { host: string, port: string };
-
-export function getHostAndPortFromEndpoint(endpoint: string): HostAndIp {
-	let authority = vscode.Uri.parse(endpoint).authority;
-	let hostAndPortRegex = /^(.*)([,:](\d+))/g;
-	let match = hostAndPortRegex.exec(authority);
-	if (match) {
-		return {
-			host: match[1],
-			port: match[3]
-		};
-	}
-	return {
-		host: authority,
-		port: undefined
-	};
-}
-
-interface RawEndpoint {
-	serviceName: string;
-	description?: string;
-	endpoint?: string;
-	protocol?: string;
-	ipAddress?: string;
-	port?: number;
+	return process.env.HOME || process.env.USERPROFILE || '';
 }
 
 export function isValidNumber(maybeNumber: any) {
@@ -286,9 +265,9 @@ export function isValidNumber(maybeNumber: any) {
  * Helper to log messages to the developer console if enabled
  * @param msg Message to log to the console
  */
-export function logDebug(msg: any): void {
+export function logDebug(msg: unknown): void {
 	let config = vscode.workspace.getConfiguration(extensionConfigSectionName);
-	let logDebugInfo = config[configLogDebugInfo];
+	let logDebugInfo = !!config[configLogDebugInfo];
 	if (logDebugInfo === true) {
 		let currentTime = new Date().toLocaleTimeString();
 		let outputMsg = '[' + currentTime + ']: ' + msg ? msg.toString() : '';
@@ -304,3 +283,46 @@ export async function exists(path: string): Promise<boolean> {
 		return false;
 	}
 }
+
+const STS_OVERRIDE_ENV_VAR = 'ADS_SQLTOOLSSERVICE';
+let overrideMessageDisplayed = false;
+/**
+ * Gets the full path to the EXE for the specified tools service, downloading it in the process if necessary. The location
+ * for this can be overridden with an environment variable for debugging or other purposes.
+ * @param config The configuration values of the server to get/download
+ * @param handleServerEvent A callback for handling events from the server downloader
+ * @returns The path to the server exe
+ */
+export async function getOrDownloadServer(config: IConfig, handleServerEvent?: (e: string, ...args: any[]) => void): Promise<string> {
+	// This env var is used to override the base install location of STS - primarily to be used for debugging scenarios.
+	try {
+		const stsRootPath = env[STS_OVERRIDE_ENV_VAR];
+		if (stsRootPath) {
+			for (const exeFile of config.executableFiles) {
+				const serverFullPath = path.join(stsRootPath, exeFile);
+				if (await exists(serverFullPath)) {
+					const overrideMessage = `Using ${exeFile} from ${stsRootPath}`;
+					// Display message to the user so they know the override is active, but only once so we don't show too many
+					if (!overrideMessageDisplayed) {
+						overrideMessageDisplayed = true;
+						void vscode.window.showInformationMessage(overrideMessage);
+					}
+					console.log(overrideMessage);
+					return serverFullPath;
+				}
+			}
+			console.warn(`Could not find valid SQL Tools Service EXE from ${JSON.stringify(config.executableFiles)} at ${stsRootPath}, falling back to config`);
+		}
+	} catch (err) {
+		console.warn('Unexpected error getting override path for SQL Tools Service client ', err);
+		// Fall back to config if something unexpected happens here
+	}
+
+	const serverdownloader = new ServerProvider(config);
+	if (handleServerEvent) {
+		serverdownloader.eventEmitter.onAny(handleServerEvent);
+	}
+
+	return serverdownloader.getOrDownloadServer();
+}
+

@@ -7,6 +7,7 @@ import { escape } from 'sql/base/common/strings';
 import { getIconCellValue, IconColumnOptions, TableColumn } from 'sql/base/browser/ui/table/plugins/tableColumn';
 
 export interface TextWithIconColumnOptions extends IconColumnOptions {
+	editor?: any;
 }
 
 export class TextWithIconColumn<T extends Slick.SlickData> implements TableColumn<T> {
@@ -20,12 +21,14 @@ export class TextWithIconColumn<T extends Slick.SlickData> implements TableColum
 			resizable: this.options.resizable,
 			formatter: (row: number, cell: number, value: any, columnDef: Slick.Column<T>, dataContext: T): string => {
 				const iconValue = getIconCellValue(this.options, dataContext);
-				return `<div class="icon codicon slick-icon-cell-content ${iconValue.iconCssClass ?? ''}">${escape(iconValue.title ?? '')}</div>`;
+				const titleValue = escape(iconValue.title ?? '');
+				return `<div class="icon codicon slick-icon-cell-content ${iconValue.iconCssClass ?? ''}" title="${titleValue}">${titleValue}</div>`;
 			},
 			width: this.options.width,
 			name: this.options.name,
 			cssClass: 'slick-icon-cell',
-			headerCssClass: this.options.headerCssClass
+			headerCssClass: this.options.headerCssClass,
+			editor: this.options.editor
 		};
 	}
 }

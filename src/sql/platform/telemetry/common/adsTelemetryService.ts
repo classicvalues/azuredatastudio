@@ -4,10 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as azdata from 'azdata';
-import { IAdsTelemetryService, ITelemetryInfo, ITelemetryEvent, ITelemetryEventMeasures, ITelemetryEventProperties } from 'sql/platform/telemetry/common/telemetry';
+import { IAdsTelemetryService, ITelemetryEvent, ITelemetryEventMeasures, ITelemetryEventProperties } from 'sql/platform/telemetry/common/telemetry';
 import { ILogService } from 'vs/platform/log/common/log';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { assign } from 'vs/base/common/objects';
 import { EventName } from 'sql/platform/telemetry/common/telemetryKeys';
 
 
@@ -36,32 +35,33 @@ class TelemetryEventImpl implements ITelemetryEvent {
 	}
 
 	public withAdditionalProperties(additionalProperties: ITelemetryEventProperties): ITelemetryEvent {
-		assign(this._properties, additionalProperties);
+		Object.assign(this._properties, additionalProperties);
 		return this;
 	}
 
 	public withAdditionalMeasurements(additionalMeasurements: ITelemetryEventMeasures): ITelemetryEvent {
-		assign(this._measurements, additionalMeasurements);
+		Object.assign(this._measurements, additionalMeasurements);
 		return this;
 	}
 
 	public withConnectionInfo(connectionInfo?: azdata.IConnectionProfile): ITelemetryEvent {
-		assign(this._properties,
+		// IMPORTANT - If making changes here the same changes should generally be made in the ads-extension-telemetry version as well
+		Object.assign(this._properties,
 			{
 				authenticationType: connectionInfo?.authenticationType,
-				provider: connectionInfo?.providerName
+				providerName: connectionInfo?.providerName
 			});
 		return this;
 	}
 
 	public withServerInfo(serverInfo?: azdata.ServerInfo): ITelemetryEvent {
-		assign(this._properties,
+		// IMPORTANT - If making changes here the same changes should generally be made in the ads-extension-telemetry version as well
+		Object.assign(this._properties,
 			{
 				connectionType: serverInfo?.isCloud !== undefined ? (serverInfo.isCloud ? 'Azure' : 'Standalone') : '',
 				serverVersion: serverInfo?.serverVersion ?? '',
 				serverEdition: serverInfo?.serverEdition ?? '',
-				serverEngineEdition: serverInfo?.engineEditionId ?? '',
-				isBigDataCluster: serverInfo?.options?.isBigDataCluster ?? false,
+				serverEngineEdition: serverInfo?.engineEditionId ?? ''
 			});
 		return this;
 	}
@@ -89,18 +89,6 @@ export class AdsTelemetryService implements IAdsTelemetryService {
 		@ITelemetryService private telemetryService: ITelemetryService,
 		@ILogService private logService: ILogService
 	) { }
-
-	setEnabled(value: boolean): void {
-		return this.telemetryService.setEnabled(value);
-	}
-
-	get isOptedIn(): boolean {
-		return this.telemetryService.isOptedIn;
-	}
-
-	getTelemetryInfo(): Promise<ITelemetryInfo> {
-		return this.telemetryService.getTelemetryInfo();
-	}
 
 	/**
 	 * Creates a View event that can be sent later. This is used to log that a particular page or item was seen.
@@ -158,7 +146,8 @@ export class AdsTelemetryService implements IAdsTelemetryService {
 
 	/**
 	 * Sends a Metrics event. This is used to log measurements taken.
-	 * @param measurements The metrics to send
+	 * @param metrics The metrics to send
+	 * @param groupName The name of the group these metrics belong to
 	 */
 	public sendMetricsEvent(metrics: ITelemetryEventMeasures, groupName: string = ''): void {
 		this.createMetricsEvent(metrics, groupName).send();
@@ -170,7 +159,6 @@ export class AdsTelemetryService implements IAdsTelemetryService {
 	 * @param name The friendly name of the error
 	 * @param errorCode The error code returned
 	 * @param errorType The specific type of error
-	 * @param properties Optional additional properties
 	 */
 	public createErrorEvent(view: string, name: string, errorCode: string = '', errorType: string = ''): ITelemetryEvent {
 		return new TelemetryEventImpl(this.telemetryService, this.logService, EventName.Error, {
@@ -219,18 +207,6 @@ export class NullAdsTelemetryService implements IAdsTelemetryService {
 
 	_serviceBrand: undefined;
 
-	get isOptedIn(): boolean {
-		return false;
-	}
-
-	setEnabled(value: boolean): void { }
-	getTelemetryInfo(): Promise<ITelemetryInfo> {
-		return Promise.resolve({
-			sessionId: '',
-			machineId: '',
-			instanceId: ''
-		});
-	}
 	createViewEvent(view: string): ITelemetryEvent { return new NullTelemetryEventImpl(); }
 	sendViewEvent(view: string): void { }
 	createActionEvent(view: string, action: string, target?: string, source?: string, durationInMs?: number): ITelemetryEvent { return new NullTelemetryEventImpl(); }

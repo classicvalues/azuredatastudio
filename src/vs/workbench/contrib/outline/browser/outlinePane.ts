@@ -11,7 +11,7 @@ import { IDisposable, toDisposable, DisposableStore, MutableDisposable } from 'v
 import { LRUCache } from 'vs/base/common/map';
 import { localize } from 'vs/nls';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { ContextKeyEqualsExpr, IContextKey, IContextKeyService, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
+import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
 import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
@@ -23,7 +23,6 @@ import { ViewAction, ViewPane } from 'vs/workbench/browser/parts/views/viewPane'
 import { IViewletViewOptions } from 'vs/workbench/browser/parts/views/viewsViewlet';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { FuzzyScore } from 'vs/base/common/filters';
-import { IDataTreeViewState } from 'vs/base/browser/ui/tree/dataTree';
 import { basename } from 'vs/base/common/resources';
 import { IViewDescriptorService } from 'vs/workbench/common/views';
 import { IOpenerService } from 'vs/platform/opener/common/opener';
@@ -36,7 +35,7 @@ import { EditorResourceAccessor, IEditorPane } from 'vs/workbench/common/editor'
 import { CancellationTokenSource } from 'vs/base/common/cancellation';
 import { Event } from 'vs/base/common/event';
 import { ITreeSorter } from 'vs/base/browser/ui/tree/tree';
-import { URI } from 'vs/base/common/uri';
+import { AbstractTreeViewState, IAbstractTreeViewState, TreeFindMode } from 'vs/base/browser/ui/tree/abstractTree';
 
 const _ctxFollowsCursor = new RawContextKey('outlineFollowsCursor', false);
 const _ctxFilterOnType = new RawContextKey('outlineFiltersOnType', false);
@@ -66,7 +65,8 @@ export class OutlinePane extends ViewPane {
 
 	private readonly _disposables = new DisposableStore();
 
-	private readonly _editorDisposables = new DisposableStore();
+	private readonly _editorControlDisposables = new DisposableStore();
+	private readonly _editorPaneDisposables = new DisposableStore();
 	private readonly _outlineViewState = new OutlineViewState();
 
 	private readonly _editorListener = new MutableDisposable();
@@ -77,7 +77,7 @@ export class OutlinePane extends ViewPane {
 	private _treeContainer!: HTMLElement;
 	private _tree?: WorkbenchDataTree<IOutline<any> | undefined, any, FuzzyScore>;
 	private _treeDimensions?: dom.Dimension;
-	private _treeStates = new LRUCache<string, IDataTreeViewState>(10);
+	private _treeStates = new LRUCache<string, IAbstractTreeViewState>(10);
 
 	private _ctxFollowsCursor!: IContextKey<boolean>;
 	private _ctxFilterOnType!: IContextKey<boolean>;
@@ -120,7 +120,8 @@ export class OutlinePane extends ViewPane {
 
 	override dispose(): void {
 		this._disposables.dispose();
-		this._editorDisposables.dispose();
+		this._editorPaneDisposables.dispose();
+		this._editorControlDisposables.dispose();
 		this._editorListener.dispose();
 		super.dispose();
 	}
@@ -135,7 +136,7 @@ export class OutlinePane extends ViewPane {
 		this._domNode = container;
 		container.classList.add('outline-pane');
 
-		let progressContainer = dom.$('.outline-progress');
+		const progressContainer = dom.$('.outline-progress');
 		this._message = dom.$('.outline-message');
 
 		this._progressBar = new ProgressBar(progressContainer);
@@ -148,7 +149,8 @@ export class OutlinePane extends ViewPane {
 			if (!visible) {
 				// stop everything when not visible
 				this._editorListener.clear();
-				this._editorDisposables.clear();
+				this._editorPaneDisposables.clear();
+				this._editorControlDisposables.clear();
 
 			} else if (!this._editorListener.value) {
 				const event = Event.any(this._editorService.onDidActiveEditorChange, this._outlineService.onDidChange);
@@ -178,24 +180,37 @@ export class OutlinePane extends ViewPane {
 		this._message.innerText = message;
 	}
 
-	private _captureViewState(resource: URI | undefined): boolean {
-		if (resource && this._tree) {
-			const oldOutline = this._tree?.getInput();
-			if (oldOutline) {
-				this._treeStates.set(`${oldOutline.outlineKind}/${resource}`, this._tree!.getViewState());
+	private _captureViewState(): boolean {
+		if (this._tree) {
+			const oldOutline = this._tree.getInput();
+			if (oldOutline && oldOutline.uri) {
+				this._treeStates.set(`${oldOutline.outlineKind}/${oldOutline.uri}`, this._tree.getViewState());
 				return true;
 			}
 		}
 		return false;
 	}
 
-	private async _handleEditorChanged(pane: IEditorPane | undefined): Promise<void> {
+	private _handleEditorChanged(pane: IEditorPane | undefined): void {
+		this._editorPaneDisposables.clear();
+
+		if (pane) {
+			// react to control changes from within pane (https://github.com/microsoft/vscode/issues/134008)
+			this._editorPaneDisposables.add(pane.onDidChangeControl(() => {
+				this._handleEditorControlChanged(pane);
+			}));
+		}
+
+		this._handleEditorControlChanged(pane);
+	}
+
+	private async _handleEditorControlChanged(pane: IEditorPane | undefined): Promise<void> {
 
 		// persist state
 		const resource = EditorResourceAccessor.getOriginalUri(pane?.input);
-		const didCapture = this._captureViewState(resource);
+		const didCapture = this._captureViewState();
 
-		this._editorDisposables.clear();
+		this._editorControlDisposables.clear();
 
 		if (!pane || !this._outlineService.canCreateOutline(pane) || !resource) {
 			return this._showMessage(localize('no-editor', "The active editor cannot provide outline information."));
@@ -211,7 +226,7 @@ export class OutlinePane extends ViewPane {
 		this._progressBar.infinite().show(500);
 
 		const cts = new CancellationTokenSource();
-		this._editorDisposables.add(toDisposable(() => cts.dispose(true)));
+		this._editorControlDisposables.add(toDisposable(() => cts.dispose(true)));
 
 		const newOutline = await this._outlineService.createOutline(pane, OutlineTarget.OutlinePane, cts.token);
 		loadingMessage?.dispose();
@@ -225,7 +240,7 @@ export class OutlinePane extends ViewPane {
 			return;
 		}
 
-		this._editorDisposables.add(newOutline);
+		this._editorControlDisposables.add(newOutline);
 		this._progressBar.stop().hide();
 
 		const sorter = new OutlineTreeSorter(newOutline.config.comparator, this._outlineViewState.sortBy);
@@ -244,7 +259,7 @@ export class OutlinePane extends ViewPane {
 				expandOnlyOnTwistieClick: true,
 				multipleSelectionSupport: false,
 				hideTwistiesOfChildlessElements: true,
-				filterOnType: this._outlineViewState.filterOnType,
+				defaultFindMode: this._outlineViewState.filterOnType ? TreeFindMode.Filter : TreeFindMode.Highlight,
 				overrideStyles: { listBackground: this.getBackgroundColor() }
 			}
 		);
@@ -254,14 +269,14 @@ export class OutlinePane extends ViewPane {
 			if (newOutline.isEmpty) {
 				// no more elements
 				this._showMessage(localize('no-symbols', "No symbols found in document '{0}'", basename(resource)));
-				this._captureViewState(resource);
+				this._captureViewState();
 				tree.setInput(undefined);
 
 			} else if (!tree.getInput()) {
 				// first: init tree
 				this._domNode.classList.remove('message');
 				const state = this._treeStates.get(`${newOutline.outlineKind}/${resource}`);
-				tree.setInput(newOutline, state);
+				tree.setInput(newOutline, state && AbstractTreeViewState.lift(state));
 
 			} else {
 				// update: refresh tree
@@ -270,43 +285,51 @@ export class OutlinePane extends ViewPane {
 			}
 		};
 		updateTree();
-		this._editorDisposables.add(newOutline.onDidChange(updateTree));
+		this._editorControlDisposables.add(newOutline.onDidChange(updateTree));
+		tree.findMode = this._outlineViewState.filterOnType ? TreeFindMode.Filter : TreeFindMode.Highlight;
 
 		// feature: apply panel background to tree
-		this._editorDisposables.add(this.viewDescriptorService.onDidChangeLocation(({ views }) => {
+		this._editorControlDisposables.add(this.viewDescriptorService.onDidChangeLocation(({ views }) => {
 			if (views.some(v => v.id === this.id)) {
 				tree.updateOptions({ overrideStyles: { listBackground: this.getBackgroundColor() } });
 			}
 		}));
 
 		// feature: filter on type - keep tree and menu in sync
-		this._editorDisposables.add(tree.onDidUpdateOptions(e => this._outlineViewState.filterOnType = Boolean(e.filterOnType)));
+		this._editorControlDisposables.add(tree.onDidChangeFindMode(mode => this._outlineViewState.filterOnType = mode === TreeFindMode.Filter));
 
 		// feature: reveal outline selection in editor
 		// on change -> reveal/select defining range
-		this._editorDisposables.add(tree.onDidOpen(e => newOutline.reveal(e.element, e.editorOptions, e.sideBySide)));
-
+		this._editorControlDisposables.add(tree.onDidOpen(e => newOutline.reveal(e.element, e.editorOptions, e.sideBySide)));
 		// feature: reveal editor selection in outline
 		const revealActiveElement = () => {
 			if (!this._outlineViewState.followCursor || !newOutline.activeElement) {
 				return;
 			}
-			const item = newOutline.activeElement;
-			const top = tree.getRelativeTop(item);
-			if (top === null) {
-				tree.reveal(item, 0.5);
+			let item = newOutline.activeElement;
+			while (item) {
+				const top = tree.getRelativeTop(item);
+				if (top === null) {
+					// not visible -> reveal
+					tree.reveal(item, 0.5);
+				}
+				if (tree.getRelativeTop(item) !== null) {
+					tree.setFocus([item]);
+					tree.setSelection([item]);
+					break;
+				}
+				// STILL not visible -> try parent
+				item = tree.getParentElement(item);
 			}
-			tree.setFocus([item]);
-			tree.setSelection([item]);
 		};
 		revealActiveElement();
-		this._editorDisposables.add(newOutline.onDidChange(revealActiveElement));
+		this._editorControlDisposables.add(newOutline.onDidChange(revealActiveElement));
 
 		// feature: update view when user state changes
-		this._editorDisposables.add(this._outlineViewState.onDidChange((e: { followCursor?: boolean, sortBy?: boolean, filterOnType?: boolean }) => {
+		this._editorControlDisposables.add(this._outlineViewState.onDidChange((e: { followCursor?: boolean; sortBy?: boolean; filterOnType?: boolean }) => {
 			this._outlineViewState.persist(this._storageService);
 			if (e.filterOnType) {
-				tree.updateOptions({ filterOnType: this._outlineViewState.filterOnType });
+				tree.findMode = this._outlineViewState.filterOnType ? TreeFindMode.Filter : TreeFindMode.Highlight;
 			}
 			if (e.followCursor) {
 				revealActiveElement();
@@ -318,9 +341,9 @@ export class OutlinePane extends ViewPane {
 		}));
 
 		// feature: expand all nodes when filtering (not when finding)
-		let viewState: IDataTreeViewState | undefined;
-		this._editorDisposables.add(tree.onDidChangeTypeFilterPattern(pattern => {
-			if (!tree.options.filterOnType) {
+		let viewState: AbstractTreeViewState | undefined;
+		this._editorControlDisposables.add(tree.onDidChangeFindPattern(pattern => {
+			if (tree.findMode === TreeFindMode.Highlight) {
 				return;
 			}
 			if (!viewState && pattern) {
@@ -335,7 +358,7 @@ export class OutlinePane extends ViewPane {
 		// last: set tree property
 		tree.layout(this._treeDimensions?.height, this._treeDimensions?.width);
 		this._tree = tree;
-		this._editorDisposables.add(toDisposable(() => {
+		this._editorControlDisposables.add(toDisposable(() => {
 			tree.dispose();
 			this._tree = undefined;
 		}));
@@ -356,7 +379,7 @@ registerAction2(class Collapse extends ViewAction<OutlinePane> {
 			menu: {
 				id: MenuId.ViewTitle,
 				group: 'navigation',
-				when: ContextKeyEqualsExpr.create('view', OutlinePane.Id)
+				when: ContextKeyExpr.equals('view', OutlinePane.Id)
 			}
 		});
 	}
@@ -377,7 +400,7 @@ registerAction2(class FollowCursor extends ViewAction<OutlinePane> {
 				id: MenuId.ViewTitle,
 				group: 'config',
 				order: 1,
-				when: ContextKeyEqualsExpr.create('view', OutlinePane.Id)
+				when: ContextKeyExpr.equals('view', OutlinePane.Id)
 			}
 		});
 	}
@@ -398,7 +421,7 @@ registerAction2(class FilterOnType extends ViewAction<OutlinePane> {
 				id: MenuId.ViewTitle,
 				group: 'config',
 				order: 2,
-				when: ContextKeyEqualsExpr.create('view', OutlinePane.Id)
+				when: ContextKeyExpr.equals('view', OutlinePane.Id)
 			}
 		});
 	}
@@ -420,7 +443,7 @@ registerAction2(class SortByPosition extends ViewAction<OutlinePane> {
 				id: MenuId.ViewTitle,
 				group: 'sort',
 				order: 1,
-				when: ContextKeyEqualsExpr.create('view', OutlinePane.Id)
+				when: ContextKeyExpr.equals('view', OutlinePane.Id)
 			}
 		});
 	}
@@ -441,7 +464,7 @@ registerAction2(class SortByName extends ViewAction<OutlinePane> {
 				id: MenuId.ViewTitle,
 				group: 'sort',
 				order: 2,
-				when: ContextKeyEqualsExpr.create('view', OutlinePane.Id)
+				when: ContextKeyExpr.equals('view', OutlinePane.Id)
 			}
 		});
 	}
@@ -462,7 +485,7 @@ registerAction2(class SortByKind extends ViewAction<OutlinePane> {
 				id: MenuId.ViewTitle,
 				group: 'sort',
 				order: 3,
-				when: ContextKeyEqualsExpr.create('view', OutlinePane.Id)
+				when: ContextKeyExpr.equals('view', OutlinePane.Id)
 			}
 		});
 	}

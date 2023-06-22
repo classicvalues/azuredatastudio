@@ -23,6 +23,7 @@ import { INotificationService, Severity } from 'vs/platform/notification/common/
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { QueryEditorInput } from 'sql/workbench/common/editor/query/queryEditorInput';
 import { ClipboardData, IClipboardService } from 'vs/platform/clipboard/common/clipboardService';
+import { NotebookInput } from 'sql/workbench/contrib/notebook/browser/models/notebookInput';
 
 const singleQuote = '\'';
 
@@ -169,7 +170,7 @@ export class CopyQueryWithResultsKeyboardAction extends Action {
 						copyString = `${copyString}${value}\t`;
 						htmlCopyString = `${htmlCopyString}<td style="border:1.0pt solid black;padding:3pt;font-size:9pt;">${escape(value)}</td>`;
 					}
-					// Removes the tab seperator from the end of a row
+					// Removes the tab separator from the end of a row
 					copyString = copyString.slice(0, -1 * '\t'.length) + '\n';
 					htmlCopyString = htmlCopyString + '</tr>';
 				}
@@ -206,9 +207,31 @@ export class CopyQueryWithResultsKeyboardAction extends Action {
 	}
 }
 
-export class RunCurrentQueryWithActualPlanKeyboardAction extends Action {
-	public static ID = 'runCurrentQueryWithActualPlanKeyboardAction';
-	public static LABEL = nls.localize('runCurrentQueryWithActualPlanKeyboardAction', "Run Current Query with Actual Plan");
+export class EstimatedExecutionPlanKeyboardAction extends Action {
+	public static ID = 'estimatedExecutionPlanKeyboardAction';
+	public static LABEL = nls.localize('estimatedExecutionPlanKeyboardAction', "Display Estimated Execution Plan");
+
+	constructor(
+		id: string,
+		label: string,
+		@IEditorService private _editorService: IEditorService
+	) {
+		super(id, label);
+		this.enabled = true;
+	}
+
+	public override async run(): Promise<void> {
+		const editor = this._editorService.activeEditorPane;
+		if (editor instanceof QueryEditor) {
+			let queryEditor = <QueryEditor>editor;
+			editor.input.runQuery(queryEditor.getSelection(), { displayEstimatedQueryPlan: true });
+		}
+	}
+}
+
+export class ToggleActualPlanKeyboardAction extends Action {
+	public static ID = 'ToggleActualPlanKeyboardAction';
+	public static LABEL = nls.localize('ToggleActualPlanKeyboardAction', "Enable/Disable Actual Execution Plan");
 
 	constructor(
 		id: string,
@@ -221,9 +244,12 @@ export class RunCurrentQueryWithActualPlanKeyboardAction extends Action {
 
 	public override run(): Promise<void> {
 		const editor = this._editorService.activeEditorPane;
+
 		if (editor instanceof QueryEditor) {
-			editor.runCurrentQueryWithActualPlan();
+			let toActualPlanState = !editor.input.state.isActualExecutionPlanMode;
+			editor.input.state.isActualExecutionPlanMode = toActualPlanState;
 		}
+
 		return Promise.resolve(null);
 	}
 }
@@ -275,6 +301,8 @@ export class RefreshIntellisenseKeyboardAction extends Action {
 		const editor = this.editorService.activeEditor;
 		if (editor instanceof QueryEditorInput) {
 			this.connectionManagementService.rebuildIntelliSenseCache(editor.uri);
+		} else if (editor instanceof NotebookInput && editor.notebookModel?.activeCell) {
+			this.connectionManagementService.rebuildIntelliSenseCache(editor.notebookModel.activeCell.cellUri.toString(true));
 		}
 		return Promise.resolve(null);
 	}
@@ -362,6 +390,7 @@ export class RunQueryShortcutAction extends Action {
 	 * Runs one of the optionally registered query shortcuts. This will lookup the shortcut's stored procedure
 	 * reference from the settings, and if found will execute it plus any
 	 *
+	 * @param editor
 	 * @param shortcutIndex which shortcut should be run?
 	 */
 	public runQueryShortcut(editor: QueryEditor, shortcutIndex: number): Thenable<void> {
@@ -492,8 +521,6 @@ export class RunQueryShortcutAction extends Action {
  * Action class that parses the query string in the current SQL text document.
  */
 export class ParseSyntaxAction extends Action {
-
-	public static ID = 'parseQueryAction';
 	public static LABEL = nls.localize('parseSyntaxLabel', "Parse Query");
 
 	constructor(
@@ -508,38 +535,34 @@ export class ParseSyntaxAction extends Action {
 		this.enabled = true;
 	}
 
-	public override run(): Promise<void> {
+	public override async run(): Promise<void> {
 		const editor = this.editorService.activeEditorPane;
 		if (editor instanceof QueryEditor) {
-			if (!editor.isSelectionEmpty()) {
+			if (!editor.isEditorEmpty()) {
 				if (this.isConnected(editor)) {
 					let text = editor.getSelectionText();
 					if (text === '') {
 						text = editor.getAllText();
 					}
-					this.queryManagementService.parseSyntax(editor.input.uri, text).then(result => {
-						if (result && result.parseable) {
-							this.notificationService.notify({
-								severity: Severity.Info,
-								message: nls.localize('queryActions.parseSyntaxSuccess', "Commands completed successfully")
-							});
-						} else if (result && result.errors.length > 0) {
-							let errorMessage = nls.localize('queryActions.parseSyntaxFailure', "Command failed: ");
-							this.notificationService.error(`${errorMessage}${result.errors[0]}`);
-
-						}
-					});
+					const result = await this.queryManagementService.parseSyntax(editor.input.uri, text);
+					if (result && result.parseable) {
+						this.notificationService.notify({
+							severity: Severity.Info,
+							message: nls.localize('queryActions.parseSyntaxSuccess', "Successfully parsed the query.")
+						});
+					} else if (result && result.errors.length > 0) {
+						this.notificationService.error(
+							nls.localize('queryActions.parseSyntaxFailure', "Failed to parse the query: {0}",
+								result.errors.map((err, idx) => `${idx + 1}. ${err} `).join(' ')));
+					}
 				} else {
 					this.notificationService.notify({
 						severity: Severity.Error,
-						message: nls.localize('queryActions.notConnected', "Please connect to a server")
+						message: nls.localize('queryActions.notConnected', "Please connect to a server before running this action.")
 					});
 				}
 			}
-
 		}
-
-		return Promise.resolve(null);
 	}
 
 	/**

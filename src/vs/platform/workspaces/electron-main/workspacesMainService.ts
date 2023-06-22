@@ -4,12 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { AddFirstParameterToFunctions } from 'vs/base/common/types';
-import { IWorkspacesService, IEnterWorkspaceResult, IWorkspaceFolderCreationData, IWorkspaceIdentifier, IRecentlyOpened, IRecent } from 'vs/platform/workspaces/common/workspaces';
 import { URI } from 'vs/base/common/uri';
-import { IWorkspacesManagementMainService } from 'vs/platform/workspaces/electron-main/workspacesManagementMainService';
-import { IWindowsMainService } from 'vs/platform/windows/electron-main/windows';
-import { IWorkspacesHistoryMainService } from 'vs/platform/workspaces/electron-main/workspacesHistoryMainService';
 import { IBackupMainService } from 'vs/platform/backup/electron-main/backup';
+import { IWindowsMainService } from 'vs/platform/windows/electron-main/windows';
+import { IEnterWorkspaceResult, IRecent, IRecentlyOpened, IWorkspaceFolderCreationData, IWorkspacesService } from 'vs/platform/workspaces/common/workspaces';
+import { IWorkspaceIdentifier } from 'vs/platform/workspace/common/workspace';
+import { IWorkspacesHistoryMainService } from 'vs/platform/workspaces/electron-main/workspacesHistoryMainService';
+import { IWorkspacesManagementMainService } from 'vs/platform/workspaces/electron-main/workspacesManagementMainService';
+import { IWorkspaceBackupInfo, IFolderBackupInfo } from 'vs/platform/backup/common/backup';
 
 export class WorkspacesMainService implements AddFirstParameterToFunctions<IWorkspacesService, Promise<unknown> /* only methods, not events */, number /* window ID */> {
 
@@ -25,13 +27,13 @@ export class WorkspacesMainService implements AddFirstParameterToFunctions<IWork
 
 	//#region Workspace Management
 
-	async enterWorkspace(windowId: number, path: URI): Promise<IEnterWorkspaceResult | null> {
+	async enterWorkspace(windowId: number, path: URI): Promise<IEnterWorkspaceResult | undefined> {
 		const window = this.windowsMainService.getWindowById(windowId);
 		if (window) {
 			return this.workspacesManagementMainService.enterWorkspace(window, this.windowsMainService.getWindows(), path);
 		}
 
-		return null;
+		return undefined;
 	}
 
 	createUntitledWorkspace(windowId: number, folders?: IWorkspaceFolderCreationData[], remoteAuthority?: string): Promise<IWorkspaceIdentifier> {
@@ -52,19 +54,19 @@ export class WorkspacesMainService implements AddFirstParameterToFunctions<IWork
 
 	readonly onDidChangeRecentlyOpened = this.workspacesHistoryMainService.onDidChangeRecentlyOpened;
 
-	async getRecentlyOpened(windowId: number): Promise<IRecentlyOpened> {
-		return this.workspacesHistoryMainService.getRecentlyOpened(this.windowsMainService.getWindowById(windowId));
+	getRecentlyOpened(windowId: number): Promise<IRecentlyOpened> {
+		return this.workspacesHistoryMainService.getRecentlyOpened();
 	}
 
-	async addRecentlyOpened(windowId: number, recents: IRecent[]): Promise<void> {
+	addRecentlyOpened(windowId: number, recents: IRecent[]): Promise<void> {
 		return this.workspacesHistoryMainService.addRecentlyOpened(recents);
 	}
 
-	async removeRecentlyOpened(windowId: number, paths: URI[]): Promise<void> {
+	removeRecentlyOpened(windowId: number, paths: URI[]): Promise<void> {
 		return this.workspacesHistoryMainService.removeRecentlyOpened(paths);
 	}
 
-	async clearRecentlyOpened(windowId: number): Promise<void> {
+	clearRecentlyOpened(windowId: number): Promise<void> {
 		return this.workspacesHistoryMainService.clearRecentlyOpened();
 	}
 
@@ -73,7 +75,7 @@ export class WorkspacesMainService implements AddFirstParameterToFunctions<IWork
 
 	//#region Dirty Workspaces
 
-	async getDirtyWorkspaces(): Promise<Array<IWorkspaceIdentifier | URI>> {
+	async getDirtyWorkspaces(): Promise<Array<IWorkspaceBackupInfo | IFolderBackupInfo>> {
 		return this.backupMainService.getDirtyWorkspaces();
 	}
 

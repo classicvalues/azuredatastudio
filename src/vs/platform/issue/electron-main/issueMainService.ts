@@ -3,27 +3,38 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { localize } from 'vs/nls';
+import { BrowserWindow, BrowserWindowConstructorOptions, Display, IpcMainEvent, screen } from 'electron';
+import { validatedIpcMain } from 'vs/base/parts/ipc/electron-main/ipcMain';
 import { arch, release, type } from 'os';
-import product from 'vs/platform/product/common/product';
-import { ICommonIssueService, IssueReporterWindowConfiguration, IssueReporterData, ProcessExplorerData, ProcessExplorerWindowConfiguration } from 'vs/platform/issue/common/issue';
-import { BrowserWindow, ipcMain, screen, IpcMainEvent, Display } from 'electron';
-import { ILaunchMainService } from 'vs/platform/launch/electron-main/launchMainService';
-import { IDiagnosticsService, PerformanceInfo, isRemoteDiagnosticError } from 'vs/platform/diagnostics/common/diagnostics';
-import { IEnvironmentMainService } from 'vs/platform/environment/electron-main/environmentMainService';
-import { isMacintosh, IProcessEnvironment, browserCodeLoadingCacheStrategy } from 'vs/base/common/platform';
-import { ILogService } from 'vs/platform/log/common/log';
-import { IWindowState } from 'vs/platform/windows/electron-main/windows';
-import { listProcesses } from 'vs/base/node/ps';
-import { IDialogMainService } from 'vs/platform/dialogs/electron-main/dialogMainService';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { zoomLevelToZoomFactor } from 'vs/platform/windows/common/windows';
-import { FileAccess } from 'vs/base/common/network';
-import { INativeHostMainService } from 'vs/platform/native/electron-main/nativeHostMainService';
-import { IIPCObjectUrl, IProtocolMainService } from 'vs/platform/protocol/electron-main/protocol';
+import { mnemonicButtonLabel } from 'vs/base/common/labels';
 import { DisposableStore } from 'vs/base/common/lifecycle';
+import { FileAccess } from 'vs/base/common/network';
+import { IProcessEnvironment, isMacintosh } from 'vs/base/common/platform';
+import { listProcesses } from 'vs/base/node/ps';
+import { localize } from 'vs/nls';
+import { IDiagnosticsService, isRemoteDiagnosticError, PerformanceInfo } from 'vs/platform/diagnostics/common/diagnostics';
+import { IDiagnosticsMainService } from 'vs/platform/diagnostics/electron-main/diagnosticsMainService';
+import { IDialogMainService } from 'vs/platform/dialogs/electron-main/dialogMainService';
+import { IEnvironmentMainService } from 'vs/platform/environment/electron-main/environmentMainService';
+import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import { ICommonIssueService, IssueReporterData, IssueReporterWindowConfiguration, ProcessExplorerData, ProcessExplorerWindowConfiguration } from 'vs/platform/issue/common/issue';
+import { ILaunchMainService } from 'vs/platform/launch/electron-main/launchMainService';
+import { ILogService } from 'vs/platform/log/common/log';
+import { INativeHostMainService } from 'vs/platform/native/electron-main/nativeHostMainService';
+import product from 'vs/platform/product/common/product';
+import { IProductService } from 'vs/platform/product/common/productService';
+import { IIPCObjectUrl, IProtocolMainService } from 'vs/platform/protocol/electron-main/protocol';
+import { zoomLevelToZoomFactor } from 'vs/platform/window/common/window';
+import { IWindowState } from 'vs/platform/window/electron-main/window';
 
 export const IIssueMainService = createDecorator<IIssueMainService>('issueMainService');
+
+interface IBrowserWindowOptions {
+	backgroundColor: string | undefined;
+	title: string;
+	zoomLevel: number;
+	alwaysOnTop: boolean;
+}
 
 export interface IIssueMainService extends ICommonIssueService { }
 
@@ -45,29 +56,31 @@ export class IssueMainService implements ICommonIssueService {
 		@ILaunchMainService private readonly launchMainService: ILaunchMainService,
 		@ILogService private readonly logService: ILogService,
 		@IDiagnosticsService private readonly diagnosticsService: IDiagnosticsService,
+		@IDiagnosticsMainService private readonly diagnosticsMainService: IDiagnosticsMainService,
 		@IDialogMainService private readonly dialogMainService: IDialogMainService,
 		@INativeHostMainService private readonly nativeHostMainService: INativeHostMainService,
-		@IProtocolMainService private readonly protocolMainService: IProtocolMainService
+		@IProtocolMainService private readonly protocolMainService: IProtocolMainService,
+		@IProductService private readonly productService: IProductService
 	) {
 		this.registerListeners();
 	}
 
 	private registerListeners(): void {
-		ipcMain.on('vscode:issueSystemInfoRequest', async event => {
-			const [info, remoteData] = await Promise.all([this.launchMainService.getMainProcessInfo(), this.launchMainService.getRemoteDiagnostics({ includeProcesses: false, includeWorkspaceMetadata: false })]);
+		validatedIpcMain.on('vscode:issueSystemInfoRequest', async event => {
+			const [info, remoteData] = await Promise.all([this.launchMainService.getMainProcessInfo(), this.diagnosticsMainService.getRemoteDiagnostics({ includeProcesses: false, includeWorkspaceMetadata: false })]);
 			const msg = await this.diagnosticsService.getSystemInfo(info, remoteData);
 
 			this.safeSend(event, 'vscode:issueSystemInfoResponse', msg);
 		});
 
-		ipcMain.on('vscode:listProcesses', async event => {
+		validatedIpcMain.on('vscode:listProcesses', async event => {
 			const processes = [];
 
 			try {
 				const mainPid = await this.launchMainService.getMainProcessId();
 				processes.push({ name: localize('local', "Local"), rootProcess: await listProcesses(mainPid) });
 
-				const remoteDiagnostics = await this.launchMainService.getRemoteDiagnostics({ includeProcesses: true });
+				const remoteDiagnostics = await this.diagnosticsMainService.getRemoteDiagnostics({ includeProcesses: true });
 				remoteDiagnostics.forEach(data => {
 					if (isRemoteDiagnosticError(data)) {
 						processes.push({
@@ -90,14 +103,18 @@ export class IssueMainService implements ICommonIssueService {
 			this.safeSend(event, 'vscode:listProcessesResponse', processes);
 		});
 
-		ipcMain.on('vscode:issueReporterClipboard', async event => {
+		validatedIpcMain.on('vscode:issueReporterClipboard', async event => {
 			const messageOptions = {
+				title: this.productService.nameLong,
 				message: localize('issueReporterWriteToClipboard', "There is too much data to send to GitHub directly. The data will be copied to the clipboard, please paste it into the GitHub issue page that is opened."),
 				type: 'warning',
 				buttons: [
-					localize('ok', "OK"),
-					localize('cancel', "Cancel")
-				]
+					mnemonicButtonLabel(localize({ key: 'ok', comment: ['&& denotes a mnemonic'] }, "&&OK")),
+					mnemonicButtonLabel(localize({ key: 'cancel', comment: ['&& denotes a mnemonic'] }, "&&Cancel")),
+				],
+				defaultId: 0,
+				cancelId: 1,
+				noLink: true
 			};
 
 			if (this.issueReporterWindow) {
@@ -106,19 +123,23 @@ export class IssueMainService implements ICommonIssueService {
 			}
 		});
 
-		ipcMain.on('vscode:issuePerformanceInfoRequest', async event => {
+		validatedIpcMain.on('vscode:issuePerformanceInfoRequest', async event => {
 			const performanceInfo = await this.getPerformanceInfo();
 			this.safeSend(event, 'vscode:issuePerformanceInfoResponse', performanceInfo);
 		});
 
-		ipcMain.on('vscode:issueReporterConfirmClose', async () => {
+		validatedIpcMain.on('vscode:issueReporterConfirmClose', async () => {
 			const messageOptions = {
+				title: this.productService.nameLong,
 				message: localize('confirmCloseIssueReporter', "Your input will not be saved. Are you sure you want to close this window?"),
 				type: 'warning',
 				buttons: [
-					localize('yes', "Yes"),
-					localize('cancel', "Cancel")
-				]
+					mnemonicButtonLabel(localize({ key: 'yes', comment: ['&& denotes a mnemonic'] }, "&&Yes")),
+					mnemonicButtonLabel(localize({ key: 'cancel', comment: ['&& denotes a mnemonic'] }, "&&Cancel")),
+				],
+				defaultId: 0,
+				cancelId: 1,
+				noLink: true
 			};
 
 			if (this.issueReporterWindow) {
@@ -132,7 +153,7 @@ export class IssueMainService implements ICommonIssueService {
 			}
 		});
 
-		ipcMain.on('vscode:workbenchCommand', (_: unknown, commandInfo: { id: any; from: any; args: any; }) => {
+		validatedIpcMain.on('vscode:workbenchCommand', (_: unknown, commandInfo: { id: any; from: any; args: any }) => {
 			const { id, from, args } = commandInfo;
 
 			let parentWindow: BrowserWindow | null;
@@ -147,28 +168,26 @@ export class IssueMainService implements ICommonIssueService {
 					throw new Error(`Unexpected command source: ${from}`);
 			}
 
-			if (parentWindow) {
-				parentWindow.webContents.send('vscode:runAction', { id, from, args });
-			}
+			parentWindow?.webContents.send('vscode:runAction', { id, from, args });
 		});
 
-		ipcMain.on('vscode:openExternal', (_: unknown, arg: string) => {
+		validatedIpcMain.on('vscode:openExternal', (_: unknown, arg: string) => {
 			this.nativeHostMainService.openExternal(undefined, arg);
 		});
 
-		ipcMain.on('vscode:closeIssueReporter', event => {
+		validatedIpcMain.on('vscode:closeIssueReporter', event => {
 			if (this.issueReporterWindow) {
 				this.issueReporterWindow.close();
 			}
 		});
 
-		ipcMain.on('vscode:closeProcessExplorer', event => {
+		validatedIpcMain.on('vscode:closeProcessExplorer', event => {
 			if (this.processExplorerWindow) {
 				this.processExplorerWindow.close();
 			}
 		});
 
-		ipcMain.on('vscode:windowsInfoRequest', async event => {
+		validatedIpcMain.on('vscode:windowsInfoRequest', async event => {
 			const mainProcessInfo = await this.launchMainService.getMainProcessInfo();
 			this.safeSend(event, 'vscode:windowsInfoResponse', mainProcessInfo.windows);
 		});
@@ -189,7 +208,12 @@ export class IssueMainService implements ICommonIssueService {
 				const issueReporterWindowConfigUrl = issueReporterDisposables.add(this.protocolMainService.createIPCObjectUrl<IssueReporterWindowConfiguration>());
 				const position = this.getWindowPosition(this.issueReporterParentWindow, 700, 800);
 
-				this.issueReporterWindow = this.createBrowserWindow(position, issueReporterWindowConfigUrl, data.styles.backgroundColor, localize('issueReporter', "Issue Reporter"), data.zoomLevel);
+				this.issueReporterWindow = this.createBrowserWindow(position, issueReporterWindowConfigUrl, {
+					backgroundColor: data.styles.backgroundColor,
+					title: localize('issueReporter', "Issue Reporter"),
+					zoomLevel: data.zoomLevel,
+					alwaysOnTop: false
+				}, 'issue-reporter');
 
 				// Store into config object URL
 				issueReporterWindowConfigUrl.update({
@@ -207,7 +231,7 @@ export class IssueMainService implements ICommonIssueService {
 				});
 
 				this.issueReporterWindow.loadURL(
-					FileAccess.asBrowserUri('vs/code/electron-sandbox/issue/issueReporter.html', require, true).toString(true)
+					FileAccess.asBrowserUri('vs/code/electron-sandbox/issue/issueReporter.html', require).toString(true)
 				);
 
 				this.issueReporterWindow.on('close', () => {
@@ -227,7 +251,9 @@ export class IssueMainService implements ICommonIssueService {
 			}
 		}
 
-		this.issueReporterWindow?.focus();
+		if (this.issueReporterWindow) {
+			this.focusWindow(this.issueReporterWindow);
+		}
 	}
 
 	async openProcessExplorer(data: ProcessExplorerData): Promise<void> {
@@ -239,7 +265,12 @@ export class IssueMainService implements ICommonIssueService {
 				const processExplorerWindowConfigUrl = processExplorerDisposables.add(this.protocolMainService.createIPCObjectUrl<ProcessExplorerWindowConfiguration>());
 				const position = this.getWindowPosition(this.processExplorerParentWindow, 800, 500);
 
-				this.processExplorerWindow = this.createBrowserWindow(position, processExplorerWindowConfigUrl, data.styles.backgroundColor, localize('processExplorer', "Process Explorer"), data.zoomLevel);
+				this.processExplorerWindow = this.createBrowserWindow(position, processExplorerWindowConfigUrl, {
+					backgroundColor: data.styles.backgroundColor,
+					title: localize('processExplorer', "Process Explorer"),
+					zoomLevel: data.zoomLevel,
+					alwaysOnTop: true
+				}, 'process-explorer');
 
 				// Store into config object URL
 				processExplorerWindowConfigUrl.update({
@@ -251,7 +282,7 @@ export class IssueMainService implements ICommonIssueService {
 				});
 
 				this.processExplorerWindow.loadURL(
-					FileAccess.asBrowserUri('vs/code/electron-sandbox/processExplorer/processExplorer.html', require, true).toString(true)
+					FileAccess.asBrowserUri('vs/code/electron-sandbox/processExplorer/processExplorer.html', require).toString(true)
 				);
 
 				this.processExplorerWindow.on('close', () => {
@@ -270,10 +301,20 @@ export class IssueMainService implements ICommonIssueService {
 			}
 		}
 
-		this.processExplorerWindow?.focus();
+		if (this.processExplorerWindow) {
+			this.focusWindow(this.processExplorerWindow);
+		}
 	}
 
-	private createBrowserWindow<T>(position: IWindowState, ipcObjectUrl: IIPCObjectUrl<T>, backgroundColor: string | undefined, title: string, zoomLevel: number): BrowserWindow {
+	private focusWindow(window: BrowserWindow): void {
+		if (window.isMinimized()) {
+			window.restore();
+		}
+
+		window.focus();
+	}
+
+	private createBrowserWindow<T>(position: IWindowState, ipcObjectUrl: IIPCObjectUrl<T>, options: IBrowserWindowOptions, windowKind: string): BrowserWindow {
 		const window = new BrowserWindow({
 			fullscreen: false,
 			skipTaskbar: true,
@@ -284,21 +325,21 @@ export class IssueMainService implements ICommonIssueService {
 			minHeight: 200,
 			x: position.x,
 			y: position.y,
-			title,
-			backgroundColor: backgroundColor || IssueMainService.DEFAULT_BACKGROUND_COLOR,
+			title: options.title,
+			backgroundColor: options.backgroundColor || IssueMainService.DEFAULT_BACKGROUND_COLOR,
 			webPreferences: {
 				preload: FileAccess.asFileUri('vs/base/parts/sandbox/electron-browser/preload.js', require).fsPath,
-				additionalArguments: [`--vscode-window-config=${ipcObjectUrl.resource.toString()}`, '--context-isolation' /* TODO@bpasero: Use process.contextIsolateed when 13-x-y is adopted (https://github.com/electron/electron/pull/28030) */],
-				v8CacheOptions: browserCodeLoadingCacheStrategy,
+				additionalArguments: [`--vscode-window-config=${ipcObjectUrl.resource.toString()}`, `--vscode-window-kind=${windowKind}`],
+				v8CacheOptions: this.environmentMainService.useCodeCache ? 'bypassHeatCheck' : 'none',
 				enableWebSQL: false,
-				enableRemoteModule: false,
 				spellcheck: false,
-				nativeWindowOpen: true,
-				zoomFactor: zoomLevelToZoomFactor(zoomLevel),
+				zoomFactor: zoomLevelToZoomFactor(options.zoomLevel),
 				sandbox: true,
 				contextIsolation: true
-			}
-		});
+			},
+			alwaysOnTop: options.alwaysOnTop,
+			experimentalDarkMode: true
+		} as BrowserWindowConstructorOptions & { experimentalDarkMode: boolean });
 
 		window.setMenuBarVisibility(false);
 
@@ -306,7 +347,7 @@ export class IssueMainService implements ICommonIssueService {
 	}
 
 	async getSystemStatus(): Promise<string> {
-		const [info, remoteData] = await Promise.all([this.launchMainService.getMainProcessInfo(), this.launchMainService.getRemoteDiagnostics({ includeProcesses: false, includeWorkspaceMetadata: false })]);
+		const [info, remoteData] = await Promise.all([this.launchMainService.getMainProcessInfo(), this.diagnosticsMainService.getRemoteDiagnostics({ includeProcesses: false, includeWorkspaceMetadata: false })]);
 
 		return this.diagnosticsService.getDiagnostics(info, remoteData);
 	}
@@ -382,7 +423,7 @@ export class IssueMainService implements ICommonIssueService {
 
 	private async getPerformanceInfo(): Promise<PerformanceInfo> {
 		try {
-			const [info, remoteData] = await Promise.all([this.launchMainService.getMainProcessInfo(), this.launchMainService.getRemoteDiagnostics({ includeProcesses: true, includeWorkspaceMetadata: true })]);
+			const [info, remoteData] = await Promise.all([this.launchMainService.getMainProcessInfo(), this.diagnosticsMainService.getRemoteDiagnostics({ includeProcesses: true, includeWorkspaceMetadata: true })]);
 			return await this.diagnosticsService.getPerformanceInfo(info, remoteData);
 		} catch (error) {
 			this.logService.warn('issueService#getPerformanceInfo ', error.message);

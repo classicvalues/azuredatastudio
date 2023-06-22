@@ -3,10 +3,10 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { URI, UriComponents } from 'vs/base/common/uri';
+import { URI } from 'vs/base/common/uri';
 import { IListService } from 'vs/platform/list/browser/listService';
-import { OpenEditor, SortOrder } from 'vs/workbench/contrib/files/common/files';
-import { EditorResourceAccessor, SideBySideEditor, IEditorIdentifier, EditorInput, IEditorInputSerializer } from 'vs/workbench/common/editor';
+import { OpenEditor, ISortOrderConfiguration } from 'vs/workbench/contrib/files/common/files';
+import { EditorResourceAccessor, SideBySideEditor, IEditorIdentifier } from 'vs/workbench/common/editor';
 import { List } from 'vs/base/browser/ui/list/listWidget';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { ExplorerItem } from 'vs/workbench/contrib/files/common/explorerModel';
@@ -14,72 +14,19 @@ import { coalesce } from 'vs/base/common/arrays';
 import { AsyncDataTree } from 'vs/base/browser/ui/tree/asyncDataTree';
 import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { IEditableData } from 'vs/workbench/common/views';
-import { createDecorator, IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
+import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { ResourceFileEdit } from 'vs/editor/browser/services/bulkEditService';
 import { ProgressLocation } from 'vs/platform/progress/common/progress';
-import { FileEditorInput } from 'vs/workbench/contrib/files/common/editors/fileEditorInput';
-import { isEqual } from 'vs/base/common/resources';
-
-interface ISerializedFileEditorInput {
-	resourceJSON: UriComponents;
-	preferredResourceJSON?: UriComponents;
-	name?: string;
-	description?: string;
-	encoding?: string;
-	modeId?: string;
-}
-
-export class FileEditorInputSerializer implements IEditorInputSerializer {
-
-	canSerialize(editorInput: EditorInput): boolean {
-		return true;
-	}
-
-	serialize(editorInput: EditorInput): string {
-		const fileEditorInput = editorInput as FileEditorInput;
-		const resource = fileEditorInput.resource;
-		const preferredResource = fileEditorInput.preferredResource;
-		const serializedFileEditorInput: ISerializedFileEditorInput = {
-			resourceJSON: resource.toJSON(),
-			preferredResourceJSON: isEqual(resource, preferredResource) ? undefined : preferredResource, // only storing preferredResource if it differs from the resource
-			name: fileEditorInput.getPreferredName(),
-			description: fileEditorInput.getPreferredDescription(),
-			encoding: fileEditorInput.getEncoding(),
-			modeId: fileEditorInput.getPreferredMode() // only using the preferred user associated mode here if available to not store redundant data
-		};
-
-		return JSON.stringify(serializedFileEditorInput);
-	}
-
-	deserialize(instantiationService: IInstantiationService, serializedEditorInput: string): FileEditorInput {
-		return instantiationService.invokeFunction(accessor => {
-			const serializedFileEditorInput: ISerializedFileEditorInput = JSON.parse(serializedEditorInput);
-			const resource = URI.revive(serializedFileEditorInput.resourceJSON);
-			const preferredResource = URI.revive(serializedFileEditorInput.preferredResourceJSON);
-			const name = serializedFileEditorInput.name;
-			const description = serializedFileEditorInput.description;
-			const encoding = serializedFileEditorInput.encoding;
-			const mode = serializedFileEditorInput.modeId;
-
-			const fileEditorInput = accessor.get(IEditorService).createEditorInput({ resource, label: name, description, encoding, mode, forceFile: true }) as FileEditorInput;
-			if (preferredResource) {
-				fileEditorInput.setPreferredResource(preferredResource);
-			}
-
-			return fileEditorInput;
-		});
-	}
-}
 
 export interface IExplorerService {
 	readonly _serviceBrand: undefined;
 	readonly roots: ExplorerItem[];
-	readonly sortOrder: SortOrder;
+	readonly sortOrderConfiguration: ISortOrderConfiguration;
 
 	getContext(respectMultiSelection: boolean): ExplorerItem[];
 	hasViewFocus(): boolean;
 	setEditable(stat: ExplorerItem, data: IEditableData | null): Promise<void>;
-	getEditable(): { stat: ExplorerItem, data: IEditableData } | undefined;
+	getEditable(): { stat: ExplorerItem; data: IEditableData } | undefined;
 	getEditableData(stat: ExplorerItem): IEditableData | undefined;
 	// If undefined is passed checks if any element is currently being edited.
 	isEditable(stat: ExplorerItem | undefined): boolean;
@@ -88,7 +35,7 @@ export interface IExplorerService {
 	refresh(): Promise<void>;
 	setToCopy(stats: ExplorerItem[], cut: boolean): Promise<void>;
 	isCut(stat: ExplorerItem): boolean;
-	applyBulkEdit(edit: ResourceFileEdit[], options: { undoLabel: string, progressLabel: string, confirmBeforeUndo?: boolean, progressLocation?: ProgressLocation.Explorer | ProgressLocation.Window }): Promise<void>;
+	applyBulkEdit(edit: ResourceFileEdit[], options: { undoLabel: string; progressLabel: string; confirmBeforeUndo?: boolean; progressLocation?: ProgressLocation.Explorer | ProgressLocation.Window }): Promise<void>;
 
 	/**
 	 * Selects and reveal the file element provided by the given resource if its found in the explorer.
@@ -108,13 +55,13 @@ export interface IExplorerView {
 	setTreeInput(): Promise<void>;
 	itemsCopied(tats: ExplorerItem[], cut: boolean, previousCut: ExplorerItem[] | undefined): void;
 	setEditable(stat: ExplorerItem, isEditing: boolean): Promise<void>;
-	focusNeighbourIfItemFocused(item: ExplorerItem): void;
 	isItemVisible(item: ExplorerItem): boolean;
+	isItemCollapsed(item: ExplorerItem): boolean;
 	hasFocus(): boolean;
 }
 
 function getFocus(listService: IListService): unknown | undefined {
-	let list = listService.lastFocusedList;
+	const list = listService.lastFocusedList;
 	if (list?.getHTMLElement() === document.activeElement) {
 		let focus: unknown;
 		if (list instanceof List) {

@@ -6,12 +6,10 @@
 import * as path from 'path';
 import * as azdata from 'azdata';
 import * as vscode from 'vscode';
-import * as os from 'os';
 import * as nls from 'vscode-nls';
 const localize = nls.loadMessageBundle();
 
 import * as constants from '../common/constants';
-import * as localizedConstants from '../common/localizedConstants';
 import { JupyterServerInstallation } from './jupyterServerInstallation';
 import * as utils from '../common/utils';
 import { IPrompter, IQuestion, QuestionTypes } from '../prompts/question';
@@ -19,7 +17,6 @@ import { IPrompter, IQuestion, QuestionTypes } from '../prompts/question';
 import { AppContext } from '../common/appContext';
 import { LocalJupyterServerManager, ServerInstanceFactory } from './jupyterServerManager';
 import { NotebookCompletionItemProvider } from '../intellisense/completionItemProvider';
-import { JupyterNotebookProvider } from './jupyterNotebookProvider';
 import { ConfigurePythonWizard } from '../dialog/configurePython/configurePythonWizard';
 import CodeAdapter from '../prompts/adapter';
 import { ManagePackagesDialog } from '../dialog/managePackages/managePackagesDialog';
@@ -28,8 +25,7 @@ import { LocalPipPackageManageProvider } from './localPipPackageManageProvider';
 import { LocalCondaPackageManageProvider } from './localCondaPackageManageProvider';
 import { ManagePackagesDialogModel, ManagePackageDialogOptions } from '../dialog/managePackages/managePackagesDialogModel';
 import { PyPiClient } from './pypiClient';
-
-let untitledCounter = 0;
+import { JupyterExecuteProvider } from './jupyterExecuteProvider';
 
 export class JupyterController {
 	private _jupyterInstallation: JupyterServerInstallation;
@@ -37,7 +33,7 @@ export class JupyterController {
 	private _packageManageProviders = new Map<string, IPackageManageProvider>();
 
 	private prompter: IPrompter;
-	private _notebookProvider: JupyterNotebookProvider;
+	private _executeProvider: JupyterExecuteProvider;
 
 	constructor(private appContext: AppContext) {
 		this.prompter = new CodeAdapter();
@@ -47,8 +43,8 @@ export class JupyterController {
 		return this.appContext && this.appContext.extensionContext;
 	}
 
-	public get notebookProvider(): JupyterNotebookProvider {
-		return this._notebookProvider;
+	public get executeProvider(): JupyterExecuteProvider {
+		return this._executeProvider;
 	}
 
 	// PUBLIC METHODS //////////////////////////////////////////////////////
@@ -68,9 +64,6 @@ export class JupyterController {
 		vscode.commands.registerCommand(constants.jupyterNewNotebookCommand, (explorerContext: azdata.ObjectExplorerContext) => {
 			return this.saveProfileAndCreateNotebook(explorerContext ? explorerContext.connectionProfile : undefined);
 		});
-		vscode.commands.registerCommand(constants.jupyterAnalyzeCommand, (explorerContext: azdata.ObjectExplorerContext) => {
-			return this.saveProfileAndAnalyzeNotebook(explorerContext);
-		});
 
 		vscode.commands.registerCommand(constants.jupyterReinstallDependenciesCommand, () => { return this.handleDependenciesReinstallation(); });
 		vscode.commands.registerCommand(constants.jupyterManagePackages, async (args) => { return this.doManagePackages(args); });
@@ -79,29 +72,23 @@ export class JupyterController {
 		let supportedFileFilter: vscode.DocumentFilter[] = [
 			{ scheme: 'untitled', language: '*' }
 		];
-		this.registerNotebookProvider();
-		this.extensionContext.subscriptions.push(vscode.languages.registerCompletionItemProvider(supportedFileFilter, new NotebookCompletionItemProvider(this._notebookProvider), '.'));
 
-		this.registerDefaultPackageManageProviders();
-		return true;
-	}
-
-	private registerNotebookProvider(): void {
-		this._notebookProvider = new JupyterNotebookProvider((documentUri: vscode.Uri) => new LocalJupyterServerManager({
+		this._executeProvider = new JupyterExecuteProvider((documentUri: vscode.Uri) => new LocalJupyterServerManager({
 			documentPath: documentUri.fsPath,
 			jupyterInstallation: this._jupyterInstallation,
 			extensionContext: this.extensionContext,
 			factory: this._serverInstanceFactory
 		}));
-		azdata.nb.registerNotebookProvider(this._notebookProvider);
+		azdata.nb.registerExecuteProvider(this._executeProvider);
+
+		this.extensionContext.subscriptions.push(vscode.languages.registerCompletionItemProvider(supportedFileFilter, new NotebookCompletionItemProvider(this._executeProvider), '.'));
+
+		this.registerDefaultPackageManageProviders();
+		return true;
 	}
 
 	private saveProfileAndCreateNotebook(profile: azdata.IConnectionProfile): Promise<void> {
-		return this.handleNewNotebookTask(undefined, profile);
-	}
-
-	private saveProfileAndAnalyzeNotebook(oeContext: azdata.ObjectExplorerContext): Promise<void> {
-		return this.handleNewNotebookTask(oeContext, oeContext.connectionProfile);
+		return this.handleNewNotebookTask(profile);
 	}
 
 	// EVENT HANDLERS //////////////////////////////////////////////////////
@@ -123,7 +110,7 @@ export class JupyterController {
 			// Verify this is a .ipynb file since this isn't actually filtered on Mac/Linux
 			if (path.extname(fileUri.fsPath) !== '.ipynb') {
 				// in the future might want additional supported types
-				vscode.window.showErrorMessage(localize('unsupportedFileType', "Only .ipynb Notebooks are supported"));
+				void vscode.window.showErrorMessage(localize('unsupportedFileType', "Only .ipynb Notebooks are supported"));
 			} else {
 				await azdata.nb.showNotebookDocument(fileUri, {
 					connectionProfile: profile,
@@ -134,37 +121,17 @@ export class JupyterController {
 		}
 	}
 
-	private async handleNewNotebookTask(oeContext?: azdata.ObjectExplorerContext, profile?: azdata.IConnectionProfile): Promise<void> {
-		// Ensure we get a unique ID for the notebook. For now we're using a different prefix to the built-in untitled files
-		// to handle this. We should look into improving this in the future
-		let untitledUri = vscode.Uri.parse(`untitled:Notebook-${untitledCounter++}`);
-		let editor = await azdata.nb.showNotebookDocument(untitledUri, {
+	private async handleNewNotebookTask(profile?: azdata.IConnectionProfile): Promise<void> {
+		await azdata.nb.showNotebookDocument(vscode.Uri.from({ scheme: 'untitled' }), {
 			connectionProfile: profile,
 			providerId: constants.jupyterNotebookProviderId,
 			preview: false,
 			defaultKernel: {
-				name: 'pysparkkernel',
-				display_name: 'PySpark',
+				name: 'python3',
+				display_name: 'Python 3',
 				language: 'python'
 			}
 		});
-		if (oeContext && oeContext.nodeInfo && oeContext.nodeInfo.nodePath) {
-			// Get the file path after '/HDFS'
-			let hdfsPath: string = oeContext.nodeInfo.nodePath.substring(oeContext.nodeInfo.nodePath.indexOf('/HDFS') + '/HDFS'.length);
-			if (hdfsPath.length > 0) {
-				let analyzeCommand = '#' + localizedConstants.msgSampleCodeDataFrame + os.EOL + 'df = (spark.read.option(\"inferSchema\", \"true\")'
-					+ os.EOL + '.option(\"header\", \"true\")' + os.EOL + '.csv(\'{0}\'))' + os.EOL + 'df.show(10)';
-				// TODO re-enable insert into document once APIs are finalized.
-				// editor.document.cells[0].source = [analyzeCommand.replace('{0}', hdfsPath)];
-				editor.edit(editBuilder => {
-					editBuilder.replace(0, {
-						cell_type: 'code',
-						source: analyzeCommand.replace('{0}', hdfsPath)
-					});
-				});
-
-			}
-		}
 	}
 
 	private async handleDependenciesReinstallation(): Promise<void> {
@@ -174,7 +141,7 @@ export class JupyterController {
 				await this._jupyterInstallation.startInstallProcess(true);
 			}
 		} catch (err) {
-			vscode.window.showErrorMessage(utils.getErrorMessage(err));
+			void vscode.window.showErrorMessage(utils.getErrorMessage(err));
 		}
 	}
 
@@ -202,7 +169,7 @@ export class JupyterController {
 			packagesDialog.showDialog();
 		} catch (error) {
 			let message = utils.getErrorMessage(error);
-			vscode.window.showErrorMessage(message);
+			void vscode.window.showErrorMessage(message);
 		}
 	}
 
@@ -236,10 +203,10 @@ export class JupyterController {
 	public doConfigurePython(jupyterInstaller: JupyterServerInstallation): void {
 		let pythonWizard = new ConfigurePythonWizard(jupyterInstaller);
 		pythonWizard.start().catch((err: any) => {
-			vscode.window.showErrorMessage(utils.getErrorMessage(err));
+			void vscode.window.showErrorMessage(utils.getErrorMessage(err));
 		});
 		pythonWizard.setupComplete.catch((err: any) => {
-			vscode.window.showErrorMessage(utils.getErrorMessage(err));
+			void vscode.window.showErrorMessage(utils.getErrorMessage(err));
 		});
 	}
 

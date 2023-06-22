@@ -6,14 +6,14 @@
 import * as assert from 'assert';
 import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
 import { ExtHostCredentialManagement } from 'sql/workbench/api/common/extHostCredentialManagement';
-import { SqlMainContext } from 'sql/workbench/api/common/sqlExtHost.protocol';
 import { IRPCProtocol } from 'vs/workbench/services/extensions/common/proxyIdentifier';
 import { MainThreadCredentialManagement } from 'sql/workbench/api/browser/mainThreadCredentialManagement';
 import { ICredentialsService } from 'sql/platform/credentials/common/credentialsService';
 import { Credential, CredentialProvider } from 'azdata';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { TestCredentialsService, TestCredentialsProvider } from 'sql/platform/credentials/test/common/testCredentialsService';
-import { TestRPCProtocol } from 'vs/workbench/test/browser/api/testRPCProtocol';
+import { TestRPCProtocol } from 'vs/workbench/api/test/common/testRPCProtocol';
+import { SqlMainContext } from 'vs/workbench/api/common/extHost.protocol';
 
 const IRPCProtocol = createDecorator<IRPCProtocol>('rpcProtocol');
 
@@ -41,7 +41,7 @@ suite('ExtHostCredentialManagement', () => {
 		let extHost = new ExtHostCredentialManagement(threadService);
 
 		// Then: The extension host should not have any providers registered
-		assert.equal(extHost.getProviderCount(), 0);
+		assert.strictEqual(extHost.getProviderCount(), 0);
 	});
 
 	test('Register Credential Provider', () => {
@@ -53,7 +53,7 @@ suite('ExtHostCredentialManagement', () => {
 		extHost.$registerCredentialProvider(mockCredentialProvider);
 
 		// Then: There should be one provider registered
-		assert.equal(extHost.getProviderCount(), 1);
+		assert.strictEqual(extHost.getProviderCount(), 1);
 	});
 
 	test('Get Credential Provider - Success', () => {
@@ -71,7 +71,7 @@ suite('ExtHostCredentialManagement', () => {
 		return extHost.$getCredentialProvider(namespaceId)
 			.then((provider) => {
 				// Then: There should still only be one provider registered
-				assert.equal(extHost.getProviderCount(), 1);
+				assert.strictEqual(extHost.getProviderCount(), 1);
 				credProvider = provider;
 			})
 			.then(() => {
@@ -81,8 +81,8 @@ suite('ExtHostCredentialManagement', () => {
 			.then(() => {
 				// Then: The credential should have been stored with its namespace
 				assert.notStrictEqual(mockCredentialProvider.storedCredentials[expectedCredentialId], undefined);
-				assert.equal(mockCredentialProvider.storedCredentials[expectedCredentialId].credentialId, expectedCredentialId);
-				assert.equal(mockCredentialProvider.storedCredentials[expectedCredentialId].password, credential);
+				assert.strictEqual(mockCredentialProvider.storedCredentials[expectedCredentialId].credentialId, expectedCredentialId);
+				assert.strictEqual(mockCredentialProvider.storedCredentials[expectedCredentialId].password, credential);
 			})
 			.then(() => {
 				// If: I read a credential
@@ -90,8 +90,8 @@ suite('ExtHostCredentialManagement', () => {
 			})
 			.then((returnedCredential: Credential) => {
 				// Then: The credential ID should be namespaced
-				assert.equal(returnedCredential.credentialId, expectedCredentialId);
-				assert.equal(returnedCredential.password, credential);
+				assert.strictEqual(returnedCredential.credentialId, expectedCredentialId);
+				assert.strictEqual(returnedCredential.password, credential);
 			})
 			.then(() => {
 				// If: I delete a credential

@@ -1,6 +1,6 @@
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
- *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
 import { createHash } from 'crypto';
@@ -15,10 +15,10 @@ export class ChecksumService implements IChecksumService {
 
 	constructor(@IFileService private readonly fileService: IFileService) { }
 
-	checksum(resource: URI): Promise<string> {
-		return new Promise<string>(async (resolve, reject) => {
+	async checksum(resource: URI): Promise<string> {
+		const stream = (await this.fileService.readFileStream(resource)).value;
+		return new Promise<string>((resolve, reject) => {
 			const hash = createHash('md5');
-			const stream = (await this.fileService.readFileStream(resource)).value;
 
 			listenStream(stream, {
 				onData: data => hash.update(data.buffer),

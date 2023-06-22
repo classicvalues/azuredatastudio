@@ -5,6 +5,8 @@
 
 import * as azdata from 'azdata';
 import { MigrationStateModel, StateChangeEvent } from './stateMachine';
+import { ShowStatusMessageDialog } from '../dialog/generic/genericDialogs';
+
 export abstract class MigrationWizardPage {
 	constructor(
 		protected readonly wizard: azdata.window.Wizard,
@@ -43,7 +45,7 @@ export abstract class MigrationWizardPage {
 			return this.handleStateChange(e);
 		});
 
-		this.enableQueueProcessor();
+		await this.enableQueueProcessor();
 	}
 
 	private queueActive = false;
@@ -81,5 +83,11 @@ export abstract class MigrationWizardPage {
 		await this.wizard.setCurrentPage(current + 1);
 	}
 
+	protected showDialogMessage(
+		title: string,
+		statusMessage: string,
+		errorMessage: string,
+	): void {
+		ShowStatusMessageDialog(title, statusMessage, errorMessage);
+	}
 }
-

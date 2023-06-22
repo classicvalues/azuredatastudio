@@ -43,7 +43,7 @@ suite('Account Management Dialog Controller Tests', () => {
 		controller.openAccountDialog();
 
 		// Then: It should be the same dialog that already existed
-		assert.equal(controller.accountDialog, accountDialog);
+		assert.strictEqual(controller.accountDialog, accountDialog);
 	});
 
 	test('Add Account Failure - Error Message Shown', () => {
@@ -87,7 +87,7 @@ function createInstantiationService(addAccountFailureEmitter?: Emitter<string>):
 		.returns(() => undefined);
 
 	// Create a mock account dialog
-	let accountDialog = new AccountDialog(undefined!, undefined!, instantiationService.object, undefined!, undefined!, undefined!, undefined!, new MockContextKeyService(), undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!);
+	let accountDialog = new AccountDialog(undefined!, undefined!, instantiationService.object, undefined!, undefined!, undefined!, undefined!, new MockContextKeyService(), undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!);
 	let mockAccountDialog = TypeMoq.Mock.ofInstance(accountDialog);
 	mockAccountDialog.setup(x => x.onAddAccountErrorEvent)
 		.returns(() => { return addAccountFailureEmitter ? addAccountFailureEmitter.event : mockEvent.event; });

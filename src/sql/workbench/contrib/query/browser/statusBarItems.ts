@@ -15,7 +15,7 @@ import { Disposable, DisposableStore } from 'vs/base/common/lifecycle';
 import { localize } from 'vs/nls';
 import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from 'vs/workbench/services/statusbar/common/statusbar';
+import { IStatusbarEntryAccessor, IStatusbarService, ShowTooltipCommand, StatusbarAlignment } from 'vs/workbench/services/statusbar/browser/statusbar';
 export class TimeElapsedStatusBarContributions extends Disposable implements IWorkbenchContribution {
 
 	private static readonly ID = 'status.query.timeElapsed';
@@ -24,6 +24,7 @@ export class TimeElapsedStatusBarContributions extends Disposable implements IWo
 	private intervalTimer = new IntervalTimer();
 
 	private disposable = this._register(new DisposableStore());
+	private readonly name = localize('status.query.timeElapsed', "Time Elapsed");
 
 	constructor(
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
@@ -33,11 +34,11 @@ export class TimeElapsedStatusBarContributions extends Disposable implements IWo
 		super();
 		this.statusItem = this._register(
 			this.statusbarService.addEntry({
+				name: this.name,
 				text: '',
 				ariaLabel: ''
 			},
 				TimeElapsedStatusBarContributions.ID,
-				localize('status.query.timeElapsed', "Time Elapsed"),
 				StatusbarAlignment.RIGHT, 100)
 		);
 
@@ -93,6 +94,7 @@ export class TimeElapsedStatusBarContributions extends Disposable implements IWo
 				const value = runner.queryStartTime ? Date.now() - runner.queryStartTime.getTime() : 0;
 				const timeString = parseNumAsTimeString(value, false);
 				this.statusItem.update({
+					name: this.name,
 					text: timeString,
 					ariaLabel: timeString
 				});
@@ -101,6 +103,7 @@ export class TimeElapsedStatusBarContributions extends Disposable implements IWo
 			const value = runner.queryStartTime ? Date.now() - runner.queryStartTime.getTime() : 0;
 			const timeString = parseNumAsTimeString(value, false);
 			this.statusItem.update({
+				name: this.name,
 				text: timeString,
 				ariaLabel: timeString
 			});
@@ -109,6 +112,7 @@ export class TimeElapsedStatusBarContributions extends Disposable implements IWo
 				? runner.queryEndTime.getTime() - runner.queryStartTime.getTime() : 0;
 			const timeString = parseNumAsTimeString(value, false);
 			this.statusItem.update({
+				name: this.name,
 				text: timeString,
 				ariaLabel: timeString
 			});
@@ -124,6 +128,7 @@ export class RowCountStatusBarContributions extends Disposable implements IWorkb
 	private statusItem: IStatusbarEntryAccessor;
 
 	private disposable = this._register(new DisposableStore());
+	private readonly name = localize('status.query.rowCount', "Row Count");
 
 	constructor(
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
@@ -133,11 +138,11 @@ export class RowCountStatusBarContributions extends Disposable implements IWorkb
 		super();
 		this.statusItem = this._register(
 			this.statusbarService.addEntry({
+				name: this.name,
 				text: '',
 				ariaLabel: ''
 			},
 				RowCountStatusBarContributions.ID,
-				localize('status.query.rowCount', "Row Count"),
 				StatusbarAlignment.RIGHT, 100)
 		);
 
@@ -201,7 +206,7 @@ export class RowCountStatusBarContributions extends Disposable implements IWorkb
 			return p + cnt;
 		}, 0);
 		const text = localize('rowCount', "{0} rows", rowCount.toLocaleString());
-		this.statusItem.update({ text, ariaLabel: text });
+		this.statusItem.update({ name: this.name, text: text, ariaLabel: text });
 		this.show();
 	}
 }
@@ -220,11 +225,11 @@ export class QueryStatusStatusBarContributions extends Disposable implements IWo
 		super();
 		this._register(
 			this.statusbarService.addEntry({
+				name: localize('status.query.status', "Execution Status"),
 				text: localize('query.status.executing', "Executing query..."),
 				ariaLabel: localize('query.status.executing', "Executing query...")
 			},
 				QueryStatusStatusBarContributions.ID,
-				localize('status.query.status', "Execution Status"),
 				StatusbarAlignment.RIGHT, 100)
 		);
 
@@ -259,6 +264,7 @@ export class QueryStatusStatusBarContributions extends Disposable implements IWo
 export class QueryResultSelectionSummaryStatusBarContribution extends Disposable implements IWorkbenchContribution {
 	private static readonly ID = 'status.query.selection-summary';
 	private statusItem: IStatusbarEntryAccessor;
+	private readonly name = localize('status.query.selection-summary', "Selection Summary");
 
 	constructor(
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
@@ -269,11 +275,11 @@ export class QueryResultSelectionSummaryStatusBarContribution extends Disposable
 		super();
 		this.statusItem = this._register(
 			this.statusbarService.addEntry({
+				name: this.name,
 				text: '',
 				ariaLabel: ''
 			},
 				QueryResultSelectionSummaryStatusBarContribution.ID,
-				localize('status.query.selection-summary', "Selection Summary"),
 				StatusbarAlignment.RIGHT, 100)
 		);
 		this._register(editorService.onDidActiveEditorChange(() => { this.hide(); }, this));
@@ -293,17 +299,38 @@ export class QueryResultSelectionSummaryStatusBarContribution extends Disposable
 	}
 
 	private onCellSelectionChanged(selectedCells: ICellValue[]): void {
-		const numericValues = selectedCells?.map(cell => cell.invariantCultureDisplayValue || cell.displayValue).filter(value => !Number.isNaN(Number(value))).map(value => Number(value));
-		if (numericValues?.length < 2) {
+		// Only show the summary when there are more than 1 selected cells.
+		if (!selectedCells || selectedCells.length <= 1) {
 			this.hide();
 			return;
 		}
 
-		const sum = numericValues.reduce((previous, current, idx, array) => previous + current);
-		const summaryText = localize('status.query.summaryText', "Average: {0}  Count: {1}  Sum: {2}", Number((sum / numericValues.length).toFixed(3)), selectedCells.length, sum);
+		// When there are more than 1 numeric values:
+		//   Text: Average, Count, Sum
+		//   Tooltip: Average, Count, Distinct Count, Max, Min,Null Count, Sum
+		// Otherwise:
+		//   Text: Count, Distinct Count, Null Count
+		const values = selectedCells.map(cell => cell.invariantCultureDisplayValue || cell.displayValue);
+		const distinctValues = new Set(values);
+		const numericValues = selectedCells.map(cell => cell.invariantCultureDisplayValue || cell.displayValue).filter(value => !Number.isNaN(Number(value))).map(value => Number(value));
+		const nullCount = selectedCells.filter(cell => cell.isNull).length;
+		let summaryText, tooltipText;
+		if (numericValues.length >= 2) {
+			const sum = numericValues.reduce((previous, current) => previous + current);
+			const min = numericValues.reduce((previous, current) => Math.min(previous, current));
+			const max = numericValues.reduce((previous, current) => Math.max(previous, current));
+			summaryText = localize('status.query.summaryText', "Average: {0}  Count: {1}  Sum: {2}", Number((sum / numericValues.length).toFixed(3)), selectedCells.length, sum);
+			tooltipText = localize('status.query.summaryTooltip', "Average: {0}  Count: {1}  Distinct Count: {2}  Max: {3}  Min: {4}  Null Count: {5}  Sum: {6}",
+				Number((sum / numericValues.length).toFixed(3)), selectedCells.length, distinctValues.size, max, min, nullCount, sum);
+		} else {
+			summaryText = summaryText = localize('status.query.summaryTextNonNumeric', "Count: {0}  Distinct Count: {1}  Null Count: {2}", selectedCells.length, distinctValues.size, nullCount);
+		}
 		this.statusItem.update({
+			name: this.name,
 			text: summaryText,
-			ariaLabel: summaryText
+			ariaLabel: summaryText,
+			tooltip: tooltipText,
+			command: tooltipText ? ShowTooltipCommand : undefined
 		});
 		this.show();
 	}

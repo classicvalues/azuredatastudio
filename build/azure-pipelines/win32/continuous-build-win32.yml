@@ -1,7 +1,7 @@
 steps:
   - task: NodeTool@0
     inputs:
-      versionSpec: "12.18.3"
+      versionSpec: "14.x"
 
   - task: geeklearningio.gl-vsts-tasks-yarn.yarn-installer-task.YarnInstaller@3 # {{SQL CARBON EDIT}} update version
     inputs:
@@ -9,7 +9,7 @@ steps:
 
   - task: UsePythonVersion@0
     inputs:
-      versionSpec: "2.x"
+      versionSpec: "3.x"
       addToPath: true
 
   - task: 1ESLighthouseEng.PipelineArtifactCaching.RestoreCacheV1.RestoreCache@1
@@ -56,7 +56,7 @@ steps:
 
   - powershell: |
       .\scripts\test.bat --tfs "Unit Tests"
-    displayName: Run Unit Tests (Electron)
+    displayName: Run Core Unit Tests # {{SQL CARBON EDIT}} Rename to core for clarity
 
   # - powershell: | {{SQL CARBON EDIT}} disable
   #     yarn test-browser --browser chromium --browser firefox --tfs "Browser Unit Tests"
@@ -64,7 +64,7 @@ steps:
 
   # - powershell: | {{SQL CARBON EDIT}} disable
   #     .\scripts\test-integration.bat --tfs "Integration Tests"
-  #   displayName: Run Integration Tests (Electron)
+  #   displayName: Run Core Integration Tests # {{SQL CARBON EDIT}} Rename to core for clarity
 
   - task: PublishPipelineArtifact@0
     displayName: "Publish Crash Reports"

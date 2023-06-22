@@ -14,7 +14,6 @@ import { ControllerModel } from '../../../models/controllerModel';
 import { MiaaModel } from '../../../models/miaaModel';
 import { DashboardPage } from '../../components/dashboardPage';
 import { ResourceType } from 'arc';
-import { UserCancelledError } from '../../../common/api';
 
 export class MiaaDashboardOverviewPage extends DashboardPage {
 
@@ -212,7 +211,7 @@ export class MiaaDashboardOverviewPage extends DashboardPage {
 				this._connectToServerButton!.enabled = false;
 				this._databasesTableLoading!.loading = true;
 				try {
-					await this.callGetDatabases();
+					await this._miaaModel.callGetDatabases();
 				} catch {
 					this._connectToServerButton!.enabled = true;
 				}
@@ -244,7 +243,14 @@ export class MiaaDashboardOverviewPage extends DashboardPage {
 								cancellable: false
 							},
 							async (_progress, _token) => {
-								return await this._azApi.az.sql.miarc.delete(this._miaaModel.info.name, this._controllerModel.info.namespace, this._controllerModel.azAdditionalEnvVars);
+								return await this._azApi.az.sql.miarc.delete(
+									this._miaaModel.info.name,
+									{
+										resourceGroup: undefined,
+										namespace: this._controllerModel.info.namespace,
+									},
+									this._controllerModel.azAdditionalEnvVars
+								);
 							}
 						);
 						await this._controllerModel.refreshTreeNode();
@@ -322,19 +328,6 @@ export class MiaaDashboardOverviewPage extends DashboardPage {
 		).component();
 	}
 
-	private async callGetDatabases(): Promise<void> {
-		try {
-			await this._miaaModel.getDatabases();
-		} catch (error) {
-			if (error instanceof UserCancelledError) {
-				vscode.window.showWarningMessage(loc.miaaConnectionRequired);
-			} else {
-				vscode.window.showErrorMessage(loc.fetchDatabasesFailed(this._miaaModel.info.name, error));
-			}
-			throw error;
-		}
-	}
-
 	private handleRegistrationsUpdated(): void {
 		const config = this._controllerModel.controllerConfig;
 		if (this._openInAzurePortalButton) {
@@ -350,10 +343,10 @@ export class MiaaDashboardOverviewPage extends DashboardPage {
 	private handleMiaaConfigUpdated(): void {
 		if (this._miaaModel.config) {
 			this._instanceProperties.status = this._miaaModel.config.status.state || '-';
-			this._instanceProperties.externalEndpoint = this._miaaModel.config.status.primaryEndpoint || loc.notConfigured;
-			this._instanceProperties.vCores = this._miaaModel.config.spec.scheduling?.default?.resources?.limits?.cpu?.toString() || '';
-			this._databasesMessage.value = !this._miaaModel.config.status.primaryEndpoint ? loc.noExternalEndpoint : '';
-			if (!this._miaaModel.config.status.primaryEndpoint) {
+			this._instanceProperties.externalEndpoint = this._miaaModel.config.status.endpoints.primary || loc.notConfigured;
+			this._instanceProperties.vCores = this._miaaModel.config.spec?.scheduling?.default?.resources?.limits?.cpu?.toString() || '';
+			this._databasesMessage.value = !this._miaaModel.config.status.endpoints.primary ? loc.noExternalEndpoint : '';
+			if (!this._miaaModel.config.status.endpoints.primary) {
 				this._databasesContainer.removeItem(this._connectToServerLoading);
 			}
 		}
@@ -382,7 +375,7 @@ export class MiaaDashboardOverviewPage extends DashboardPage {
 		} else {
 			// If we don't have an endpoint then there's no point in showing the connect button - but the logic
 			// to display text informing the user of this is already handled by the handleMiaaConfigUpdated
-			if (this._miaaModel?.config?.status.primaryEndpoint) {
+			if (this._miaaModel?.config?.status.endpoints.primary) {
 				this._connectToServerLoading.loading = false;
 				this._connectToServerButton.enabled = true;
 			}
@@ -433,12 +426,12 @@ export class MiaaDashboardOverviewPage extends DashboardPage {
 
 	private refreshDashboardLinks(): void {
 		if (this._miaaModel.config) {
-			const kibanaUrl = this._miaaModel.config.status.logSearchDashboard ?? '';
+			const kibanaUrl = this._miaaModel.config.status.endpoints.logSearchDashboard ?? '';
 			this._kibanaLink.label = kibanaUrl;
 			this._kibanaLink.url = kibanaUrl;
 			this._kibanaLoading!.loading = false;
 
-			const grafanaUrl = this._miaaModel.config.status.metricsDashboard ?? '';
+			const grafanaUrl = this._miaaModel.config.status.endpoints.metricsDashboard ?? '';
 			this._grafanaLink.label = grafanaUrl;
 			this._grafanaLink.url = grafanaUrl;
 			this._grafanaLoading!.loading = false;

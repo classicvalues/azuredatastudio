@@ -4,23 +4,23 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { extHostNamedCustomer } from 'vs/workbench/api/common/extHostCustomers';
-import { IExtHostContext } from 'vs/workbench/api/common/extHost.protocol';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 
-import { MainThreadModelViewDialogShape, SqlMainContext, ExtHostModelViewDialogShape, SqlExtHostContext } from 'sql/workbench/api/common/sqlExtHost.protocol';
+import { MainThreadModelViewDialogShape, ExtHostModelViewDialogShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
 import { Dialog, DialogTab, DialogButton, WizardPage, Wizard } from 'sql/workbench/services/dialog/common/dialogTypes';
 import { CustomDialogService, DefaultWizardOptions, DefaultDialogOptions } from 'sql/workbench/services/dialog/browser/customDialogService';
-import { IModelViewDialogDetails, IModelViewTabDetails, IModelViewButtonDetails, IModelViewWizardPageDetails, IModelViewWizardDetails } from 'sql/workbench/api/common/sqlExtHostTypes';
+import { IModelViewDialogDetails, IModelViewTabDetails, IModelViewButtonDetails, IModelViewWizardPageDetails, IModelViewWizardDetails, IErrorDialogOptions } from 'sql/workbench/api/common/sqlExtHostTypes';
 import { ModelViewInput, ModelViewInputModel, ModeViewSaveHandler } from 'sql/workbench/browser/modelComponents/modelViewInput';
 
 import * as vscode from 'vscode';
 import * as azdata from 'azdata';
-import { assign } from 'vs/base/common/objects';
 import { TelemetryView, TelemetryAction } from 'sql/platform/telemetry/common/telemetryKeys';
 import { IAdsTelemetryService } from 'sql/platform/telemetry/common/telemetry';
-import { IEditorInput, IEditorPane } from 'vs/workbench/common/editor';
+import { IEditorPane } from 'vs/workbench/common/editor';
 import { Disposable } from 'vs/base/common/lifecycle';
+import { EditorInput } from 'vs/workbench/common/editor/editorInput';
+import { extHostNamedCustomer, IExtHostContext } from 'vs/workbench/services/extensions/common/extHostCustomers';
+import { SqlExtHostContext, SqlMainContext } from 'vs/workbench/api/common/extHost.protocol';
 
 @extHostNamedCustomer(SqlMainContext.MainThreadModelViewDialog)
 export class MainThreadModelViewDialog extends Disposable implements MainThreadModelViewDialogShape {
@@ -32,7 +32,7 @@ export class MainThreadModelViewDialog extends Disposable implements MainThreadM
 	private readonly _wizardPageHandles = new Map<WizardPage, number>();
 	private readonly _wizards = new Map<number, Wizard>();
 	private readonly _editorInputModels = new Map<number, ModelViewInputModel>();
-	private readonly _editors = new Map<number, { pane: IEditorPane, input: IEditorInput }>();
+	private readonly _editors = new Map<number, { pane: IEditorPane, input: EditorInput }>();
 	private _dialogService: CustomDialogService;
 
 	constructor(
@@ -92,14 +92,18 @@ export class MainThreadModelViewDialog extends Disposable implements MainThreadM
 
 	public $openDialog(handle: number, dialogName?: string): Thenable<void> {
 		let dialog = this.getDialog(handle);
-		const options = assign({}, DefaultDialogOptions);
+		const options = Object.assign({}, DefaultDialogOptions);
 		options.width = dialog.width;
 		options.dialogStyle = dialog.dialogStyle;
 		options.dialogPosition = dialog.dialogPosition;
 		options.renderHeader = dialog.renderHeader;
 		options.renderFooter = dialog.renderFooter;
 		options.dialogProperties = dialog.dialogProperties;
-		this._dialogService.showDialog(dialog, dialogName, options);
+		const modal = this._dialogService.showDialog(dialog, dialogName, options);
+		const onClosed = modal.onClosed(reason => {
+			this._proxy.$onClosed(handle, reason);
+			onClosed.dispose();
+		});
 		return Promise.resolve();
 	}
 
@@ -107,6 +111,10 @@ export class MainThreadModelViewDialog extends Disposable implements MainThreadM
 		let dialog = this.getDialog(handle);
 		this._dialogService.closeDialog(dialog);
 		return Promise.resolve();
+	}
+
+	public $openCustomErrorDialog(options: IErrorDialogOptions): Promise<string | undefined> {
+		return this._dialogService.openCustomErrorDialog(options);
 	}
 
 	public $setDialogDetails(handle: number, details: IModelViewDialogDetails): Thenable<void> {
@@ -140,6 +148,9 @@ export class MainThreadModelViewDialog extends Disposable implements MainThreadM
 			dialog.customButtons = details.customButtons.map(buttonHandle => this.getButton(buttonHandle));
 		}
 		dialog.message = details.message;
+		dialog.loading = details.loading;
+		dialog.loadingText = dialog.loadingText;
+		dialog.loadingCompletedText = dialog.loadingCompletedText;
 
 		return Promise.resolve();
 	}
@@ -219,7 +230,9 @@ export class MainThreadModelViewDialog extends Disposable implements MainThreadM
 			wizard.customButtons = details.customButtons.map(buttonHandle => this.getButton(buttonHandle));
 		}
 		wizard.message = details.message;
-
+		wizard.loading = details.loading;
+		wizard.loadingText = details.loadingText;
+		wizard.loadingCompletedText = details.loadingCompletedText;
 		return Promise.resolve();
 	}
 
@@ -247,7 +260,7 @@ export class MainThreadModelViewDialog extends Disposable implements MainThreadM
 
 	public $openWizard(handle: number, source?: string): Thenable<void> {
 		let wizard = this.getWizard(handle);
-		const options = assign({}, DefaultWizardOptions);
+		const options = Object.assign({}, DefaultWizardOptions);
 		options.width = wizard.width;
 		this._dialogService.showWizard(wizard, options, source);
 		return Promise.resolve();

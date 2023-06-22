@@ -8,13 +8,13 @@
  * being used e.g. in HTMLElement.innerHTML.
  */
 export function escape(html: string): string {
-	return html.replace(/[<|>|&|"]/g, function (match) {
+	return html.replace(/[<|>|&|"|\']/g, function (match) {
 		switch (match) {
 			case '<': return '&lt;';
 			case '>': return '&gt;';
 			case '&': return '&amp;';
 			case '"': return '&quot;';
-			case '\'': return '&#39';
+			case '\'': return '&#39;';
 			default: return match;
 		}
 	});
@@ -70,4 +70,14 @@ export function endsWith(haystack: string, needle: string): boolean {
 	} else {
 		return false;
 	}
+}
+
+/**
+ * Remove line breaks/eols from a string across different operating systems.
+ * @param str target strings that needs line breaks removed.
+ * @param replace optional string that replaces the line breaks.
+ * @returns string with removed line breaks.
+ */
+export function removeLineBreaks(str: string, replace?: string): string {
+	return str.replace(/(\r\n|\n|\r)/gm, replace ?? '');
 }

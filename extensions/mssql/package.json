@@ -2,7 +2,7 @@
   "name": "mssql",
   "version": "0.1.0",
   "publisher": "Microsoft",
-  "aiKey": "AIF-37eefaf0-8022-4671-a3fb-64752724682e",
+  "aiKey": "29a207bb14f84905966a8f22524cb730-25407f35-11b6-4d4e-8114-ab9e843cb52f-7380",
   "activationEvents": [
     "*"
   ],
@@ -19,6 +19,12 @@
     "update-grammar": "node ../../build/npm/update-grammar.js Microsoft/vscode-mssql syntaxes/SQL.plist ./syntaxes/sql.tmLanguage.json",
     "postinstall": "node ./build/postinstall.js"
   },
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
   "contributes": {
     "problemMatchers": [
       {
@@ -26,6 +32,10 @@
       }
     ],
     "commands": [
+      {
+        "command": "objectExplorer.scriptAsAlter",
+        "title": "Script as Alter"
+      },
       {
         "command": "mssql.exportSqlAsNotebook",
         "title": "%mssql.exportSqlAsNotebook%"
@@ -39,82 +49,6 @@
         }
       },
       {
-        "command": "mssqlCluster.uploadFiles",
-        "title": "%mssqlCluster.uploadFiles%"
-      },
-      {
-        "command": "mssqlCluster.mkdir",
-        "title": "%mssqlCluster.mkdir%"
-      },
-      {
-        "command": "mssqlCluster.deleteFiles",
-        "title": "%mssqlCluster.deleteFiles%"
-      },
-      {
-        "command": "mssqlCluster.previewFile",
-        "title": "%mssqlCluster.previewFile%"
-      },
-      {
-        "command": "mssqlCluster.saveFile",
-        "title": "%mssqlCluster.saveFile%"
-      },
-      {
-        "command": "mssqlCluster.copyPath",
-        "title": "%mssqlCluster.copyPath%"
-      },
-      {
-        "command": "mssqlCluster.manageAccess",
-        "title": "%mssqlCluster.manageAccess%"
-      },
-      {
-        "command": "mssqlCluster.task.newNotebook",
-        "title": "%notebook.command.new%",
-        "icon": {
-          "dark": "resources/dark/new_notebook.svg",
-          "light": "resources/light/new_notebook.svg"
-        }
-      },
-      {
-        "command": "mssqlCluster.task.openNotebook",
-        "title": "%notebook.command.open%",
-        "icon": {
-          "dark": "resources/dark/open_notebook_inverse.svg",
-          "light": "resources/light/open_notebook.svg"
-        }
-      },
-      {
-        "command": "mssqlCluster.livy.cmd.submitSparkJob",
-        "title": "%title.submitSparkJob%"
-      },
-      {
-        "command": "mssqlCluster.livy.task.submitSparkJob",
-        "title": "%title.newSparkJob%",
-        "icon": {
-          "dark": "resources/dark/new_spark_job_inverse.svg",
-          "light": "resources/light/new_spark_job.svg"
-        }
-      },
-      {
-        "command": "mssqlCluster.task.openClusterDashboard",
-        "title": "%title.openClusterDashboard%",
-        "icon": {
-          "dark": "resources/dark/cluster_status_inverse.svg",
-          "light": "resources/light/cluster_status.svg"
-        }
-      },
-      {
-        "command": "mssqlCluster.livy.task.openYarnHistory",
-        "title": "%title.openYarnHistory%",
-        "icon": {
-          "dark": "resources/light/hadoop.svg",
-          "light": "resources/light/hadoop.svg"
-        }
-      },
-      {
-        "command": "mssqlCluster.livy.cmd.submitFileToSparkJob",
-        "title": "%title.submitSparkJob%"
-      },
-      {
         "command": "mssql.searchServers",
         "title": "%title.searchServers%"
       },
@@ -126,6 +60,82 @@
         "command": "mssql.showLogFile",
         "category": "MSSQL",
         "title": "%title.showLogFile%"
+      },
+      {
+        "command": "mssql.newTable",
+        "category": "MSSQL",
+        "title": "%title.newTable%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "mssql.designTable",
+        "category": "MSSQL",
+        "title": "%title.designTable%",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "mssql.changeNotebookConnection",
+        "category": "MSSQL",
+        "title": "%title.changeNotebookConnection%"
+      },
+      {
+        "command": "mssql.newObject",
+        "category": "MSSQL",
+        "title": "%title.newObject%",
+        "icon": "$(add)"
+      },
+      {
+        "command": "mssql.objectProperties",
+        "category": "MSSQL",
+        "title": "%title.objectProperties%",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "mssql.deleteObject",
+        "category": "MSSQL",
+        "title": "%title.deleteObject%",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "mssql.renameObject",
+        "category": "MSSQL",
+        "title": "%title.renameObject%"
+      },
+      {
+        "command": "mssql.enableGroupBySchema",
+        "category": "MSSQL",
+        "title": "%mssql.objectExplorer.enableGroupBySchema%",
+        "icon": {
+          "dark": "resources/dark/groupBySchemaEnabled_inverse.svg",
+          "light": "resources/light/groupBySchemaEnabled.svg"
+        }
+      },
+      {
+        "command": "mssql.disableGroupBySchema",
+        "category": "MSSQL",
+        "title": "%mssql.objectExplorer.disableGroupBySchema%",
+        "icon": {
+          "dark": "resources/dark/groupBySchemaDisabled_inverse.svg",
+          "light": "resources/light/groupBySchemaDisabled.svg"
+        }
+      },
+      {
+        "command": "mssql.enableGroupBySchemaTitle",
+        "category": "MSSQL",
+        "title": "%mssql.objectExplorer.enableGroupBySchemaTitle%",
+        "icon": {
+          "dark": "resources/dark/groupBySchemaEnabled_inverse.svg",
+          "light": "resources/light/groupBySchemaEnabled.svg"
+        }
+      },
+      {
+        "command": "mssql.disableGroupBySchemaTitle",
+        "category": "MSSQL",
+        "title": "%mssql.objectExplorer.disableGroupBySchemaTitle%",
+        "icon": {
+          "dark": "resources/dark/groupBySchemaDisabled_inverse.svg",
+          "light": "resources/light/groupBySchemaDisabled.svg"
+        }
       }
     ],
     "outputChannels": [
@@ -150,6 +160,11 @@
           "type": "number",
           "default": 2097152,
           "description": "%mssql.query.maxXmlCharsToStore%"
+        },
+        "mssql.query.maxCharsToStore": {
+          "type": "number",
+          "default": 65535,
+          "description": "%mssql.query.maxCharsToStore%"
         },
         "mssql.format.alignColumnDefinitionsInColumns": {
           "type": "boolean",
@@ -191,6 +206,11 @@
           "default": false,
           "description": "%mssql.logDebugInfo%"
         },
+        "mssql.piiLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "%mssql.piiLogging%"
+        },
         "mssql.tracingLevel": {
           "type": "string",
           "description": "%mssql.tracingLevel%",
@@ -204,6 +224,17 @@
             "Information",
             "Verbose"
           ]
+        },
+        "mssql.trace.server": {
+          "type": "string",
+          "scope": "window",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "%mssql.tracing.desc%"
         },
         "mssql.logRetentionMinutes": {
           "type": "number",
@@ -239,6 +270,29 @@
           "type": "boolean",
           "default": false,
           "description": "%mssql.intelliSense.lowerCaseSuggestions%"
+        },
+        "mssql.executionPlan.expensiveOperationMetric": {
+          "type": "string",
+          "description": "%mssql.executionPlan.expensiveOperationMetric%",
+          "default": "cost",
+          "enum": [
+            "off",
+            "actualElapsedTime",
+            "actualElapsedCpuTime",
+            "cost",
+            "subtreeCost",
+            "actualNumberOfRowsForAllExecutions",
+            "numberOfRowsRead"
+          ],
+          "enumDescriptions": [
+            "%mssql.executionPlan.expensiveOperationMetric.off%",
+            "%mssql.executionPlan.expensiveOperationMetric.actualElapsedTime%",
+            "%mssql.executionPlan.expensiveOperationMetric.actualElapsedCpuTime%",
+            "%mssql.executionPlan.cost%",
+            "%mssql.executionPlan.subtreeCost%",
+            "%mssql.executionPlan.actualNumberOfRowsForAllExecutions%",
+            "%mssql.executionPlan.numberOfRowsRead%"
+          ]
         },
         "mssql.query.rowCount": {
           "type": "number",
@@ -367,6 +421,37 @@
           "type": "boolean",
           "description": "%mssql.ignorePlatformWarning%",
           "default": false
+        },
+        "mssql.parallelMessageProcessing": {
+          "type": "boolean",
+          "description": "%mssql.parallelMessageProcessing%",
+          "default": false
+        },
+        "mssql.enableSqlAuthenticationProvider": {
+          "type": "boolean",
+          "description": "%mssql.enableSqlAuthenticationProvider%",
+          "default": true
+        },
+        "mssql.tableDesigner.preloadDatabaseModel": {
+          "type": "boolean",
+          "default": false,
+          "description": "%mssql.tableDesigner.preloadDatabaseModel%"
+        },
+        "mssql.tableDesigner.allowDisableAndReenableDdlTriggers": {
+          "type": "boolean",
+          "default": true,
+          "description": "%mssql.tableDesigner.allowDisableAndReenableDdlTriggers%"
+        },
+        "mssql.objectExplorer.groupBySchema": {
+          "type": "boolean",
+          "default": false,
+          "description": "%mssql.objectExplorer.groupBySchema%"
+        },
+        "mssql.objectExplorer.expandTimeout": {
+          "type": "number",
+          "default": 45,
+          "minimum": 1,
+          "description": "%mssql.objectExplorer.expandTimeout%"
         }
       }
     },
@@ -381,105 +466,172 @@
           "when": "false"
         },
         {
-          "command": "mssqlCluster.uploadFiles",
+          "command": "mssql.newTable",
           "when": "false"
         },
         {
-          "command": "mssqlCluster.mkdir",
+          "command": "mssql.designTable",
           "when": "false"
         },
         {
-          "command": "mssqlCluster.deleteFiles",
+          "command": "mssql.changeNotebookConnection",
           "when": "false"
         },
         {
-          "command": "mssqlCluster.previewFile",
+          "command": "mssql.newObject",
           "when": "false"
         },
         {
-          "command": "mssqlCluster.saveFile",
+          "command": "mssql.objectProperties",
           "when": "false"
         },
         {
-          "command": "mssqlCluster.copyPath",
+          "command": "mssql.deleteObject",
           "when": "false"
         },
         {
-          "command": "mssqlCluster.manageAccess",
-          "when": "false"
-        },
-        {
-          "command": "mssqlCluster.task.newNotebook",
-          "when": "false"
-        },
-        {
-          "command": "mssqlCluster.task.openNotebook",
-          "when": "false"
-        },
-        {
-          "command": "mssqlCluster.livy.cmd.submitFileToSparkJob",
-          "when": "false"
-        },
-        {
-          "command": "mssqlCluster.livy.task.submitSparkJob",
-          "when": "false"
-        },
-        {
-          "command": "mssqlCluster.task.openClusterDashboard",
+          "command": "mssql.renameObject",
           "when": "false"
         }
       ],
       "objectExplorer/item/context": [
         {
-          "command": "mssqlCluster.uploadFiles",
-          "when": "nodeType=~/^mssqlCluster/ && nodeType != mssqlCluster:message && nodeType != mssqlCluster:file && nodeSubType=~/^(?!:mount).*$/",
-          "group": "1mssqlCluster@1"
+          "command": "objectExplorer.scriptAsAlter",
+          "when": "nodeType == Table",
+          "group": "0_query@5"
         },
         {
-          "command": "mssqlCluster.mkdir",
-          "when": "nodeType=~/^mssqlCluster/ && nodeType != mssqlCluster:message && nodeType != mssqlCluster:file && nodeSubType=~/^(?!:mount).*$/",
-          "group": "1mssqlCluster@1"
+          "command": "mssql.designTable",
+          "when": "connectionProvider == MSSQL && nodeType == Table && nodeSubType != LedgerDropped",
+          "group": "0_query@3",
+          "isDefault": true
         },
         {
-          "command": "mssqlCluster.saveFile",
-          "when": "nodeType == mssqlCluster:file",
-          "group": "1mssqlCluster@1"
+          "command": "mssql.newTable",
+          "when": "connectionProvider == MSSQL && nodeType == Folder && objectType == Tables",
+          "group": "0_query@1"
         },
         {
-          "command": "mssqlCluster.previewFile",
-          "when": "nodeType == mssqlCluster:file",
-          "group": "1mssqlCluster@2"
+          "command": "mssql.newObject",
+          "when": "connectionProvider == MSSQL && nodeType == Folder && objectType =~ /^(ServerLevelLogins|Users|ServerLevelServerRoles|ApplicationRoles|DatabaseRoles|Databases)$/ && config.workbench.enablePreviewFeatures",
+          "group": "0_query@1"
         },
         {
-          "command": "mssqlCluster.copyPath",
-          "when": "nodeType=~/^mssqlCluster/ && nodeType != mssqlCluster:connection && nodeType != mssqlCluster:message && nodeType != mssqlCluster:hdfs",
-          "group": "1mssqlCluster@3"
+          "command": "mssql.objectProperties",
+          "when": "connectionProvider == MSSQL && nodeType =~ /^(ServerLevelLogin|User|ServerLevelServerRole|ApplicationRole|DatabaseRole)$/ && config.workbench.enablePreviewFeatures",
+          "group": "0_query@1",
+          "isDefault": true
         },
         {
-          "command": "mssqlCluster.manageAccess",
-          "when": "nodeType=~/^mssqlCluster/ && nodeType != mssqlCluster:connection && nodeType != mssqlCluster:message",
-          "group": "1mssqlCluster@3"
+          "command": "mssql.deleteObject",
+          "when": "connectionProvider == MSSQL && nodeType =~ /^(ServerLevelLogin|User|ServerLevelServerRole|ApplicationRole|DatabaseRole|Database)$/ && config.workbench.enablePreviewFeatures",
+          "group": "0_query@2"
         },
         {
-          "command": "mssqlCluster.deleteFiles",
-          "when": "nodeType=~/^mssqlCluster/ && nodeType != mssqlCluster:hdfs && nodeType != mssqlCluster:connection && viewItem != mssqlCluster:connection && nodeType != mssqlCluster:message && nodeSubType=~/^(?!:mount).*$/",
-          "group": "1mssqlCluster@4"
+          "command": "mssql.renameObject",
+          "when": "connectionProvider == MSSQL && nodeType =~ /^(ServerLevelLogin|User|Table|View|ServerLevelServerRole|ApplicationRole|DatabaseRole)$/ && config.workbench.enablePreviewFeatures",
+          "group": "0_query@3"
         },
         {
-          "command": "mssqlCluster.livy.cmd.submitSparkJob",
-          "when": "nodeType == mssqlCluster:hdfs",
-          "group": "1mssqlCluster@7"
+          "command": "mssql.renameObject",
+          "when": "connectionProvider == MSSQL && nodeType == Column && config.workbench.enablePreviewFeatures && nodePath =~ /^.*\\/Tables\\/.*\\/Columns\\/.*$/",
+          "group": "0_query@3"
         },
         {
-          "command": "mssqlCluster.livy.cmd.submitFileToSparkJob",
-          "when": "nodeType == mssqlCluster:file && nodeSubType =~/:spark:/",
-          "group": "1mssqlCluster@6"
+          "command": "mssql.enableGroupBySchema",
+          "when": "connectionProvider == MSSQL && nodeType && nodeType =~ /^(Server|Database)$/ && !config.mssql.objectExplorer.groupBySchema"
+        },
+        {
+          "command": "mssql.disableGroupBySchema",
+          "when": "connectionProvider == MSSQL && nodeType && nodeType =~ /^(Server|Database)$/ && config.mssql.objectExplorer.groupBySchema"
+        },
+        {
+          "command": "mssql.designTable",
+          "when": "connectionProvider == MSSQL && nodeType == Table && nodeSubType != LedgerDropped",
+          "group": "inline@2"
+        },
+        {
+          "command": "mssql.newTable",
+          "when": "connectionProvider == MSSQL && nodeType == Folder && objectType == Tables",
+          "group": "inline@0"
+        },
+        {
+          "command": "mssql.newObject",
+          "when": "connectionProvider == MSSQL && nodeType == Folder && objectType =~ /^(ServerLevelLogins|Users|ServerLevelServerRoles|ApplicationRoles|DatabaseRoles)$/ && config.workbench.enablePreviewFeatures",
+          "group": "inline@0"
+        },
+        {
+          "command": "mssql.objectProperties",
+          "when": "connectionProvider == MSSQL && nodeType =~ /^(ServerLevelLogin|User|ServerLevelServerRole|ApplicationRole|DatabaseRole)$/ && config.workbench.enablePreviewFeatures",
+          "group": "inline@2"
+        },
+        {
+          "command": "mssql.deleteObject",
+          "when": "connectionProvider == MSSQL && nodeType =~ /^(ServerLevelLogin|User|ServerLevelServerRole|ApplicationRole|DatabaseRole|Database)$/ && config.workbench.enablePreviewFeatures",
+          "group": "inline@3"
+        }
+      ],
+      "dataExplorer/context": [
+        {
+          "command": "mssql.designTable",
+          "when": "connectionProvider == MSSQL && nodeType == Table",
+          "group": "connection@3"
+        },
+        {
+          "command": "mssql.newTable",
+          "when": "connectionProvider == MSSQL && nodeType == Folder && objectType == Tables",
+          "group": "connection@1"
+        },
+        {
+          "command": "mssql.newObject",
+          "when": "connectionProvider == MSSQL && nodeType == Folder && objectType =~ /^(ServerLevelLogins|Users|ServerLevelServerRoles|ApplicationRoles|DatabaseRoles|Databases)$/ && config.workbench.enablePreviewFeatures",
+          "group": "connection@1"
+        },
+        {
+          "command": "mssql.objectProperties",
+          "when": "connectionProvider == MSSQL && nodeType =~ /^(ServerLevelLogin|User|ServerLevelServerRole|ApplicationRole|DatabaseRole)$/ && config.workbench.enablePreviewFeatures",
+          "group": "connection@1"
+        },
+        {
+          "command": "mssql.deleteObject",
+          "when": "connectionProvider == MSSQL && nodeType =~ /^(ServerLevelLogin|User|ServerLevelServerRole|ApplicationRole|DatabaseRole|Database)$/ && config.workbench.enablePreviewFeatures",
+          "group": "connection@2"
+        },
+        {
+          "command": "mssql.renameObject",
+          "when": "connectionProvider == MSSQL && nodeType =~ /^(ServerLevelLogin|User|Table|View|ServerLevelServerRole|ApplicationRole|DatabaseRole)$/ && config.workbench.enablePreviewFeatures",
+          "group": "connection@3"
+        },
+        {
+          "command": "mssql.renameObject",
+          "when": "connectionProvider == MSSQL && nodeType == Column && config.workbench.enablePreviewFeatures && nodePath =~ /^.*\\/Tables\\/.*\\/Columns\\/.*$/",
+          "group": "connection@3"
+        },
+        {
+          "command": "mssql.enableGroupBySchema",
+          "when": "connectionProvider == MSSQL && nodeType && nodeType =~ /^(Server|Database)$/ && !config.mssql.objectExplorer.groupBySchema"
+        },
+        {
+          "command": "mssql.disableGroupBySchema",
+          "when": "connectionProvider == MSSQL && nodeType && nodeType =~ /^(Server|Database)$/ && config.mssql.objectExplorer.groupBySchema"
         }
       ],
       "notebook/toolbar": [
         {
           "command": "mssql.exportNotebookToSql",
           "when": "config.workbench.enablePreviewFeatures && providerId == sql"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "mssql.enableGroupBySchemaTitle",
+          "when": "view == dataExplorer.servers && !config.mssql.objectExplorer.groupBySchema",
+          "group": "navigation@4"
+        },
+        {
+          "command": "mssql.disableGroupBySchemaTitle",
+          "when": "view == dataExplorer.servers && config.mssql.objectExplorer.groupBySchema",
+          "group": "navigation@5"
         }
       ]
     },
@@ -659,60 +811,19 @@
         }
       ]
     },
-    "dashboard.tabs": [
-      {
-        "id": "mssql-big-data-cluster",
-        "description": "%tab.bigDataClusterDescription%",
-        "provider": "MSSQL",
-        "title": "%title.bigDataCluster%",
-        "group": "home",
-        "when": "connectionProvider == 'MSSQL' && mssql:iscluster && dashboardContext == 'server'",
-        "container": {
-          "grid-container": [
-            {
-              "name": "%title.tasks%",
-              "row": 0,
-              "col": 0,
-              "colspan": 1,
-              "widget": {
-                "tasks-widget": [
-                  "mssqlCluster.task.newNotebook",
-                  "mssqlCluster.task.openNotebook",
-                  "mssqlCluster.livy.task.submitSparkJob",
-                  "mssqlCluster.task.openClusterDashboard"
-                ]
-              }
-            },
-            {
-              "name": "%title.endpoints%",
-              "row": 1,
-              "col": 0,
-              "rowspan": 2.5,
-              "colspan": 2,
-              "widget": {
-                "modelview": {
-                  "id": "bdc-endpoints"
-                }
-              }
-            },
-            {
-              "name": "%title.books%",
-              "row": 0,
-              "col": 2,
-              "colspan": 1,
-              "widget": {
-                "modelview": {
-                  "id": "books-widget"
-                }
-              }
-            }
-          ]
-        }
-      }
-    ],
     "connectionProvider": {
       "providerId": "MSSQL",
       "displayName": "%mssql.provider.displayName%",
+      "useFullOptions": true,
+      "isExecutionPlanProvider": true,
+      "supportCopyResultsToClipboard": true,
+      "azureResource": "Sql",
+      "supportedExecutionPlanFileExtensions": [
+        "sqlplan"
+      ],
+      "connectionStringOptions": {
+        "isEnabled": true
+      },
       "iconPath": [
         {
           "id": "mssql:cloud",
@@ -722,10 +833,10 @@
           }
         },
         {
-          "id": "mssql:cluster",
+          "id": "mssql:managedInstance",
           "path": {
-            "light": "resources/light/sql_bigdata_cluster.svg",
-            "dark": "resources/dark/sql_bigdata_cluster_inverse.svg"
+            "light": "resources/light/managedInstance.svg",
+            "dark": "resources/dark/managedInstance_inverse.svg"
           }
         }
       ],
@@ -736,7 +847,7 @@
           "name": "connectionName",
           "displayName": "%mssql.connectionOptions.connectionName.displayName%",
           "description": "%mssql.connectionOptions.connectionName.description%",
-          "groupName": "Source",
+          "groupName": "%mssql.connectionOptions.groupName.source%",
           "valueType": "string",
           "defaultValue": null,
           "objectType": null,
@@ -750,9 +861,10 @@
           "name": "server",
           "displayName": "%mssql.connectionOptions.serverName.displayName%",
           "description": "%mssql.connectionOptions.serverName.description%",
-          "groupName": "Source",
+          "groupName": "%mssql.connectionOptions.groupName.source%",
           "valueType": "string",
           "defaultValue": null,
+          "placeholder": "%mssql.connectionOptions.serverName.placeholder%",
           "objectType": null,
           "categoryValues": null,
           "isRequired": true,
@@ -764,7 +876,7 @@
           "name": "database",
           "displayName": "%mssql.connectionOptions.databaseName.displayName%",
           "description": "%mssql.connectionOptions.databaseName.description%",
-          "groupName": "Source",
+          "groupName": "%mssql.connectionOptions.groupName.source%",
           "valueType": "string",
           "defaultValue": null,
           "objectType": null,
@@ -778,7 +890,7 @@
           "name": "authenticationType",
           "displayName": "%mssql.connectionOptions.authType.displayName%",
           "description": "%mssql.connectionOptions.authType.description%",
-          "groupName": "Security",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
           "valueType": "category",
           "defaultValue": "SqlLogin",
           "defaultValueOsOverrides": [
@@ -811,7 +923,7 @@
           "name": "user",
           "displayName": "%mssql.connectionOptions.userName.displayName%",
           "description": "%mssql.connectionOptions.userName.description%",
-          "groupName": "Security",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
           "valueType": "string",
           "defaultValue": null,
           "objectType": null,
@@ -825,7 +937,7 @@
           "name": "password",
           "displayName": "%mssql.connectionOptions.password.displayName%",
           "description": "%mssql.connectionOptions.password.description%",
-          "groupName": "Security",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
           "valueType": "password",
           "defaultValue": null,
           "objectType": null,
@@ -836,10 +948,24 @@
         {
           "specialValueType": null,
           "isIdentity": false,
+          "name": "applicationName",
+          "displayName": "%mssql.connectionOptions.applicationName.displayName%",
+          "description": "%mssql.connectionOptions.applicationName.description%",
+          "groupName": "%mssql.connectionOptions.groupName.initialization%",
+          "valueType": "string",
+          "defaultValue": "azdata",
+          "objectType": null,
+          "categoryValues": null,
+          "isRequired": false,
+          "isArray": false
+        },
+        {
+          "specialValueType": null,
+          "isIdentity": false,
           "name": "applicationIntent",
           "displayName": "%mssql.connectionOptions.applicationIntent.displayName%",
           "description": "%mssql.connectionOptions.applicationIntent.description%",
-          "groupName": "Initialization",
+          "groupName": "%mssql.connectionOptions.groupName.initialization%",
           "valueType": "category",
           "defaultValue": null,
           "objectType": null,
@@ -859,12 +985,12 @@
         {
           "specialValueType": null,
           "isIdentity": false,
-          "name": "asynchronousProcessing",
-          "displayName": "%mssql.connectionOptions.asynchronousProcessing.displayName%",
-          "description": "%mssql.connectionOptions.asynchronousProcessing.description%",
-          "groupName": "Initialization",
-          "valueType": "boolean",
-          "defaultValue": null,
+          "name": "connectTimeout",
+          "displayName": "%mssql.connectionOptions.connectTimeout.displayName%",
+          "description": "%mssql.connectionOptions.connectTimeout.description%",
+          "groupName": "%mssql.connectionOptions.groupName.initialization%",
+          "valueType": "number",
+          "defaultValue": "30",
           "objectType": null,
           "categoryValues": null,
           "isRequired": false,
@@ -873,10 +999,10 @@
         {
           "specialValueType": null,
           "isIdentity": false,
-          "name": "connectTimeout",
-          "displayName": "%mssql.connectionOptions.connectTimeout.displayName%",
-          "description": "%mssql.connectionOptions.connectTimeout.description%",
-          "groupName": "Initialization",
+          "name": "commandTimeout",
+          "displayName": "%mssql.connectionOptions.commandTimeout.displayName%",
+          "description": "%mssql.connectionOptions.commandTimeout.description%",
+          "groupName": "%mssql.connectionOptions.groupName.initialization%",
           "valueType": "number",
           "defaultValue": "30",
           "objectType": null,
@@ -890,7 +1016,7 @@
           "name": "currentLanguage",
           "displayName": "%mssql.connectionOptions.currentLanguage.displayName%",
           "description": "%mssql.connectionOptions.currentLanguage.description%",
-          "groupName": "Initialization",
+          "groupName": "%mssql.connectionOptions.groupName.initialization%",
           "valueType": "string",
           "defaultValue": null,
           "objectType": null,
@@ -904,22 +1030,74 @@
           "name": "columnEncryptionSetting",
           "displayName": "%mssql.connectionOptions.columnEncryptionSetting.displayName%",
           "description": "%mssql.connectionOptions.columnEncryptionSetting.description%",
-          "groupName": "Security",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
           "valueType": "category",
           "defaultValue": null,
           "objectType": null,
           "categoryValues": [
             {
               "displayName": "%mssql.disabled%",
-              "name": "Disabled"
+              "name": "disabled"
             },
             {
               "displayName": "%mssql.enabled%",
-              "name": "Enabled"
+              "name": "enabled"
             }
           ],
           "isRequired": false,
-          "isArray": false
+          "isArray": false,
+          "onSelectionChange": [
+            {
+              "values": [
+                "disabled",
+                ""
+              ],
+              "dependentOptionActions": [
+                {
+                  "optionName": "secureEnclaves",
+                  "action": "hide"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "specialValueType": null,
+          "isIdentity": false,
+          "name": "secureEnclaves",
+          "displayName": "%mssql.connectionOptions.secureEnclaves.displayName%",
+          "description": "%mssql.connectionOptions.secureEnclaves.description%",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
+          "valueType": "category",
+          "defaultValue": null,
+          "objectType": null,
+          "categoryValues": [
+            {
+              "displayName": "%mssql.disabled%",
+              "name": "disabled"
+            },
+            {
+              "displayName": "%mssql.enabled%",
+              "name": "enabled"
+            }
+          ],
+          "isRequired": false,
+          "isArray": false,
+          "onSelectionChange": [
+            {
+              "values": [
+                "disabled",
+                ""
+              ],
+              "dependentOptionActions": [
+                {
+                  "optionName": "attestationProtocol",
+                  "action": "hide",
+                  "required": true
+                }
+              ]
+            }
+          ]
         },
         {
           "specialValueType": null,
@@ -927,22 +1105,41 @@
           "name": "attestationProtocol",
           "displayName": "%mssql.connectionOptions.enclaveAttestationProtocol.displayName%",
           "description": "%mssql.connectionOptions.enclaveAttestationProtocol.description%",
-          "groupName": "Security",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
           "valueType": "category",
           "defaultValue": null,
           "objectType": null,
           "categoryValues": [
             {
               "displayName": "%mssql.connectionOptions.enclaveAttestationProtocol.categoryValues.HGS%",
-              "name": "HGS"
+              "name": "hgs"
             },
             {
               "displayName": "%mssql.connectionOptions.enclaveAttestationProtocol.categoryValues.AAS%",
-              "name": "AAS"
+              "name": "aas"
+            },
+            {
+              "displayName": "%mssql.connectionOptions.enclaveAttestationProtocol.categoryValues.None%",
+              "name": "none"
             }
           ],
           "isRequired": false,
-          "isArray": false
+          "isArray": false,
+          "onSelectionChange": [
+            {
+              "values": [
+                "none",
+                ""
+              ],
+              "dependentOptionActions": [
+                {
+                  "optionName": "enclaveAttestationUrl",
+                  "action": "hide",
+                  "required": true
+                }
+              ]
+            }
+          ]
         },
         {
           "specialValueType": null,
@@ -950,7 +1147,7 @@
           "name": "enclaveAttestationUrl",
           "displayName": "%mssql.connectionOptions.enclaveAttestationUrl.displayName%",
           "description": "%mssql.connectionOptions.enclaveAttestationUrl.description%",
-          "groupName": "Security",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
           "valueType": "string",
           "defaultValue": null,
           "objectType": null,
@@ -964,7 +1161,48 @@
           "name": "encrypt",
           "displayName": "%mssql.connectionOptions.encrypt.displayName%",
           "description": "%mssql.connectionOptions.encrypt.description%",
-          "groupName": "Security",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
+          "valueType": "category",
+          "defaultValue": "true",
+          "objectType": null,
+          "categoryValues": [
+            {
+              "displayName": "%mssql.connectionOptions.encrypt.categoryValues.true%",
+              "name": "true"
+            },
+            {
+              "displayName": "%mssql.connectionOptions.encrypt.categoryValues.strict%",
+              "name": "strict"
+            },
+            {
+              "displayName": "%mssql.connectionOptions.encrypt.categoryValues.false%",
+              "name": "false"
+            }
+          ],
+          "isRequired": false,
+          "isArray": false,
+          "showOnConnectionDialog": true,
+          "onSelectionChange": [
+            {
+              "values": [
+                "strict"
+              ],
+              "dependentOptionActions": [
+                {
+                  "optionName": "trustServerCertificate",
+                  "action": "hide"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "specialValueType": null,
+          "isIdentity": false,
+          "name": "persistSecurityInfo",
+          "displayName": "%mssql.connectionOptions.persistSecurityInfo.displayName%",
+          "description": "%mssql.connectionOptions.persistSecurityInfo.description%",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
           "valueType": "boolean",
           "defaultValue": null,
           "objectType": null,
@@ -975,11 +1213,11 @@
         {
           "specialValueType": null,
           "isIdentity": false,
-          "name": "persistSecurityInfo",
-          "displayName": "%mssql.connectionOptions.persistSecurityInfo.displayName%",
-          "description": "%mssql.connectionOptions.persistSecurityInfo.description%",
-          "groupName": "Security",
-          "valueType": "boolean",
+          "name": "hostNameInCertificate",
+          "displayName": "%mssql.connectionOptions.hostNameInCertificate.displayName%",
+          "description": "%mssql.connectionOptions.hostNameInCertificate.description%",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
+          "valueType": "string",
           "defaultValue": null,
           "objectType": null,
           "categoryValues": null,
@@ -992,27 +1230,14 @@
           "name": "trustServerCertificate",
           "displayName": "%mssql.connectionOptions.trustServerCertificate.displayName%",
           "description": "%mssql.connectionOptions.trustServerCertificate.description%",
-          "groupName": "Security",
+          "groupName": "%mssql.connectionOptions.groupName.security%",
           "valueType": "boolean",
-          "defaultValue": null,
+          "defaultValue": "false",
           "objectType": null,
           "categoryValues": null,
           "isRequired": false,
-          "isArray": false
-        },
-        {
-          "specialValueType": null,
-          "isIdentity": false,
-          "name": "attachedDBFileName",
-          "displayName": "%mssql.connectionOptions.attachedDBFileName.displayName%",
-          "description": "%mssql.connectionOptions.attachedDBFileName.description%",
-          "groupName": "Source",
-          "valueType": "string",
-          "defaultValue": null,
-          "objectType": null,
-          "categoryValues": null,
-          "isRequired": false,
-          "isArray": false
+          "isArray": false,
+          "showOnConnectionDialog": true
         },
         {
           "specialValueType": null,
@@ -1020,7 +1245,7 @@
           "name": "contextConnection",
           "displayName": "%mssql.connectionOptions.contextConnection.displayName%",
           "description": "%mssql.connectionOptions.contextConnection.description%",
-          "groupName": "Source",
+          "groupName": "%mssql.connectionOptions.groupName.source%",
           "valueType": "boolean",
           "defaultValue": null,
           "objectType": null,
@@ -1048,7 +1273,7 @@
           "name": "connectRetryCount",
           "displayName": "%mssql.connectionOptions.connectRetryCount.displayName%",
           "description": "%mssql.connectionOptions.connectRetryCount.description%",
-          "groupName": "Connection Resiliency",
+          "groupName": "%mssql.connectionOptions.groupName.connectionResiliency%",
           "valueType": "number",
           "defaultValue": "1",
           "objectType": null,
@@ -1062,23 +1287,9 @@
           "name": "connectRetryInterval",
           "displayName": "%mssql.connectionOptions.connectRetryInterval.displayName%",
           "description": "%mssql.connectionOptions.connectRetryInterval.description%",
-          "groupName": "Connection Resiliency",
+          "groupName": "%mssql.connectionOptions.groupName.connectionResiliency%",
           "valueType": "number",
           "defaultValue": "10",
-          "objectType": null,
-          "categoryValues": null,
-          "isRequired": false,
-          "isArray": false
-        },
-        {
-          "specialValueType": "appName",
-          "isIdentity": false,
-          "name": "applicationName",
-          "displayName": "%mssql.connectionOptions.applicationName.displayName%",
-          "description": "%mssql.connectionOptions.applicationName.description%",
-          "groupName": "Context",
-          "valueType": "string",
-          "defaultValue": null,
           "objectType": null,
           "categoryValues": null,
           "isRequired": false,
@@ -1090,7 +1301,7 @@
           "name": "workstationId",
           "displayName": "%mssql.connectionOptions.workstationId.displayName%",
           "description": "%mssql.connectionOptions.workstationId.description%",
-          "groupName": "Context",
+          "groupName": "%mssql.connectionOptions.groupName.context%",
           "valueType": "string",
           "defaultValue": null,
           "objectType": null,
@@ -1104,7 +1315,7 @@
           "name": "pooling",
           "displayName": "%mssql.connectionOptions.pooling.displayName%",
           "description": "%mssql.connectionOptions.pooling.description%",
-          "groupName": "Pooling",
+          "groupName": "%mssql.connectionOptions.groupName.pooling%",
           "valueType": "boolean",
           "defaultValue": null,
           "objectType": null,
@@ -1118,7 +1329,7 @@
           "name": "maxPoolSize",
           "displayName": "%mssql.connectionOptions.maxPoolSize.displayName%",
           "description": "%mssql.connectionOptions.maxPoolSize.description%",
-          "groupName": "Pooling",
+          "groupName": "%mssql.connectionOptions.groupName.pooling%",
           "valueType": "number",
           "defaultValue": null,
           "objectType": null,
@@ -1132,7 +1343,7 @@
           "name": "minPoolSize",
           "displayName": "%mssql.connectionOptions.minPoolSize.displayName%",
           "description": "%mssql.connectionOptions.minPoolSize.description%",
-          "groupName": "Pooling",
+          "groupName": "%mssql.connectionOptions.groupName.pooling%",
           "valueType": "number",
           "defaultValue": null,
           "objectType": null,
@@ -1146,7 +1357,7 @@
           "name": "loadBalanceTimeout",
           "displayName": "%mssql.connectionOptions.loadBalanceTimeout.displayName%",
           "description": "%mssql.connectionOptions.loadBalanceTimeout.description%",
-          "groupName": "Pooling",
+          "groupName": "%mssql.connectionOptions.groupName.pooling%",
           "valueType": "number",
           "defaultValue": null,
           "objectType": null,
@@ -1160,7 +1371,7 @@
           "name": "replication",
           "displayName": "%mssql.connectionOptions.replication.displayName%",
           "description": "%mssql.connectionOptions.replication.description%",
-          "groupName": "Replication",
+          "groupName": "%mssql.connectionOptions.groupName.replication%",
           "valueType": "boolean",
           "defaultValue": null,
           "objectType": null,
@@ -1173,8 +1384,8 @@
           "isIdentity": false,
           "name": "attachDbFilename",
           "displayName": "%mssql.connectionOptions.attachDbFilename.displayName%",
-          "description": null,
-          "groupName": null,
+          "description": "%mssql.connectionOptions.attachDbFilename.description%",
+          "groupName": "%mssql.connectionOptions.groupName.source%",
           "valueType": "string",
           "defaultValue": null,
           "objectType": null,
@@ -1188,7 +1399,7 @@
           "name": "failoverPartner",
           "displayName": "%mssql.connectionOptions.failoverPartner.displayName%",
           "description": "%mssql.connectionOptions.failoverPartner.description%",
-          "groupName": " Source",
+          "groupName": "%mssql.connectionOptions.groupName.source%",
           "valueType": "string",
           "defaultValue": null,
           "objectType": null,
@@ -1216,7 +1427,7 @@
           "name": "multipleActiveResultSets",
           "displayName": "%mssql.connectionOptions.multipleActiveResultSets.displayName%",
           "description": "%mssql.connectionOptions.multipleActiveResultSets.description%",
-          "groupName": "Advanced",
+          "groupName": "%mssql.connectionOptions.groupName.advanced%",
           "valueType": "boolean",
           "defaultValue": null,
           "objectType": null,
@@ -1230,7 +1441,7 @@
           "name": "packetSize",
           "displayName": "%mssql.connectionOptions.packetSize.displayName%",
           "description": "%mssql.connectionOptions.packetSize.description%",
-          "groupName": "Advanced",
+          "groupName": "%mssql.connectionOptions.groupName.advanced%",
           "valueType": "number",
           "defaultValue": null,
           "objectType": null,
@@ -1244,7 +1455,7 @@
           "name": "typeSystemVersion",
           "displayName": "%mssql.connectionOptions.typeSystemVersion.displayName%",
           "description": "%mssql.connectionOptions.typeSystemVersion.description%",
-          "groupName": "Advanced",
+          "groupName": "%mssql.connectionOptions.groupName.advanced%",
           "valueType": "string",
           "defaultValue": null,
           "objectType": null,
@@ -1256,35 +1467,19 @@
     }
   },
   "dependencies": {
-    "@microsoft/ads-kerberos": "^1.1.3",
-    "buffer-stream-reader": "^0.1.1",
-    "bytes": "^3.1.0",
-    "dataprotocol-client": "github:Microsoft/sqlops-dataprotocolclient#1.2.2",
-    "error-ex": "^1.3.2",
-    "figures": "^2.0.0",
+    "@microsoft/ads-extension-telemetry": "^3.0.1",
+    "@microsoft/ads-service-downloader": "^1.2.1",
+    "dataprotocol-client": "github:Microsoft/sqlops-dataprotocolclient#1.3.5",
     "find-remove": "1.2.1",
-    "request": "^2.88.0",
-    "request-light": "^0.3.0",
-    "@microsoft/ads-service-downloader": "0.2.2",
-    "stream-meter": "^1.0.4",
-    "through2": "^3.0.1",
-    "tough-cookie": "^3.0.1",
-    "vscode-extension-telemetry": "0.1.0",
     "vscode-languageclient": "5.2.1",
     "vscode-nls": "^4.0.0"
   },
   "devDependencies": {
-    "@types/bytes": "^3.0.0",
-    "@types/chai": "^4.2.11",
     "@types/mocha": "^7.0.2",
-    "@types/request": "^2.48.2",
-    "@types/stream-meter": "^0.0.22",
-    "@types/through2": "^2.0.34",
-    "chai": "^4.2.0",
+    "@microsoft/vscodetestcover": "^1.2.1",
+    "@microsoft/azdata-test": "^3.0.1",
     "mocha": "^7.1.1",
-    "mocha-junit-reporter": "^1.17.0",
-    "mocha-multi-reporters": "^1.1.7",
-    "typemoq": "^2.1.0",
-    "vscodetestcover": "^1.1.0"
+    "should": "^13.2.3",
+    "typemoq": "^2.1.0"
   }
 }

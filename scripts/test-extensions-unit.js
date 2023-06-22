@@ -18,14 +18,16 @@ const extensionList = [
 	'cms',
 	'dacpac',
 	'data-workspace',
+	'datavirtualization',
 	'import',
+	'machine-learning',
 	//'mssql',
 	'notebook',
-	'machine-learning',
+	'query-history',
 	'resource-deployment',
 	'schema-compare',
-	'sql-database-projects',
-
+	'sql-bindings',
+	'sql-database-projects'
 ];
 
 let argv = require('yargs')
@@ -52,13 +54,6 @@ else {
 	console.log(`Running unit tests with '${process.env.INTEGRATION_TEST_ELECTRON_PATH}' as build.`);
 }
 
-if (!process.env.ADS_TEST_GREP) {
-	console.log('Running stable tests only');
-
-	process.env.ADS_TEST_GREP = '@UNSTABLE@';
-	process.env.ADS_TEST_INVERT_GREP = 1;
-}
-
 // execute tests
 
 for (const ext of argv.extensions) {
@@ -72,14 +67,21 @@ for (const ext of argv.extensions) {
 	console.log(`VSCODEUSERDATADIR : ${VSCODEUSERDATADIR}`);
 	console.log(`VSCODEEXTENSIONSDIR : ${VSCODEEXTENSIONSDIR}`);
 
-	const command = `${process.env.INTEGRATION_TEST_ELECTRON_PATH} ${LINUX_EXTRA_ARGS} --extensionDevelopmentPath=${path.join(__dirname, '..', 'extensions', ext)} --extensionTestsPath=${path.join(__dirname, '..', 'extensions', ext, 'out', 'test')} --user-data-dir=${VSCODEUSERDATADIR} --extensions-dir=${VSCODEEXTENSIONSDIR} --remote-debugging-port=9222 --disable-telemetry --disable-crash-reporter --disable-updates --no-cached-data --disable-keytar`;
+	const command = `${process.env.INTEGRATION_TEST_ELECTRON_PATH} ${LINUX_EXTRA_ARGS} --extensionDevelopmentPath=${path.join(__dirname, '..', 'extensions', ext)} --extensionTestsPath=${path.join(__dirname, '..', 'extensions', ext, 'out', 'test')} --user-data-dir=${VSCODEUSERDATADIR} --extensions-dir=${VSCODEEXTENSIONSDIR} --remote-debugging-port=9222 --disable-telemetry --disable-crash-reporter --disable-updates --no-cached-data`;
 	console.log(`Command used: ${command}`);
-	const env = {
-		VSCODE_CLI: 1,
-		ELECTRON_ENABLE_STACK_DUMPING: 1,
-		ELECTRON_ENABLE_LOGGING: 1
-	};
-	console.log(execSync(command, { stdio: 'inherit', env: env}));
+
+	if (os.platform() === 'darwin') {
+		// passing in env on mac causes the executing the command to fail, so only pass in env for windows and linux
+		console.log(execSync(command, { stdio: 'inherit'}));
+	} else {
+		const env = {
+			...process.env,
+			VSCODE_CLI: 1,
+			ELECTRON_ENABLE_STACK_DUMPING: 1,
+			ELECTRON_ENABLE_LOGGING: 1
+		};
+		console.log(execSync(command, { stdio: 'inherit', env: env}));
+	}
 
 	// clean up
 	if (!process.env.NO_CLEANUP) {

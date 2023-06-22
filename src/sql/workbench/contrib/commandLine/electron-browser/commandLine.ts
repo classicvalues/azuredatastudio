@@ -30,18 +30,6 @@ import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
 import { IEnvironmentService, INativeEnvironmentService } from 'vs/platform/environment/common/environment';
 import { NativeParsedArgs } from 'vs/platform/environment/common/argv';
 
-export interface SqlArgs {
-	_?: string[];
-	authenticationType?: string
-	database?: string;
-	server?: string;
-	user?: string;
-	command?: string;
-	provider?: string;
-	aad?: boolean; // deprecated - used by SSMS - authenticationType should be used instead
-	integrated?: boolean; // deprecated - used by SSMS - authenticationType should be used instead.
-}
-
 //#region decorators
 
 type PathHandler = (uri: URI) => Promise<boolean>;
@@ -107,7 +95,7 @@ export class CommandLineWorkbenchContribution implements IWorkbenchContribution,
 	// (null, commandName) => Launch the command with a null connection. If the command implementation needs a connection, it will need to create it.
 	// (serverName, null) => Connect object explorer and open a new query editor if no file names are passed. If file names are passed, connect their editors to the server.
 	// (null, null) => Prompt for a connection unless there are registered servers
-	public async processCommandLine(args: SqlArgs): Promise<void> {
+	public async processCommandLine(args: NativeParsedArgs): Promise<void> {
 		let profile: IConnectionProfile = undefined;
 		let commandName = undefined;
 		if (args) {
@@ -122,22 +110,37 @@ export class CommandLineWorkbenchContribution implements IWorkbenchContribution,
 		let showConnectDialogOnStartup: boolean = this._configurationService.getValue('workbench.showConnectDialogOnStartup');
 		if (showConnectDialogOnStartup && !commandName && !profile && !this._connectionManagementService.hasRegisteredServers()) {
 			// prompt the user for a new connection on startup if no profiles are registered
-			await this._connectionManagementService.showConnectionDialog();
+			await this._connectionManagementService.showConnectionDialog(undefined, {
+				showDashboard: true,
+				saveTheConnection: true,
+				showConnectionDialogOnError: true,
+				showFirewallRuleOnError: true
+			});
 			return;
 		}
 		let connectedContext: azdata.ConnectedContext = undefined;
 		if (profile) {
+			if (profile.providerName && !this._capabilitiesService.providers[profile.providerName]) {
+				const installed = await this._connectionManagementService.handleUnsupportedProvider(profile.providerName);
+				if (!installed) {
+					// User cancelled install prompt so exit early since we won't be able to connect
+					return;
+				}
+				// Recreate the profile here now that we have our provider registered so that we get the correct
+				// option names. See https://github.com/microsoft/azuredatastudio/issues/20773 for details about the issue
+				profile = this.readProfileFromArgs(args);
+			}
 			if (this._notificationService) {
 				this._notificationService.status(localize('connectingLabel', "Connecting: {0}", profile.serverName), { hideAfter: 2500 });
 			}
 			try {
-				await this._connectionManagementService.connectIfNotConnected(profile, 'connection', true);
+				await this._connectionManagementService.connectIfNotConnected(profile, args.showDashboard ? 'dashboard' : 'connection', true);
 				// Before sending to extensions, we should a) serialize to IConnectionProfile or things will fail,
 				// and b) use the latest version of the profile from the service so most fields are filled in.
 				let updatedProfile = this._connectionManagementService.getConnectionProfileById(profile.id);
 				connectedContext = { connectionProfile: new ConnectionProfile(this._capabilitiesService, updatedProfile).toIConnectionProfile() };
 			} catch (err) {
-				this.logService.warn('Failed to connect due to error' + getErrorMessage(err));
+				this.logService.warn('Failed to connect due to error: ' + getErrorMessage(err));
 			}
 		}
 		if (commandName) {
@@ -145,14 +148,14 @@ export class CommandLineWorkbenchContribution implements IWorkbenchContribution,
 				this._notificationService.status(localize('runningCommandLabel', "Running command: {0}", commandName), { hideAfter: 2500 });
 			}
 			await this._commandService.executeCommand(commandName, connectedContext);
-		} else if (profile) {
+		} else if (connectedContext) {
 			// If we were given a file and it was opened with the sql editor,
 			// we want to connect the given profile to to it.
 			// If more than one file was passed, only show the connection dialog error on one of them.
 			if (args._ && args._.length > 0) {
 				await Promise.all(args._.map((f, i) => this.processFile(URI.file(f).toString(), profile, i === 0)));
 			}
-			else {
+			else if (this._capabilitiesService.getCapabilities(profile.providerName)?.connection?.isQueryProvider) {
 				// Default to showing new query
 				if (this._notificationService) {
 					this._notificationService.status(localize('openingNewQueryLabel', "Opening new query: {0}", profile.serverName), { hideAfter: 2500 });
@@ -223,14 +226,19 @@ export class CommandLineWorkbenchContribution implements IWorkbenchContribution,
 			}
 
 			const connectionProfile = this.readProfileFromArgs(args);
-			await this._connectionManagementService.showConnectionDialog(undefined, undefined, connectionProfile);
+			await this._connectionManagementService.showConnectionDialog(undefined, {
+				saveTheConnection: true,
+				showDashboard: true,
+				showConnectionDialogOnError: true,
+				showFirewallRuleOnError: true
+			}, connectionProfile);
 		} catch (err) {
 			this._notificationService.error(localize('errConnectUrl', "Could not open URL due to error {0}", getErrorMessage(err)));
 		}
 		return true;
 	}
 
-	private async confirmConnect(args: SqlArgs): Promise<boolean> {
+	private async confirmConnect(args: NativeParsedArgs): Promise<boolean> {
 		let detail = args && args.server ? localize('connectServerDetail', "This will connect to server {0}", args.server) : '';
 		const result = await this.dialogService.confirm({
 			message: localize('confirmConnect', "Are you sure you want to connect?"),
@@ -245,8 +253,8 @@ export class CommandLineWorkbenchContribution implements IWorkbenchContribution,
 		return false;
 	}
 
-	private parseProtocolArgs(uri: URI): SqlArgs {
-		let args: SqlArgs = querystring.parse(uri.query);
+	private parseProtocolArgs(uri: URI): NativeParsedArgs {
+		let args: NativeParsedArgs = querystring.parse(uri.query);
 		// Clear out command, not supporting arbitrary command via this path
 		args.command = undefined;
 		return args;
@@ -270,7 +278,7 @@ export class CommandLineWorkbenchContribution implements IWorkbenchContribution,
 		}
 	}
 
-	private readProfileFromArgs(args: SqlArgs) {
+	private readProfileFromArgs(args: NativeParsedArgs) {
 		let profile = new ConnectionProfile(this._capabilitiesService, null);
 		// We want connection store to use any matching password it finds
 		profile.savePassword = true;
@@ -290,16 +298,43 @@ export class CommandLineWorkbenchContribution implements IWorkbenchContribution,
 		*/
 		profile.authenticationType =
 			args.authenticationType ? args.authenticationType :
-				args.integrated ? Constants.integrated :
-					args.aad ? Constants.azureMFA :
-						(args.user && args.user.length > 0) ? args.user.includes('@') ? Constants.azureMFA : Constants.sqlLogin :
-							Constants.integrated;
+				args.integrated ? Constants.AuthenticationType.Integrated :
+					args.aad ? Constants.AuthenticationType.AzureMFA :
+						(args.user && args.user.length > 0) ? args.user.includes('@') ? Constants.AuthenticationType.AzureMFA : Constants.AuthenticationType.SqlLogin :
+							Constants.AuthenticationType.Integrated;
 
 		profile.connectionName = '';
-		profile.setOptionValue('applicationName', Constants.applicationName);
+		const applicationName = args.applicationName
+			? args.applicationName + '-' + Constants.applicationName
+			: Constants.applicationName;
+		profile.setOptionValue('applicationName', applicationName);
 		profile.setOptionValue('databaseDisplayName', profile.databaseName);
 		profile.setOptionValue('groupId', profile.groupId);
+		// Set all advanced options
+		let advancedOptions = this.getAdvancedOptions(args.connectionProperties, profile.getOptionKeyIdNames());
+		advancedOptions.forEach((v, k) => {
+			profile.setOptionValue(k, v);
+		});
 		return this._connectionManagementService ? this.tryMatchSavedProfile(profile) : profile;
+	}
+
+	private getAdvancedOptions(options: string, idNames: string[]): Map<string, string> {
+		const ignoredProperties = idNames.concat(['password', 'azureAccountToken']);
+		let advancedOptionsMap = new Map<string, string>();
+		if (options) {
+			try {
+				// Decode options if they contain any encoded URL characters
+				options = decodeURI(options);
+				JSON.parse(options, (k, v) => {
+					if (!(k in ignoredProperties)) {
+						advancedOptionsMap.set(k, v);
+					}
+				});
+			} catch (e) {
+				throw new Error(localize('commandline.propertiesFormatError', 'Advanced connection properties could not be parsed as JSON, error occurred: {0} Received properties value: {1}', e, options));
+			}
+		}
+		return advancedOptionsMap;
 	}
 
 	private tryMatchSavedProfile(profile: ConnectionProfile) {

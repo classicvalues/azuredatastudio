@@ -14,6 +14,7 @@ import { TestAccountManagementService } from 'sql/platform/accounts/test/common/
 import { InstantiationService } from 'vs/platform/instantiation/common/instantiationService';
 import { TestThemeService } from 'vs/platform/theme/test/common/testThemeService';
 import { AccountPickerService } from 'sql/workbench/services/accountManagement/browser/accountPickerService';
+import { NullLogService } from 'vs/platform/log/common/log';
 
 // SUITE STATE /////////////////////////////////////////////////////////////
 let mockAddAccountCompleteEmitter: Emitter<void>;
@@ -37,17 +38,18 @@ suite('Account picker service tests', () => {
 		// Setup:
 		// ... Create instantiation service
 		let instantiationService = createInstantiationService();
+		let logService = new NullLogService();
 
-		// ... Create instance of the service and reder account picker
-		let service = new AccountPickerService(instantiationService);
+		// ... Create instance of the service and render account picker
+		let service = new AccountPickerService(instantiationService, logService);
 		service.renderAccountPicker(TypeMoq.It.isAny());
 
 		// Then:
 		// ... All the events for the view models should be properly initialized
-		assert.notEqual(service.addAccountCompleteEvent, undefined);
-		assert.notEqual(service.addAccountErrorEvent, undefined);
-		assert.notEqual(service.addAccountStartEvent, undefined);
-		assert.notEqual(service.onAccountSelectionChangeEvent, undefined);
+		assert.notStrictEqual(service.addAccountCompleteEvent, undefined);
+		assert.notStrictEqual(service.addAccountErrorEvent, undefined);
+		assert.notStrictEqual(service.addAccountStartEvent, undefined);
+		assert.notStrictEqual(service.onAccountSelectionChangeEvent, undefined);
 
 
 		// ... All the events should properly fire

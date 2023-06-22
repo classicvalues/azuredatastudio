@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as azdata from 'azdata';
-import * as mssql from '../../../mssql';
+import * as mssql from 'mssql';
 import should = require('should');
 import { AssertionError } from 'assert';
 
@@ -15,7 +15,7 @@ export const mockIConnectionProfile: azdata.IConnectionProfile = {
 	databaseName: 'My Database',
 	userName: 'My User',
 	password: 'My Pwd',
-	authenticationType: 'SqlLogin',
+	authenticationType: azdata.connection.AuthenticationType.SqlLogin,
 	savePassword: false,
 	groupFullName: 'My groupName',
 	groupId: 'My GroupId',
@@ -23,50 +23,6 @@ export const mockIConnectionProfile: azdata.IConnectionProfile = {
 	saveProfile: true,
 	id: 'My Id',
 	options: null
-};
-
-export const mockConnectionProfile: azdata.connection.ConnectionProfile = {
-	providerId: 'My Provider',
-	connectionId: 'My Id',
-	connectionName: 'My Connection',
-	serverName: 'My Server',
-	databaseName: 'My Database',
-	userName: 'My User',
-	password: 'My Pwd',
-	authenticationType: 'SqlLogin',
-	savePassword: false,
-	groupFullName: 'My groupName',
-	groupId: 'My GroupId',
-	saveProfile: true,
-	options: {
-		server: 'My Server',
-		database: 'My Database',
-		user: 'My User',
-		password: 'My Pwd',
-		authenticationType: 'SqlLogin'
-	}
-};
-
-export const mockConnectionProfile2: azdata.connection.ConnectionProfile = {
-	providerId: 'My Provider2',
-	connectionId: 'My Id2',
-	connectionName: 'My Connection2',
-	serverName: 'My Server2',
-	databaseName: 'My Database2',
-	userName: 'My User2',
-	password: 'My Pwd2',
-	authenticationType: 'SqlLogin',
-	savePassword: false,
-	groupFullName: 'My groupName2',
-	groupId: 'My GroupId2',
-	saveProfile: true,
-	options: {
-		server: 'My Server2',
-		database: 'My Database2',
-		user: 'My User2',
-		password: 'My Pwd2',
-		authenticationType: 'SqlLogin'
-	}
 };
 
 export const mockConnectionResult: azdata.ConnectionResult = {
@@ -82,7 +38,7 @@ export const mockConnectionInfo = {
 	databaseName: 'My Database',
 	userName: 'My User',
 	password: 'My Pwd',
-	authenticationType: 'SqlLogin'
+	authenticationType: azdata.connection.AuthenticationType.SqlLogin
 };
 
 export const mockFilePath: string = 'test.dacpac';
@@ -94,7 +50,11 @@ export const mockDacpacEndpoint: mssql.SchemaCompareEndpointInfo = {
 	databaseName: '',
 	ownerUri: '',
 	packageFilePath: mockFilePath,
-	connectionDetails: undefined
+	connectionDetails: undefined,
+	projectFilePath: '',
+	extractTarget: mssql.ExtractTarget.schemaObjectType,
+	targetScripts: [],
+	dataSchemaProvider: '',
 };
 
 export const mockDatabaseEndpoint: mssql.SchemaCompareEndpointInfo = {
@@ -104,7 +64,11 @@ export const mockDatabaseEndpoint: mssql.SchemaCompareEndpointInfo = {
 	databaseName: '',
 	ownerUri: '',
 	packageFilePath: '',
-	connectionDetails: undefined
+	connectionDetails: undefined,
+	projectFilePath: '',
+	extractTarget: mssql.ExtractTarget.schemaObjectType,
+	targetScripts: [],
+	dataSchemaProvider: '',
 };
 
 export async function shouldThrowSpecificError(block: Function, expectedMessage: string, details?: string) {
@@ -143,4 +107,20 @@ export function setDatabaseEndpointInfo(): mssql.SchemaCompareEndpointInfo {
 	endpointInfo.serverName = serverName;
 
 	return endpointInfo;
+}
+
+export function getDeploymentOptions(): mssql.DeploymentOptions {
+	const sampleDesc = 'Sample Description text';
+	const sampleName = 'Sample Display Name';
+	return {
+		excludeObjectTypes: { value: [], description: sampleDesc, displayName: sampleName },
+		booleanOptionsDictionary: {
+			'SampleDisplayOption1': { value: false, description: sampleDesc, displayName: sampleName },
+			'SampleDisplayOption2': { value: false, description: sampleDesc, displayName: sampleName }
+		},
+		objectTypesDictionary: {
+			'SampleProperty1': sampleName,
+			'SampleProperty2': sampleName
+		}
+	};
 }

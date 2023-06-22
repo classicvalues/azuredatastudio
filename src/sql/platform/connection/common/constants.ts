@@ -11,22 +11,73 @@ export const outputChannelName = 'MSSQL';
 export const capabilitiesOptions = 'OPTIONS_METADATA';
 
 export const mssqlProviderName = 'MSSQL';
+export const mssqlCmsProviderName = 'MSSQL-CMS';
+export const mysqlProviderName = 'MYSQL';
 export const pgsqlProviderName = 'PGSQL';
 export const anyProviderName = '*';
 export const connectionProviderContextKey = 'connectionProvider';
 
 export const applicationName = 'azdata';
+export const mssqlApplicationNameOption = 'applicationName';
 
 export const defaultEngine = 'defaultEngine';
 
 export const passwordChars = '***************';
 
-/* authentication types */
-export const sqlLogin = 'SqlLogin';
-export const integrated = 'Integrated';
-export const azureMFA = 'AzureMFA';
-export const azureMFAAndUser = 'AzureMFAAndUser';
-export const dstsAuth = 'dstsAuth';
+export const enableSqlAuthenticationProviderConfig = 'mssql.enableSqlAuthenticationProvider';
+
+/** Configuration for Azure Authentication Library */
+export const azureAuthenticationLibraryConfig = 'azure.authenticationLibrary';
+
+/* default authentication type setting name*/
+export const defaultAuthenticationType = 'defaultAuthenticationType';
+
+/* Connection Properties */
+export const trustServerCertificate = 'trustServerCertificate';
+
+/**
+ * Well-known Authentication types commonly supported by connection providers.
+ */
+export enum AuthenticationType {
+	/**
+	 * Username and password
+	 */
+	SqlLogin = 'SqlLogin',
+	/**
+	 * Windows Authentication
+	 */
+	Integrated = 'Integrated',
+	/**
+	 * Azure Active Directory - Universal with MFA support
+	 */
+	AzureMFA = 'AzureMFA',
+	/**
+	 * Azure Active Directory - Password
+	 */
+	AzureMFAAndUser = 'AzureMFAAndUser',
+	/**
+	 * Datacenter Security Token Service Authentication
+	 */
+	DSTSAuth = 'dstsAuth',
+	/**
+	 * No authentication required
+	 */
+	None = 'None'
+}
+
+/*
+* Actions for the connection dialog to show/hide connection options.
+*/
+export enum Actions {
+	/**
+	 * Shows a connection option
+	 */
+	Show = 'show',
+	/**
+	 * Hides a connection option
+	 */
+	Hide = 'hide'
+}
 
 /* CMS constants */
 export const cmsProviderName = 'MSSQL-CMS';

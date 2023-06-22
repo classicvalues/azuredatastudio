@@ -4,9 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IDisposable, Disposable } from 'vs/base/common/lifecycle';
+import * as perf from 'vs/base/common/performance';
 import {
-	SqlExtHostContext, ExtHostDataProtocolShape,
-	MainThreadDataProtocolShape, SqlMainContext
+	ExtHostDataProtocolShape,
+	MainThreadDataProtocolShape
 } from 'sql/workbench/api/common/sqlExtHost.protocol';
 import { IConnectionManagementService } from 'sql/platform/connection/common/connectionManagement';
 import { ICapabilitiesService } from 'sql/platform/capabilities/common/capabilitiesService';
@@ -23,14 +24,15 @@ import { ITaskService } from 'sql/workbench/services/tasks/common/tasksService';
 import { IProfilerService } from 'sql/workbench/services/profiler/browser/interfaces';
 import { ISerializationService } from 'sql/platform/serialization/common/serializationService';
 import { IFileBrowserService } from 'sql/workbench/services/fileBrowser/common/interfaces';
-import { IExtHostContext } from 'vs/workbench/api/common/extHost.protocol';
-import { extHostNamedCustomer } from 'vs/workbench/api/common/extHostCustomers';
-import { assign } from 'vs/base/common/objects';
 import { serializableToMap } from 'sql/base/common/map';
 import { IAssessmentService } from 'sql/workbench/services/assessment/common/interfaces';
 import { IDataGridProviderService } from 'sql/workbench/services/dataGridProvider/common/dataGridProviderService';
-import { IAdsTelemetryService } from 'sql/platform/telemetry/common/telemetry';
+import { IAdsTelemetryService, ITelemetryEventProperties } from 'sql/platform/telemetry/common/telemetry';
 import * as TelemetryKeys from 'sql/platform/telemetry/common/telemetryKeys';
+import { ITableDesignerService } from 'sql/workbench/services/tableDesigner/common/interface';
+import { IExecutionPlanService } from 'sql/workbench/services/executionPlan/common/interfaces';
+import { extHostNamedCustomer, IExtHostContext } from 'vs/workbench/services/extensions/common/extHostCustomers';
+import { SqlExtHostContext, SqlMainContext } from 'vs/workbench/api/common/extHost.protocol';
 
 /**
  * Main thread class for handling data protocol management registration.
@@ -60,7 +62,9 @@ export class MainThreadDataProtocol extends Disposable implements MainThreadData
 		@IFileBrowserService private _fileBrowserService: IFileBrowserService,
 		@IAssessmentService private _assessmentService: IAssessmentService,
 		@IDataGridProviderService private _dataGridProviderService: IDataGridProviderService,
-		@IAdsTelemetryService private _telemetryService: IAdsTelemetryService
+		@IAdsTelemetryService private _telemetryService: IAdsTelemetryService,
+		@ITableDesignerService private _tableDesignerService: ITableDesignerService,
+		@IExecutionPlanService private _executionPlanService: IExecutionPlanService
 	) {
 		super();
 		if (extHostContext) {
@@ -79,6 +83,9 @@ export class MainThreadDataProtocol extends Disposable implements MainThreadData
 			},
 			disconnect(connectionUri: string): Thenable<boolean> {
 				return self._proxy.$disconnect(handle, connectionUri);
+			},
+			changePassword(connectionUri, connectionInfo, newPassword): Thenable<azdata.PasswordChangeResult> {
+				return self._proxy.$changePassword(handle, connectionUri, connectionInfo, newPassword);
 			},
 			changeDatabase(connectionUri: string, newDatabase: string): Thenable<boolean> {
 				return self._proxy.$changeDatabase(handle, connectionUri, newDatabase);
@@ -110,15 +117,19 @@ export class MainThreadDataProtocol extends Disposable implements MainThreadData
 				return Promise.resolve(self._proxy.$cancelQuery(handle, ownerUri));
 			},
 			runQuery(ownerUri: string, selection: azdata.ISelectionData, runOptions?: azdata.ExecutionPlanOptions): Promise<void> {
+				perf.mark(`sql/query/${ownerUri}/main_$runQuery`);
 				return Promise.resolve(self._proxy.$runQuery(handle, ownerUri, selection, runOptions));
 			},
 			runQueryStatement(ownerUri: string, line: number, column: number): Promise<void> {
+				perf.mark(`sql/query/${ownerUri}/main_$runQueryStatement`);
 				return Promise.resolve(self._proxy.$runQueryStatement(handle, ownerUri, line, column));
 			},
 			runQueryString(ownerUri: string, queryString: string): Promise<void> {
+				perf.mark(`sql/query/${ownerUri}/main_$runQueryString`);
 				return Promise.resolve(self._proxy.$runQueryString(handle, ownerUri, queryString));
 			},
 			runQueryAndReturn(ownerUri: string, queryString: string): Promise<azdata.SimpleExecuteResult> {
+				perf.mark(`sql/query/${ownerUri}/main_$runQueryAndReturn`);
 				return Promise.resolve(self._proxy.$runQueryAndReturn(handle, ownerUri, queryString));
 			},
 			parseSyntax(ownerUri: string, query: string): Promise<azdata.SyntaxParseResult> {
@@ -133,6 +144,9 @@ export class MainThreadDataProtocol extends Disposable implements MainThreadData
 			disposeQuery(ownerUri: string): Promise<void> {
 				return Promise.resolve(self._proxy.$disposeQuery(handle, ownerUri));
 			},
+			connectionUriChanged(newUri: string, oldUri: string): Promise<void> {
+				return Promise.resolve(self._proxy.$connectionUriChanged(handle, newUri, oldUri));
+			},
 			saveResults(requestParams: azdata.SaveResultsRequestParams): Promise<azdata.SaveResultRequestResult> {
 				let saveResultsFeatureInfo = self._serializationService.getSaveResultsFeatureMetadataProvider(requestParams.ownerUri);
 				if (saveResultsFeatureInfo && saveResultsFeatureInfo.enabled) {
@@ -144,6 +158,9 @@ export class MainThreadDataProtocol extends Disposable implements MainThreadData
 				else {
 					return Promise.resolve(self._serializationService.saveAs(requestParams.resultFormat, requestParams.filePath, undefined, true));
 				}
+			},
+			copyResults(requestParams: azdata.CopyResultsRequestParams): Promise<void> {
+				return Promise.resolve(self._proxy.$copyResults(handle, requestParams));
 			},
 			initializeEdit(ownerUri: string, schemaName: string, objectName: string, objectType: string, rowLimit: number, queryString: string): Promise<void> {
 				return Promise.resolve(self._proxy.$initializeEdit(handle, ownerUri, schemaName, objectName, objectType, rowLimit, queryString));
@@ -505,6 +522,33 @@ export class MainThreadDataProtocol extends Disposable implements MainThreadData
 		return undefined;
 	}
 
+	$registerTableDesignerProvider(providerId: string, handle: number): Promise<any> {
+		const self = this;
+		this._tableDesignerService.registerProvider(providerId, <azdata.designers.TableDesignerProvider>{
+			providerId: providerId,
+			initializeTableDesigner(tableInfo: azdata.designers.TableInfo): Thenable<azdata.designers.TableDesignerInfo> {
+				return self._proxy.$initializeTableDesigner(handle, tableInfo);
+			},
+			processTableEdit(table, edit): Thenable<azdata.designers.DesignerEditResult<azdata.designers.TableDesignerView>> {
+				return self._proxy.$processTableDesignerEdit(handle, table, edit);
+			},
+			publishChanges(tableInfo: azdata.designers.TableInfo): Thenable<azdata.designers.PublishChangesResult> {
+				return self._proxy.$publishTableDesignerChanges(handle, tableInfo);
+			},
+			generateScript(tableInfo: azdata.designers.TableInfo): Thenable<string> {
+				return self._proxy.$generateScriptForTableDesigner(handle, tableInfo);
+			},
+			generatePreviewReport(tableInfo: azdata.designers.TableInfo): Thenable<azdata.designers.GeneratePreviewReportResult> {
+				return self._proxy.$generatePreviewReportForTableDesigner(handle, tableInfo);
+			},
+			disposeTableDesigner(tableInfo: azdata.designers.TableInfo): Thenable<void> {
+				return self._proxy.$disposeTableDesigner(handle, tableInfo);
+			}
+		});
+
+		return undefined;
+	}
+
 	public $registerSerializationProvider(providerId: string, handle: number): Promise<any> {
 		const self = this;
 		this._serializationService.registerProvider(providerId, <azdata.SerializationProvider>{
@@ -517,6 +561,14 @@ export class MainThreadDataProtocol extends Disposable implements MainThreadData
 		});
 
 		return undefined;
+	}
+
+	public $registerExecutionPlanProvider(providerId: string, handle: number): void {
+		this._executionPlanService.registerProvider(providerId, <azdata.executionPlan.ExecutionPlanProvider>{
+			getExecutionPlan: (planFile: azdata.executionPlan.ExecutionPlanGraphInfo) => this._proxy.$getExecutionPlan(handle, planFile),
+			compareExecutionPlanGraph: (firstPlanFile: azdata.executionPlan.ExecutionPlanGraphInfo, secondPlanFile: azdata.executionPlan.ExecutionPlanGraphInfo) => this._proxy.$compareExecutionPlanGraph(handle, firstPlanFile, secondPlanFile),
+			isExecutionPlan: (value: string) => this._proxy.$isExecutionPlan(handle, value)
+		});
 	}
 
 	// Connection Management handlers
@@ -534,6 +586,7 @@ export class MainThreadDataProtocol extends Disposable implements MainThreadData
 
 	// Query Management handlers
 	public $onQueryComplete(handle: number, result: azdata.QueryExecuteCompleteNotificationResult): void {
+		perf.mark(`sql/query/${result.ownerUri}/main_$onQueryComplete`);
 		this._queryManagementService.onQueryComplete(result);
 	}
 	public $onBatchStart(handle: number, batchInfo: azdata.QueryExecuteBatchNotificationParams): void {
@@ -570,7 +623,7 @@ export class MainThreadDataProtocol extends Disposable implements MainThreadData
 	}
 
 	public $onObjectExplorerNodeExpanded(providerId: string, expandResponse: azdata.ObjectExplorerExpandInfo): void {
-		let expandInfo: NodeExpandInfoWithProviderId = assign({ providerId: providerId }, expandResponse);
+		let expandInfo: NodeExpandInfoWithProviderId = Object.assign({ providerId: providerId }, expandResponse);
 		this._objectExplorerService.onNodeExpanded(expandInfo);
 	}
 
@@ -612,6 +665,11 @@ export class MainThreadDataProtocol extends Disposable implements MainThreadData
 	// SQL Server Agent handlers
 	public $onJobDataUpdated(handle: Number): void {
 		this._jobManagementService.fireOnDidChange();
+	}
+
+	// Table Designer
+	public $openTableDesigner(providerId: string, tableInfo: azdata.designers.TableInfo, telemetryInfo?: ITelemetryEventProperties, objectExplorerContext?: azdata.ObjectExplorerContext): void {
+		this._tableDesignerService.openTableDesigner(providerId, tableInfo, telemetryInfo, objectExplorerContext);
 	}
 
 	public $unregisterProvider(handle: number): Promise<any> {

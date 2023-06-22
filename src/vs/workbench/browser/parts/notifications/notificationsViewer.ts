@@ -4,11 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IListVirtualDelegate, IListRenderer } from 'vs/base/browser/ui/list/list';
-import { clearNode, addDisposableListener, EventType, EventHelper, $ } from 'vs/base/browser/dom';
+import { clearNode, addDisposableListener, EventType, EventHelper, $, EventLike } from 'vs/base/browser/dom';
 import { IOpenerService } from 'vs/platform/opener/common/opener';
 import { URI } from 'vs/base/common/uri';
 import { localize } from 'vs/nls';
-import { ButtonBar } from 'vs/base/browser/ui/button/button';
+import { ButtonBar, IButtonOptions } from 'vs/base/browser/ui/button/button';
 import { attachButtonStyler, attachProgressBarStyler } from 'vs/platform/theme/common/styler';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { ActionBar } from 'vs/base/browser/ui/actionbar/actionbar';
@@ -24,6 +24,9 @@ import { Severity } from 'vs/platform/notification/common/notification';
 import { isNonEmptyArray } from 'vs/base/common/arrays';
 import { Codicon } from 'vs/base/common/codicons';
 import { DropdownMenuActionViewItem } from 'vs/base/browser/ui/dropdown/dropdownActionViewItem';
+import { DomEmitter } from 'vs/base/browser/event';
+import { Gesture, EventType as GestureEventType } from 'vs/base/browser/touch';
+import { Event } from 'vs/base/common/event';
 
 export class NotificationsListDelegate implements IListVirtualDelegate<INotificationViewItem> {
 
@@ -151,10 +154,17 @@ class NotificationMessageRenderer {
 				const anchor = $('a', { href: node.href, title: title, }, node.label);
 
 				if (actionHandler) {
-					actionHandler.toDispose.add(addDisposableListener(anchor, EventType.CLICK, e => {
+					const onPointer = (e: EventLike) => {
 						EventHelper.stop(e, true);
 						actionHandler.callback(node.href);
-					}));
+					};
+
+					const onClick = actionHandler.toDispose.add(new DomEmitter(anchor, 'click')).event;
+
+					actionHandler.toDispose.add(Gesture.addTarget(anchor));
+					const onTap = actionHandler.toDispose.add(new DomEmitter(anchor, GestureEventType.Tap)).event;
+
+					Event.any(onClick, onTap)(onPointer, null, actionHandler.toDispose);
 				}
 
 				messageContainer.appendChild(anchor);
@@ -443,8 +453,10 @@ export class NotificationTemplateRenderer extends Disposable {
 		const primaryActions = notification.actions ? notification.actions.primary : undefined;
 		if (notification.expanded && isNonEmptyArray(primaryActions)) {
 			const that = this;
+
 			const actionRunner: IActionRunner = new class extends ActionRunner {
 				protected override async runAction(action: IAction): Promise<void> {
+
 					// Run action
 					that.actionRunner.run(action, notification);
 
@@ -454,24 +466,34 @@ export class NotificationTemplateRenderer extends Disposable {
 					}
 				}
 			}();
+
 			const buttonToolbar = this.inputDisposables.add(new ButtonBar(this.template.buttonsContainer));
-			for (const action of primaryActions) {
-				const buttonOptions = { title: true, /* assign titles to buttons in case they overflow */ };
+			for (let i = 0; i < primaryActions.length; i++) {
+				const action = primaryActions[i];
+
+				const options: IButtonOptions = {
+					title: true,  // assign titles to buttons in case they overflow
+					secondary: i > 0
+				};
+
 				const dropdownActions = action instanceof ChoiceAction ? action.menu : undefined;
-				const button = this.inputDisposables.add(
-					dropdownActions
-						? buttonToolbar.addButtonWithDropdown({
-							...buttonOptions,
-							contextMenuProvider: this.contextMenuService,
-							actions: dropdownActions,
-							actionRunner
-						})
-						: buttonToolbar.addButton(buttonOptions));
+				const button = this.inputDisposables.add(dropdownActions ?
+					buttonToolbar.addButtonWithDropdown({
+						...options,
+						contextMenuProvider: this.contextMenuService,
+						actions: dropdownActions,
+						actionRunner
+					}) :
+					buttonToolbar.addButton(options)
+				);
+
 				button.label = action.label;
+
 				this.inputDisposables.add(button.onDidClick(e => {
 					if (e) {
 						EventHelper.stop(e, true);
 					}
+
 					actionRunner.run(action);
 				}));
 

@@ -12,7 +12,7 @@ import { IContextMenuService } from 'vs/platform/contextview/browser/contextView
 import { IMenuService, MenuId, MenuItemAction, registerAction2, Action2, SubmenuItemAction } from 'vs/platform/actions/common/actions';
 import { MenuEntryActionViewItem, createAndFillInContextMenuActions, SubmenuEntryActionViewItem } from 'vs/platform/actions/browser/menuEntryActionViewItem';
 import { IContextKeyService, ContextKeyExpr, ContextKeyEqualsExpr, RawContextKey, IContextKey } from 'vs/platform/contextkey/common/contextkey';
-import { TreeItemCollapsibleState, ITreeViewDataProvider, TreeViewItemHandleArg, ITreeItemLabel, IViewDescriptorService, ViewContainer, ViewContainerLocation } from 'vs/workbench/common/views';
+import { TreeItemCollapsibleState, ITreeViewDataProvider, TreeViewItemHandleArg, ITreeItemLabel, IViewDescriptorService, ViewContainer, ViewContainerLocation, IViewBadge } from 'vs/workbench/common/views';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { IProgressService } from 'vs/platform/progress/common/progress';
@@ -75,6 +75,8 @@ export class TreeView extends Disposable implements ITreeView {
 	private messageElement!: HTMLDivElement;
 	private tree: Tree | undefined;
 	private treeLabels: ResourceLabels | undefined;
+	readonly badge: IViewBadge | undefined = undefined;
+	readonly container: any | undefined = undefined;
 
 	public readonly root: ITreeItem;
 	private elementsToRefresh: ITreeItem[] = [];
@@ -183,7 +185,7 @@ export class TreeView extends Disposable implements ITreeView {
 				}
 
 				async getChildren(node: ITreeItem): Promise<ITreeItem[]> {
-					let children: ITreeItem[];
+					let children: ITreeItem[] | undefined = undefined;
 					if (node && node.children) {
 						children = node.children;
 					} else {
@@ -192,12 +194,12 @@ export class TreeView extends Disposable implements ITreeView {
 					}
 					if (node instanceof Root) {
 						const oldEmpty = this._isEmpty;
-						this._isEmpty = children.length === 0;
+						this._isEmpty = !children || children.length === 0;
 						if (oldEmpty !== this._isEmpty) {
 							this._onDidChangeEmpty.fire();
 						}
 					}
-					return children;
+					return children ?? [];
 				}
 			};
 			if (this._dataProvider.onDidChangeEmpty) {
@@ -382,9 +384,9 @@ export class TreeView extends Disposable implements ITreeView {
 	private createTree() {
 		const actionViewItemProvider = (action: IAction) => {
 			if (action instanceof MenuItemAction) {
-				return this.instantiationService.createInstance(MenuEntryActionViewItem, action);
+				return this.instantiationService.createInstance(MenuEntryActionViewItem, action, undefined);
 			} else if (action instanceof SubmenuItemAction) {
-				return this.instantiationService.createInstance(SubmenuEntryActionViewItem, action);
+				return this.instantiationService.createInstance(SubmenuEntryActionViewItem, action, undefined);
 			}
 
 			return undefined;
@@ -806,7 +808,8 @@ class TreeRenderer extends Disposable implements ITreeRenderer<ITreeItem, FuzzyS
 			}
 			return ({ start, end });
 		}) : undefined;
-		const icon = this.themeService.getColorTheme().type === ColorScheme.LIGHT ? node.icon : node.iconDark;
+		const isLightTheme = [ColorScheme.LIGHT, ColorScheme.HIGH_CONTRAST_LIGHT].includes(this.themeService.getColorTheme().type);
+		const icon = isLightTheme ? node.icon : node.iconDark;
 		const iconUrl = icon ? URI.revive(icon) : null;
 		const title = node.tooltip ? isString(node.tooltip) ? node.tooltip : undefined : resource ? undefined : label;
 		const sqlIcon = node.sqlIcon;
@@ -826,9 +829,9 @@ class TreeRenderer extends Disposable implements ITreeRenderer<ITreeItem, FuzzyS
 		if (iconUrl || sqlIcon) {
 			templateData.icon.className = 'custom-view-tree-node-item-icon';
 			if (sqlIcon) {
-				DOM.toggleClass(templateData.icon, sqlIcon, !!sqlIcon);  // tracked change
+				templateData.icon.classList.toggle(sqlIcon, !!sqlIcon);  // tracked change
 			}
-			DOM.toggleClass(templateData.icon, 'icon', !!sqlIcon);
+			templateData.icon.classList.toggle('icon', !!sqlIcon);
 			templateData.icon.style.backgroundImage = iconUrl ? DOM.asCSSUrl(iconUrl) : '';
 		} else {
 			let iconClass: string | undefined;
@@ -849,7 +852,7 @@ class TreeRenderer extends Disposable implements ITreeRenderer<ITreeItem, FuzzyS
 	}
 
 	private setAlignment(container: HTMLElement, treeItem: ITreeItem) {
-		DOM.toggleClass(container.parentElement!, 'align-icon-with-twisty', this.aligner.alignIconWithTwisty(treeItem));
+		container.parentElement!.classList.toggle('align-icon-with-twisty', this.aligner.alignIconWithTwisty(treeItem));
 	}
 
 	private isFileKindThemeIcon(icon: ThemeIcon | undefined): boolean {
@@ -914,7 +917,8 @@ class Aligner extends Disposable {
 	}
 
 	private hasIcon(node: ITreeItem): boolean {
-		const icon = this.themeService.getColorTheme().type === ColorScheme.LIGHT ? node.icon : node.iconDark;
+		const isLightTheme = [ColorScheme.LIGHT, ColorScheme.HIGH_CONTRAST_LIGHT].includes(this.themeService.getColorTheme().type);
+		const icon = isLightTheme ? node.icon : node.iconDark;
 		if (icon) {
 			return true;
 		}

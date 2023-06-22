@@ -93,7 +93,7 @@ export class OpenExistingDialog extends DialogBase {
 			await addProjectsPromise;
 		}
 		catch (err) {
-			vscode.window.showErrorMessage(err?.message ? err.message : err);
+			void vscode.window.showErrorMessage(err?.message ? err.message : err);
 		}
 	}
 
@@ -119,7 +119,6 @@ export class OpenExistingDialog extends DialogBase {
 
 		this.locationRadioButtonFormComponent = {
 			title: constants.LocationSelectorTitle,
-			required: true,
 			component: view.modelBuilder.flexContainer()
 				.withItems([this.localRadioButton, this.remoteGitRepoRadioButton], { flex: '0 0 auto', CSSStyles: { 'margin-right': '15px' } })
 				.withProps({ ariaRole: 'radiogroup' })
@@ -142,7 +141,7 @@ export class OpenExistingDialog extends DialogBase {
 		}).component();
 
 		this.register(gitRepoTextBox.onTextChanged(() => {
-			gitRepoTextBox.updateProperty('title', this.localClonePathTextBox!.value!);
+			return gitRepoTextBox.updateProperty('title', this.localClonePathTextBox!.value!);
 		}));
 
 		this.gitRepoTextBoxComponent = {
@@ -158,11 +157,12 @@ export class OpenExistingDialog extends DialogBase {
 		}).component();
 
 		this.register(this.localClonePathTextBox.onTextChanged(() => {
-			this.localClonePathTextBox!.updateProperty('title', this.localClonePathTextBox!.value!);
+			return this.localClonePathTextBox!.updateProperty('title', this.localClonePathTextBox!.value!);
 		}));
 
 		const localClonePathBrowseFolderButton = view.modelBuilder.button().withProps({
 			ariaLabel: constants.BrowseButtonText,
+			title: constants.BrowseButtonText,
 			iconPath: IconPathHelper.folder,
 			width: '18px',
 			height: '16px',
@@ -181,7 +181,7 @@ export class OpenExistingDialog extends DialogBase {
 
 			const selectedFolder = folderUris[0].fsPath;
 			this.localClonePathTextBox!.value = selectedFolder;
-			this.localClonePathTextBox!.updateProperty('title', this.localClonePathTextBox!.value);
+			void this.localClonePathTextBox!.updateProperty('title', this.localClonePathTextBox!.value);
 		}));
 
 		this.localClonePathComponent = {
@@ -191,18 +191,19 @@ export class OpenExistingDialog extends DialogBase {
 		};
 
 		this.filePathTextBox = view.modelBuilder.inputBox().withProps({
-			ariaLabel: constants.LocationSelectorTitle,
+			ariaLabel: constants.ProjectFileTitle,
 			placeHolder: constants.ProjectFilePlaceholder,
 			required: true,
 			width: constants.DefaultInputWidth
 		}).component();
 
 		this.register(this.filePathTextBox.onTextChanged(() => {
-			this.filePathTextBox!.updateProperty('title', this.filePathTextBox!.value!);
+			return this.filePathTextBox!.updateProperty('title', this.filePathTextBox!.value!);
 		}));
 
 		const localProjectBrowseFolderButton = view.modelBuilder.button().withProps({
 			ariaLabel: constants.BrowseButtonText,
+			title: constants.BrowseButtonText,
 			iconPath: IconPathHelper.folder,
 			width: '18px',
 			height: '16px'
@@ -210,9 +211,10 @@ export class OpenExistingDialog extends DialogBase {
 		this.register(localProjectBrowseFolderButton.onDidClick(() => this.onBrowseButtonClick()));
 
 		const flexContainer = this.createHorizontalContainer(view, [this.filePathTextBox, localProjectBrowseFolderButton]);
-		flexContainer.updateCssStyles({ 'margin-top': '-10px' });
 		this.filePathAndButtonComponent = {
-			component: flexContainer
+			component: flexContainer,
+			title: constants.ProjectFileTitle,
+			required: true
 		};
 
 		this.formBuilder = view.modelBuilder.formContainer().withFormItems([
@@ -244,7 +246,8 @@ export async function browseForProject(workspaceService: IWorkspaceService): Pro
 		canSelectFolders: false,
 		canSelectMany: false,
 		openLabel: constants.SelectProjectFileActionName,
-		filters: filters
+		filters: filters,
+		defaultUri: defaultProjectSaveLocation()
 	});
 
 	return fileUris?.[0];

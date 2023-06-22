@@ -3,9 +3,9 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IListRenderer } from './list';
-import { IDisposable } from 'vs/base/common/lifecycle';
 import { $ } from 'vs/base/browser/dom';
+import { IDisposable } from 'vs/base/common/lifecycle';
+import { IListRenderer } from './list';
 
 export interface IRow {
 	domNode: HTMLElement;
@@ -15,9 +15,7 @@ export interface IRow {
 
 function removeFromParent(element: HTMLElement): void {
 	try {
-		if (element.parentElement) {
-			element.parentElement.removeChild(element);
-		}
+		element.parentElement?.removeChild(element);
 	} catch (e) {
 		// this will throw if this happens due to a blur event, nasty business
 	}

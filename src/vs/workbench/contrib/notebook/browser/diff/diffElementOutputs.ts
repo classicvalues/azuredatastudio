@@ -9,12 +9,10 @@ import { Disposable, DisposableStore } from 'vs/base/common/lifecycle';
 import { IOpenerService } from 'vs/platform/opener/common/opener';
 import { DiffElementViewModelBase, SideBySideDiffElementViewModel } from 'vs/workbench/contrib/notebook/browser/diff/diffElementViewModel';
 import { DiffSide, INotebookTextDiffEditor } from 'vs/workbench/contrib/notebook/browser/diff/notebookDiffEditorBrowser';
-import { ICellOutputViewModel, IRenderOutput, RenderOutputType } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
-import { getResizesObserver } from 'vs/workbench/contrib/notebook/browser/view/renderers/cellWidgets';
+import { ICellOutputViewModel, IInsetRenderOutput, RenderOutputType } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
 import { NotebookTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookTextModel';
-import { BUILTIN_RENDERER_ID, NotebookCellOutputsSplice } from 'vs/workbench/contrib/notebook/common/notebookCommon';
+import { NotebookCellOutputsSplice } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { INotebookService } from 'vs/workbench/contrib/notebook/common/notebookService';
-import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
 import { DiffNestedCellViewModel } from 'vs/workbench/contrib/notebook/browser/diff/diffNestedCellViewModel';
 import { ThemeIcon } from 'vs/platform/theme/common/themeService';
 import { mimetypeIcon } from 'vs/workbench/contrib/notebook/browser/notebookIcons';
@@ -27,9 +25,9 @@ interface IMimeTypeRenderer extends IQuickPickItem {
 }
 
 export class OutputElement extends Disposable {
-	readonly resizeListener = new DisposableStore();
+	readonly resizeListener = this._register(new DisposableStore());
 	domNode!: HTMLElement;
-	renderResult?: IRenderOutput;
+	renderResult?: IInsetRenderOutput;
 
 	constructor(
 		private _notebookEditor: INotebookTextDiffEditor,
@@ -47,7 +45,7 @@ export class OutputElement extends Disposable {
 
 	render(index: number, beforeElement?: HTMLElement) {
 		const outputItemDiv = document.createElement('div');
-		let result: IRenderOutput | undefined = undefined;
+		let result: IInsetRenderOutput | undefined = undefined;
 
 		const [mimeTypes, pick] = this.output.resolveMimeTypes(this._notebookTextModel, undefined);
 		const pickedMimeTypeRenderer = mimeTypes[pick];
@@ -81,16 +79,12 @@ export class OutputElement extends Disposable {
 
 
 		if (mimeTypes.length !== 0) {
-			if (pickedMimeTypeRenderer.rendererId !== BUILTIN_RENDERER_ID) {
-				const renderer = this._notebookService.getRendererInfo(pickedMimeTypeRenderer.rendererId);
-				result = renderer
-					? { type: RenderOutputType.Extension, renderer, source: this.output, mimeType: pickedMimeTypeRenderer.mimeType }
-					: this._notebookEditor.getOutputRenderer().render(this.output, innerContainer, pickedMimeTypeRenderer.mimeType, this._notebookTextModel.uri,);
-			} else {
-				result = this._notebookEditor.getOutputRenderer().render(this.output, innerContainer, pickedMimeTypeRenderer.mimeType, this._notebookTextModel.uri);
-			}
+			const renderer = this._notebookService.getRendererInfo(pickedMimeTypeRenderer.rendererId);
+			result = renderer
+				? { type: RenderOutputType.Extension, renderer, source: this.output, mimeType: pickedMimeTypeRenderer.mimeType }
+				: this._renderMissingRenderer(this.output, pickedMimeTypeRenderer.mimeType);
 
-			this.output.pickedMimeType = pick;
+			this.output.pickedMimeType = pickedMimeTypeRenderer;
 		}
 
 		this.domNode = outputItemDiv;
@@ -107,52 +101,47 @@ export class OutputElement extends Disposable {
 			this._outputContainer.appendChild(outputItemDiv);
 		}
 
-		if (result.type !== RenderOutputType.Mainframe) {
-			// this.viewCell.selfSizeMonitoring = true;
-			this._notebookEditor.createOutput(
-				this._diffElementViewModel,
-				this._nestedCell,
-				result,
-				() => this.getOutputOffsetInCell(index),
-				this._diffElementViewModel instanceof SideBySideDiffElementViewModel
-					? this._diffSide
-					: this._diffElementViewModel.type === 'insert' ? DiffSide.Modified : DiffSide.Original
-			);
-		} else {
-			outputItemDiv.classList.add('foreground', 'output-element');
-			outputItemDiv.style.position = 'absolute';
-		}
-		if (result.type === RenderOutputType.Html || result.type === RenderOutputType.Extension) {
-			return;
+		this._notebookEditor.createOutput(
+			this._diffElementViewModel,
+			this._nestedCell,
+			result,
+			() => this.getOutputOffsetInCell(index),
+			this._diffElementViewModel instanceof SideBySideDiffElementViewModel
+				? this._diffSide
+				: this._diffElementViewModel.type === 'insert' ? DiffSide.Modified : DiffSide.Original
+		);
+	}
+
+	private _renderMissingRenderer(viewModel: ICellOutputViewModel, preferredMimeType: string | undefined): IInsetRenderOutput {
+		if (!viewModel.model.outputs.length) {
+			return this._renderMessage(viewModel, nls.localize('empty', "Cell has no output"));
 		}
 
+		if (!preferredMimeType) {
+			const mimeTypes = viewModel.model.outputs.map(op => op.mime);
+			const mimeTypesMessage = mimeTypes.join(', ');
+			return this._renderMessage(viewModel, nls.localize('noRenderer.2', "No renderer could be found for output. It has the following mimetypes: {0}", mimeTypesMessage));
+		}
 
+		return this._renderSearchForMimetype(viewModel, preferredMimeType);
+	}
 
-		let clientHeight = Math.ceil(outputItemDiv.clientHeight);
-		const elementSizeObserver = getResizesObserver(outputItemDiv, undefined, () => {
-			if (this._outputContainer && document.body.contains(this._outputContainer)) {
-				const height = Math.ceil(elementSizeObserver.getHeight());
+	private _renderSearchForMimetype(viewModel: ICellOutputViewModel, mimeType: string): IInsetRenderOutput {
+		const query = `@tag:notebookRenderer ${mimeType}`;
 
-				if (clientHeight === height) {
-					return;
-				}
+		const p = DOM.$('p', undefined, `No renderer could be found for mimetype "${mimeType}", but one might be available on the Marketplace.`);
+		const a = DOM.$('a', { href: `command:workbench.extensions.search?%22${query}%22`, class: 'monaco-button monaco-text-button', tabindex: 0, role: 'button', style: 'padding: 8px; text-decoration: none; color: rgb(255, 255, 255); background-color: rgb(14, 99, 156); max-width: 200px;' }, `Search Marketplace`);
 
-				clientHeight = height;
+		return {
+			type: RenderOutputType.Html,
+			source: viewModel,
+			htmlContent: p.outerHTML + a.outerHTML,
+		};
+	}
 
-				const currIndex = this.getCellOutputCurrentIndex();
-				if (currIndex < 0) {
-					return;
-				}
-
-				this.updateHeight(currIndex, height);
-			}
-		});
-		elementSizeObserver.startObserving();
-		this.resizeListener.add(elementSizeObserver);
-		this.updateHeight(index, clientHeight);
-
-		const top = this.getOutputOffsetInContainer(index);
-		outputItemDiv.style.top = `${top}px`;
+	private _renderMessage(viewModel: ICellOutputViewModel, message: string): IInsetRenderOutput {
+		const el = DOM.$('p', undefined, message);
+		return { type: RenderOutputType.Html, source: viewModel, htmlContent: el.outerHTML };
 	}
 
 	private async pickActiveMimeTypeRenderer(notebookTextModel: NotebookTextModel, viewModel: ICellOutputViewModel) {
@@ -202,16 +191,12 @@ export class OutputElement extends Disposable {
 				);
 			}
 
-			viewModel.pickedMimeType = pick;
+			viewModel.pickedMimeType = mimeTypes[pick];
 			this.render(index, nextElement as HTMLElement);
 		}
 	}
 
-	private generateRendererInfo(renderId: string | undefined): string {
-		if (renderId === undefined || renderId === BUILTIN_RENDERER_ID) {
-			return nls.localize('builtinRenderInfo', "built-in");
-		}
-
+	private generateRendererInfo(renderId: string): string {
 		const renderInfo = this._notebookService.getRendererInfo(renderId);
 
 		if (renderInfo) {
@@ -250,9 +235,7 @@ export class OutputContainer extends Disposable {
 		private _outputContainer: HTMLElement,
 		@INotebookService private _notebookService: INotebookService,
 		@IQuickInputService private readonly _quickInputService: IQuickInputService,
-		@IOpenerService readonly _openerService: IOpenerService,
-		@ITextFileService readonly _textFileService: ITextFileService,
-
+		@IOpenerService readonly _openerService: IOpenerService
 	) {
 		super();
 		this._register(this._diffElementViewModel.onDidLayoutChange(() => {
@@ -265,16 +248,12 @@ export class OutputContainer extends Disposable {
 			});
 		}));
 
-		this._register(this._nestedCellViewModel.textModel.onDidChangeOutputs(splices => {
-			this._updateOutputs(splices);
+		this._register(this._nestedCellViewModel.textModel.onDidChangeOutputs(splice => {
+			this._updateOutputs(splice);
 		}));
 	}
 
-	private _updateOutputs(splices: NotebookCellOutputsSplice[]) {
-		if (!splices.length) {
-			return;
-		}
-
+	private _updateOutputs(splice: NotebookCellOutputsSplice) {
 		const removedKeys: ICellOutputViewModel[] = [];
 
 		this._outputEntries.forEach((value, key) => {

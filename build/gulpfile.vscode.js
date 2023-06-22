@@ -38,6 +38,9 @@ const vscodeEntryPoints = _.flatten([
 	buildfile.base,
 	buildfile.workerExtensionHost,
 	buildfile.workerNotebook,
+	buildfile.workerLanguageDetection,
+	buildfile.workerSharedProcess,
+	buildfile.workerLocalFileSearch,
 	buildfile.workbenchDesktop,
 	buildfile.code
 ]);
@@ -51,10 +54,11 @@ const vscodeResources = [
 	'out-build/bootstrap-amd.js',
 	'out-build/bootstrap-node.js',
 	'out-build/bootstrap-window.js',
-	'out-build/vs/**/*.{svg,png,html,jpg}',
+	'out-build/vs/**/*.{svg,png,html,jpg,opus}',
 	'!out-build/vs/code/browser/**/*.html',
 	'!out-build/vs/editor/standalone/**/*.svg',
 	'out-build/vs/base/common/performance.js',
+	'out-build/vs/base/common/stripComments.js',
 	'out-build/vs/base/node/languagePacks.js',
 	'out-build/vs/base/node/{stdForkStart.js,terminateProcess.sh,cpuUsage.sh,ps.sh}',
 	'out-build/vs/base/browser/ui/codicons/codicon/**',
@@ -63,14 +67,15 @@ const vscodeResources = [
 	'out-build/vs/workbench/browser/media/*-theme.css',
 	'out-build/vs/workbench/contrib/debug/**/*.json',
 	'out-build/vs/workbench/contrib/externalTerminal/**/*.scpt',
+	'out-build/vs/workbench/contrib/terminal/browser/media/*.ps1',
+	'out-build/vs/workbench/contrib/terminal/browser/media/*.sh',
+	'out-build/vs/workbench/contrib/terminal/browser/media/*.zsh',
 	'out-build/vs/workbench/contrib/webview/browser/pre/*.js',
-	'out-build/vs/workbench/contrib/webview/electron-browser/pre/*.js',
-	'out-build/vs/workbench/services/extensions/worker/extensionHostWorkerMain.js',
 	'out-build/vs/**/markdown.css',
 	'out-build/vs/workbench/contrib/tasks/**/*.json',
 	'out-build/vs/platform/files/**/*.exe',
 	'out-build/vs/platform/files/**/*.md',
-	'out-build/vs/code/electron-browser/workbench/**',
+	'out-build/vs/code/electron-sandbox/workbench/**',
 	'out-build/vs/code/electron-browser/sharedProcess/sharedProcess.js',
 	'out-build/vs/code/electron-sandbox/issue/issueReporter.js',
 	'out-build/sql/**/*.{svg,png,cur,html}',
@@ -116,17 +121,17 @@ const extensionsFilter = filter([
 	'**/agent.xlf',
 	'**/arc.xlf',
 	'**/asde-deployment.xlf',
-	'**/azdata.xlf',
+	'**/azcli.xlf',
 	'**/azurecore.xlf',
-	'**/azurehybridtoolkit.xlf',
-	'**/big-data-cluster.xlf',
+	'**/azuremonitor.xlf',
 	'**/cms.xlf',
 	'**/dacpac.xlf',
+	'**/datavirtualization.xlf',
+	'**/git.xlf',
 	'**/data-workspace.xlf',
 	'**/import.xlf',
 	'**/kusto.xlf',
 	'**/machine-learning.xlf',
-	'**/Microsoft.sqlservernotebook.xlf',
 	'**/mssql.xlf',
 	'**/notebook.xlf',
 	'**/profiler.xlf',
@@ -135,6 +140,7 @@ const extensionsFilter = filter([
 	'**/schema-compare.xlf',
 	'**/server-report.xlf',
 	'**/sql-assessment.xlf',
+	'**/sql-bindings.xlf',
 	'**/sql-database-projects.xlf',
 	'**/sql-migration.xlf',
 	'**/xml-language-features.xlf'
@@ -147,7 +153,7 @@ const importExtensionsTask = task.define('import-extensions-xlfs', function () {
 			.pipe(extensionsFilter),
 		gulp.src(`./vscode-translations-export/ads-core/*.xlf`)
 	)
-	.pipe(vfs.dest(`./resources/xlf/en`));
+		.pipe(vfs.dest(`./resources/xlf/en`));
 });
 gulp.task(importExtensionsTask);
 // {{SQL CARBON EDIT}} end
@@ -178,9 +184,9 @@ gulp.task(core);
  * @return {Object} A map of paths to checksums.
  */
 function computeChecksums(out, filenames) {
-	let result = {};
+	const result = {};
 	filenames.forEach(function (filename) {
-		let fullPath = path.join(process.cwd(), out, filename);
+		const fullPath = path.join(process.cwd(), out, filename);
 		result[filename] = computeChecksum(fullPath);
 	});
 	return result;
@@ -193,9 +199,9 @@ function computeChecksums(out, filenames) {
  * @return {string} The checksum for `filename`.
  */
 function computeChecksum(filename) {
-	let contents = fs.readFileSync(filename);
+	const contents = fs.readFileSync(filename);
 
-	let hash = crypto
+	const hash = crypto
 		.createHash('md5')
 		.update(contents)
 		.digest('base64')
@@ -220,9 +226,9 @@ function packageTask(platform, arch, sourceFolderName, destinationFolderName, op
 			'vs/base/parts/sandbox/electron-browser/preload.js',
 			'vs/workbench/workbench.desktop.main.js',
 			'vs/workbench/workbench.desktop.main.css',
-			'vs/workbench/services/extensions/node/extensionHostProcess.js',
-			'vs/code/electron-browser/workbench/workbench.html',
-			'vs/code/electron-browser/workbench/workbench.js'
+			'vs/workbench/api/node/extensionHostProcess.js',
+			'vs/code/electron-sandbox/workbench/workbench.html',
+			'vs/code/electron-sandbox/workbench/workbench.js'
 		]);
 
 		const src = gulp.src(out + '/**', { base: '.' })
@@ -263,10 +269,10 @@ function packageTask(platform, arch, sourceFolderName, destinationFolderName, op
 		const productJsonStream = gulp.src(['product.json'], { base: '.' })
 			.pipe(json(productJsonUpdate));
 
-		const license = gulp.src(['LICENSES.chromium.html', product.licenseFileName, 'ThirdPartyNotices.txt', 'licenses/**'], { base: '.', allowEmpty: true });
+		const license = gulp.src(['LICENSES.chromium.html', 'LICENSE.txt', 'ThirdPartyNotices.txt', 'licenses/**'], { base: '.', allowEmpty: true });
 
 		// TODO the API should be copied to `out` during compile, not here
-		const api = gulp.src('src/vs/vscode.d.ts').pipe(rename('out/vs/vscode.d.ts'));
+		const api = gulp.src('src/vscode-dts/vscode.d.ts').pipe(rename('out/vscode-dts/vscode.d.ts'));
 		// {{SQL CARBON EDIT}}
 		const dataApi = gulp.src('src/sql/azdata.d.ts').pipe(rename('out/sql/azdata.d.ts'));
 
@@ -283,7 +289,14 @@ function packageTask(platform, arch, sourceFolderName, destinationFolderName, op
 			.pipe(jsFilter)
 			.pipe(util.rewriteSourceMappingURL(sourceMappingURLBase))
 			.pipe(jsFilter.restore)
-			.pipe(createAsar(path.join(process.cwd(), 'node_modules'), ['**/*.node', '**/vscode-ripgrep/bin/*', '**/node-pty/build/Release/*', '**/*.wasm'], 'node_modules.asar'));
+			.pipe(createAsar(path.join(process.cwd(), 'node_modules'), [
+				'**/*.node',
+				'**/@vscode/ripgrep/bin/*',
+				'**/node-pty/build/Release/*',
+				'**/node-pty/lib/worker/conoutSocketWorker.js',
+				'**/node-pty/lib/shared/conout.js',
+				'**/*.wasm',
+			], 'node_modules.asar'));
 
 		let all = es.merge(
 			packageJsonStream,
@@ -306,6 +319,7 @@ function packageTask(platform, arch, sourceFolderName, destinationFolderName, op
 			all = es.merge(all, gulp.src('resources/linux/code.png', { base: '.' }));
 		} else if (platform === 'darwin') {
 			const shortcut = gulp.src('resources/darwin/bin/code.sh')
+				.pipe(replace('@@APPNAME@@', product.applicationName))
 				.pipe(rename('bin/code'));
 
 			all = es.merge(all, shortcut);
@@ -350,20 +364,15 @@ function packageTask(platform, arch, sourceFolderName, destinationFolderName, op
 
 			result = es.merge(result, gulp.src('resources/win32/VisualElementsManifest.xml', { base: 'resources/win32' })
 				.pipe(rename(product.nameShort + '.VisualElementsManifest.xml')));
+
+			result = es.merge(result, gulp.src('.build/policies/win32/**', { base: '.build/policies/win32' })
+				.pipe(rename(f => f.dirname = `policies/${f.dirname}`)));
+
 		} else if (platform === 'linux') {
 			result = es.merge(result, gulp.src('resources/linux/bin/code.sh', { base: '.' })
 				.pipe(replace('@@PRODNAME@@', product.nameLong))
-				.pipe(replace('@@NAME@@', product.applicationName))
+				.pipe(replace('@@APPNAME@@', product.applicationName))
 				.pipe(rename('bin/' + product.applicationName)));
-		}
-
-		// submit all stats that have been collected
-		// during the build phase
-		if (opts.stats) {
-			result.on('end', () => {
-				const { submitAllStats } = require('./lib/stats');
-				submitAllStats(product, commit).then(() => console.log('Submitted bundle stats!'));
-			});
 		}
 
 		return result.pipe(vfs.dest(destination));
@@ -374,7 +383,7 @@ const fileLengthFilter = filter([
 	'**',
 	'!extensions/import/*.docx',
 	'!extensions/admin-tool-ext-win/license/**'
-], {restore: true});
+], { restore: true });
 
 const filelength = es.through(function (file) {
 
@@ -439,8 +448,6 @@ BUILD_TARGETS.forEach(buildTarget => {
 	}
 });
 
-// Transifex Localizations
-
 const innoSetupConfig = {
 	'zh-cn': { codePage: 'CP936', defaultInfo: { name: 'Simplified Chinese', id: '$0804', } },
 	'zh-tw': { codePage: 'CP950', defaultInfo: { name: 'Traditional Chinese', id: '$0404' } },
@@ -455,6 +462,8 @@ const innoSetupConfig = {
 	'hu': { codePage: 'CP1250' },
 	'tr': { codePage: 'CP1254' }
 };
+
+// Transifex Localizations
 
 const apiHostname = process.env.TRANSIFEX_API_URL;
 const apiName = process.env.TRANSIFEX_API_NAME;
@@ -491,7 +500,7 @@ const vscodeTranslationsExport = task.define(
 		function () {
 			const pathToMetadata = './out-vscode/nls.metadata.json';
 			const pathToExtensions = '.build/extensions/*';
-			const pathToSetup = 'build/win32/**/{Default.isl,messages.en.isl}';
+			const pathToSetup = 'build/win32/i18n/messages.en.isl';
 
 			return es.merge(
 				gulp.src(pathToMetadata).pipe(i18n.createXlfFilesForCoreBundle()),
@@ -516,14 +525,14 @@ gulp.task(task.define(
 
 gulp.task('vscode-translations-pull', function () {
 	return es.merge([...i18n.defaultLanguages, ...i18n.extraLanguages].map(language => {
-		let includeDefault = !!innoSetupConfig[language.id].defaultInfo;
+		const includeDefault = !!innoSetupConfig[language.id].defaultInfo;
 		return i18n.pullSetupXlfFiles(apiHostname, apiName, apiToken, language, includeDefault).pipe(vfs.dest(`../vscode-translations-import/${language.id}/setup`));
 	}));
 });
 
 gulp.task('vscode-translations-import', function () {
 	// {{SQL CARBON EDIT}} - Replace function body with our own
-	return new Promise(function(resolve) {
+	return new Promise(function (resolve) {
 		[...i18n.defaultLanguages, ...i18n.extraLanguages].forEach(language => {
 			let languageId = language.translationId ? language.translationId : language.id;
 			gulp.src(`resources/xlf/${languageId}/**/*.xlf`)

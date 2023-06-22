@@ -17,6 +17,7 @@ import { IKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { KeyCode } from 'vs/base/common/keyCodes';
 import { SelectBoxList } from 'vs/base/browser/ui/selectBox/selectBoxCustom';
 import { Event, Emitter } from 'vs/base/common/event';
+import { AdsWidget } from 'sql/base/browser/ui/adsWidget';
 
 const $ = dom.$;
 
@@ -39,7 +40,7 @@ export interface ISelectBoxStyles extends vsISelectBoxStyles {
 	inputValidationErrorForeground?: Color;
 }
 
-export class SelectBox extends vsSelectBox {
+export class SelectBox extends vsSelectBox implements AdsWidget {
 	private _optionsDictionary: Map<string, number>;
 	private _dialogOptions: SelectOptionItemSQL[];
 	private _selectedOption: string;
@@ -53,6 +54,7 @@ export class SelectBox extends vsSelectBox {
 	private contextViewProvider: IContextViewProvider;
 	private message?: IMessage;
 	private _onDidSelect: Emitter<ISelectData>;
+	private _onDidFocus: Emitter<void>;
 
 	private inputValidationInfoBorder?: Color;
 	private inputValidationInfoBackground?: Color;
@@ -66,16 +68,17 @@ export class SelectBox extends vsSelectBox {
 
 	private element?: HTMLElement;
 
-	constructor(options: SelectOptionItemSQL[] | string[], selectedOption: string, contextViewProvider: IContextViewProvider, container?: HTMLElement, selectBoxOptions?: ISelectBoxOptions) {
+	constructor(options: SelectOptionItemSQL[] | string[], selectedOption: string, contextViewProvider: IContextViewProvider, container?: HTMLElement, selectBoxOptions?: ISelectBoxOptions, id?: string) {
 		let optionItems: SelectOptionItemSQL[] = SelectBox.createOptions(options);
 		super(optionItems, 0, contextViewProvider, undefined, selectBoxOptions);
 
 		this._onDidSelect = new Emitter<ISelectData>();
+		this._onDidFocus = new Emitter<void>();
 		this._optionsDictionary = new Map<string, number>();
 		this.populateOptionsDictionary(optionItems);
 		this._dialogOptions = optionItems;
 		const option = this._optionsDictionary.get(selectedOption);
-		if (option) {
+		if (option !== undefined) {
 			super.select(option);
 		}
 
@@ -96,11 +99,17 @@ export class SelectBox extends vsSelectBox {
 			this.element = dom.append(container, $('.monaco-selectbox.idle'));
 		}
 
+		if (id !== undefined) {
+			this.selectElement.id = id;
+		}
 		this._selectBoxOptions = selectBoxOptions;
 		let focusTracker = dom.trackFocus(this.selectElement);
 		this._register(focusTracker);
 		this._register(focusTracker.onDidBlur(() => this._hideMessage()));
-		this._register(focusTracker.onDidFocus(() => this._showMessage()));
+		this._register(focusTracker.onDidFocus(() => {
+			this._showMessage();
+			this._onDidFocus.fire();
+		}));
 		// Stop propagation - we've handled the event already and letting it bubble up causes issues with parent
 		// controls handling it (such as dialog pages)
 		this.onkeydown(this.selectElement, (e: IKeyboardEvent) => {
@@ -131,6 +140,10 @@ export class SelectBox extends vsSelectBox {
 		// So we expose our own event that's fired either when the base onDidSelect is called or when we
 		// manually select an item
 		return this._onDidSelect.event;
+	}
+
+	public get onDidFocus(): Event<void> {
+		return this._onDidFocus.event;
 	}
 
 	public onSelect(newInput: ISelectData) {
@@ -184,22 +197,22 @@ export class SelectBox extends vsSelectBox {
 		this.applyStyles();
 	}
 
-	public selectWithOptionName(optionName?: string): void {
+	public selectWithOptionName(optionName?: string, selectFirstByDefault: boolean = true, forceSelectionEvent: boolean = false): void {
 		let option: number | undefined;
-		if (optionName) {
+		if (optionName !== undefined) {
 			option = this._optionsDictionary.get(optionName);
 		}
-		if (option) {
-			this.select(option);
-		} else {
-			this.select(0);
+		if (option !== undefined) {
+			this.select(option, forceSelectionEvent);
+		} else if (selectFirstByDefault) {
+			this.select(0, forceSelectionEvent);
 		}
 	}
 
-	public override select(index: number): void {
+	public override select(index: number, forceSelectionEvent: boolean = false): void {
 		super.select(index);
 		let selectedOptionIndex = this._optionsDictionary.get(this._selectedOption);
-		if (selectedOptionIndex === index) { // Not generating an event if the same value is selected.
+		if (!forceSelectionEvent && selectedOptionIndex === index) { // Not generating an event if the same value is selected.
 			return;
 		}
 		if (this._dialogOptions !== undefined) {
@@ -210,7 +223,6 @@ export class SelectBox extends vsSelectBox {
 			index: index
 		});
 	}
-
 
 	public override setOptions(options: string[] | SelectOptionItemSQL[] | ISelectOptionItem[], selected?: number): void {
 		let selectOptions: SelectOptionItemSQL[] = SelectBox.createOptions(options);
@@ -244,6 +256,14 @@ export class SelectBox extends vsSelectBox {
 		this.selectForeground = this.disabledSelectForeground;
 		this.selectBorder = this.disabledSelectBorder;
 		this.applyStyles();
+	}
+
+	public getAriaLabel(): string {
+		return this.selectElem.ariaLabel;
+	}
+
+	public get id(): string {
+		return this.selectElem.id;
 	}
 
 	public hasFocus(): boolean {

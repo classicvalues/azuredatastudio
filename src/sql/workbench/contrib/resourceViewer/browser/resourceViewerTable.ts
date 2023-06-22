@@ -25,6 +25,9 @@ import { Emitter } from 'vs/base/common/event';
 import { ContextMenuAnchor } from 'sql/workbench/contrib/resourceViewer/browser/resourceViewerEditor';
 import { LoadingSpinnerPlugin } from 'sql/base/browser/ui/table/plugins/loadingSpinner.plugin';
 import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
+import { IAccessibilityService } from 'vs/platform/accessibility/common/accessibility';
+import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
+import { IComponentContextService } from 'sql/workbench/services/componentContext/browser/componentContextService';
 
 export class ResourceViewerTable extends Disposable {
 
@@ -39,14 +42,17 @@ export class ResourceViewerTable extends Disposable {
 		@IOpenerService private _openerService: IOpenerService,
 		@ICommandService private _commandService: ICommandService,
 		@INotificationService private _notificationService: INotificationService,
-		@IContextViewService private _contextViewService: IContextViewService) {
+		@IContextViewService private _contextViewService: IContextViewService,
+		@IAccessibilityService private _accessibilityService: IAccessibilityService,
+		@IQuickInputService private _quickInputService: IQuickInputService,
+		@IComponentContextService private readonly _componentContextService: IComponentContextService) {
 		super();
 		let filterFn = (data: Array<azdata.DataGridItem>): Array<azdata.DataGridItem> => {
 			return data.filter(item => this.filter(item));
 		};
 
 		this._dataView = new TableDataView<azdata.DataGridItem>(undefined, undefined, undefined, filterFn);
-		this._resourceViewerTable = this._register(new Table(parent, {
+		this._resourceViewerTable = this._register(new Table(parent, this._accessibilityService, this._quickInputService, {
 			sorter: (args) => {
 				this._dataView.sort(args);
 			}
@@ -85,6 +91,7 @@ export class ResourceViewerTable extends Disposable {
 		});
 		this._resourceViewerTable.registerPlugin(filterPlugin);
 		this._resourceViewerTable.registerPlugin(this._loadingSpinnerPlugin);
+		this._register(this._componentContextService.registerTable(this._resourceViewerTable));
 	}
 
 	public set data(data: azdata.DataGridItem[]) {
@@ -95,7 +102,7 @@ export class ResourceViewerTable extends Disposable {
 	}
 
 	public set columns(columns: Slick.Column<Slick.SlickData>[]) {
-		this._resourceViewerTable.columns = columns;
+		this._resourceViewerTable.columns = columns as any; // Cast to any to fix strict type assertion error
 		this._resourceViewerTable.autosizeColumns();
 	}
 
@@ -128,7 +135,7 @@ export class ResourceViewerTable extends Disposable {
 		const columns = this._resourceViewerTable.grid.getColumns();
 		let value = true;
 		for (let i = 0; i < columns.length; i++) {
-			const col: FilterableColumn<Slick.SlickData> = columns[i];
+			const col: FilterableColumn<Slick.SlickData> = columns[i] as any; // Cast to any to fix strict type assertion error
 			if (!col.field) {
 				continue;
 			}

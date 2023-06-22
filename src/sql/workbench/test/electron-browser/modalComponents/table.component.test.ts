@@ -19,7 +19,7 @@ suite('TableComponent Tests', () => {
 			['4', '5', '6']
 		];
 		let columns = ['c1', 'c2', 'c3'];
-		const tableComponent = new TableComponent(undefined, undefined, undefined, new NullLogService(), undefined);
+		const tableComponent = new TableComponent(undefined, undefined, undefined, new NullLogService(), undefined, undefined, undefined, undefined, undefined, undefined);
 
 		let actual = tableComponent.transformData(data, columns);
 		let expected: { [key: string]: string }[] = [
@@ -34,16 +34,16 @@ suite('TableComponent Tests', () => {
 				'c3': '6'
 			}
 		];
-		assert.deepEqual(actual, expected);
+		assert.deepStrictEqual(actual, expected);
 	});
 
 	test('Table transformData should return empty array given undefined rows', () => {
 		let data = undefined;
-		const tableComponent = new TableComponent(undefined, undefined, undefined, new NullLogService(), undefined);
+		const tableComponent = new TableComponent(undefined, undefined, undefined, new NullLogService(), undefined, undefined, undefined, undefined, undefined, undefined);
 		let columns = ['c1', 'c2', 'c3'];
 		let actual = tableComponent.transformData(data, columns);
 		let expected: { [key: string]: string }[] = [];
-		assert.deepEqual(actual, expected);
+		assert.deepStrictEqual(actual, expected);
 	});
 
 	test('Table transformData should return empty array given undefined columns', () => {
@@ -52,10 +52,10 @@ suite('TableComponent Tests', () => {
 			['4', '5', '6']
 		];
 		let columns;
-		const tableComponent = new TableComponent(undefined, undefined, undefined, new NullLogService(), undefined);
+		const tableComponent = new TableComponent(undefined, undefined, undefined, new NullLogService(), undefined, undefined, undefined, undefined, undefined, undefined);
 		let actual = tableComponent.transformData(data, columns);
 		let expected: { [key: string]: string }[] = [];
-		assert.deepEqual(actual, expected);
+		assert.deepStrictEqual(actual, expected);
 	});
 
 	test('Table transformData should return array matched with columns given rows with missing column', () => {
@@ -63,7 +63,7 @@ suite('TableComponent Tests', () => {
 			['1', '2'],
 			['4', '5']
 		];
-		const tableComponent = new TableComponent(undefined, undefined, undefined, new NullLogService(), undefined);
+		const tableComponent = new TableComponent(undefined, undefined, undefined, new NullLogService(), undefined, undefined, undefined, undefined, undefined, undefined);
 		let columns = ['c1', 'c2', 'c3'];
 		let actual = tableComponent.transformData(data, columns);
 		let expected: { [key: string]: string }[] = [
@@ -76,6 +76,6 @@ suite('TableComponent Tests', () => {
 				'c2': '5'
 			}
 		];
-		assert.deepEqual(actual, expected);
+		assert.deepStrictEqual(actual, expected);
 	});
 });

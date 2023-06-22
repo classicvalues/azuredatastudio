@@ -1,7 +1,7 @@
 steps:
   - task: NodeTool@0
     inputs:
-      versionSpec: "12.13.0"
+      versionSpec: "16.x"
 
   - task: geeklearningio.gl-vsts-tasks-yarn.yarn-installer-task.YarnInstaller@3
     inputs:
@@ -64,7 +64,7 @@ steps:
 
   - script: |
       set -e
-      node build/azure-pipelines/mixin
+      node build/azure-pipelines/sql-mixin
     displayName: Mix in quality
 
   - task: DownloadBuildArtifacts@0

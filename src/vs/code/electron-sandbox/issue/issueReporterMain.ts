@@ -5,28 +5,27 @@
 
 import 'vs/css!./media/issueReporter';
 import 'vs/base/browser/ui/codicons/codiconStyles'; // make sure codicon css is loaded
-import { INativeHostService } from 'vs/platform/native/electron-sandbox/native';
-import { NativeHostService } from 'vs/platform/native/electron-sandbox/nativeHostService';
-import { ipcRenderer } from 'vs/base/parts/sandbox/electron-sandbox/globals';
-import { applyZoom, zoomIn, zoomOut } from 'vs/platform/windows/electron-sandbox/window';
+import { localize } from 'vs/nls';
 import { $, reset, safeInnerHtml, windowOpenNoOpener } from 'vs/base/browser/dom';
 import { Button } from 'vs/base/browser/ui/button/button';
+import { renderIcon } from 'vs/base/browser/ui/iconLabel/iconLabels';
+import { Delayer } from 'vs/base/common/async';
+import { Codicon } from 'vs/base/common/codicons';
 import { groupBy } from 'vs/base/common/collections';
 import { debounce } from 'vs/base/common/decorators';
 import { Disposable } from 'vs/base/common/lifecycle';
-import { isWindows, isLinux, isLinuxSnap, isMacintosh } from 'vs/base/common/platform';
+import { isLinux, isLinuxSnap, isMacintosh, isWindows } from 'vs/base/common/platform';
 import { escape } from 'vs/base/common/strings';
-import { normalizeGitHubUrl } from 'vs/platform/issue/common/issueReporterUtil';
+import { ipcRenderer } from 'vs/base/parts/sandbox/electron-sandbox/globals';
 import { IssueReporterData as IssueReporterModelData, IssueReporterModel } from 'vs/code/electron-sandbox/issue/issueReporterModel';
 import BaseHtml from 'vs/code/electron-sandbox/issue/issueReporterPage';
-import { localize } from 'vs/nls';
 import { isRemoteDiagnosticError, SystemInfo } from 'vs/platform/diagnostics/common/diagnostics';
-import { ServiceCollection } from 'vs/platform/instantiation/common/serviceCollection';
-import { IMainProcessService } from 'vs/platform/ipc/electron-sandbox/services';
-import { IssueReporterWindowConfiguration, IssueReporterData, IssueReporterExtensionData, IssueReporterStyles, IssueType } from 'vs/platform/issue/common/issue';
-import { Codicon } from 'vs/base/common/codicons';
-import { renderIcon } from 'vs/base/browser/ui/iconLabel/iconLabels';
 import { ElectronIPCMainProcessService } from 'vs/platform/ipc/electron-sandbox/mainProcessService';
+import { IssueReporterData, IssueReporterExtensionData, IssueReporterStyles, IssueReporterWindowConfiguration, IssueType } from 'vs/platform/issue/common/issue';
+import { normalizeGitHubUrl } from 'vs/platform/issue/common/issueReporterUtil';
+import { INativeHostService } from 'vs/platform/native/electron-sandbox/native';
+import { NativeHostService } from 'vs/platform/native/electron-sandbox/nativeHostService';
+import { applyZoom, zoomIn, zoomOut } from 'vs/platform/window/electron-sandbox/window';
 import * as locConstants from 'sql/base/common/locConstants'; // {{SQL CARBON EDIT}}
 
 const MAX_URL_LENGTH = 2045;
@@ -63,13 +62,15 @@ export class IssueReporter extends Disposable {
 	private receivedPerformanceInfo = false;
 	private shouldQueueSearch = false;
 	private hasBeenSubmitted = false;
+	private delayedSubmit = new Delayer<void>(300);
 
 	private readonly previewButton!: Button;
 
 	constructor(private readonly configuration: IssueReporterWindowConfiguration) {
 		super();
 
-		this.initServices(configuration);
+		const mainProcessService = new ElectronIPCMainProcessService(configuration.windowId);
+		this.nativeHostService = new NativeHostService(configuration.windowId, mainProcessService) as INativeHostService;
 
 		const targetExtension = configuration.data.extensionId ? configuration.data.enabledExtensions.find(extension => extension.id === configuration.data.extensionId) : undefined;
 		this.issueReporterModel = new IssueReporterModel({
@@ -86,6 +87,7 @@ export class IssueReporter extends Disposable {
 		const issueReporterElement = this.getElementById('issue-reporter');
 		if (issueReporterElement) {
 			this.previewButton = new Button(issueReporterElement);
+			this.updatePreviewButtonState();
 		}
 
 		const issueTitle = configuration.data.issueTitle;
@@ -138,6 +140,9 @@ export class IssueReporter extends Disposable {
 		this.applyStyles(configuration.data.styles);
 		this.handleExtensionData(configuration.data.enabledExtensions);
 		this.updateExperimentsInfo(configuration.data.experiments);
+		this.updateRestrictedMode(configuration.data.restrictedMode);
+		this.updatePreviewFeaturesEnabled(configuration.data.previewFeaturesEnabled); // {{SQL CARBON EDIT}} Add preview features flag
+		this.updateUnsupportedMode(configuration.data.isUnsupported);
 	}
 
 	render(): void {
@@ -252,15 +257,6 @@ export class IssueReporter extends Disposable {
 		this.updateExtensionSelector(installedExtensions);
 	}
 
-	private initServices(configuration: IssueReporterWindowConfiguration): void {
-		const serviceCollection = new ServiceCollection();
-		const mainProcessService = new ElectronIPCMainProcessService(configuration.windowId);
-		serviceCollection.set(IMainProcessService, mainProcessService);
-
-		this.nativeHostService = new NativeHostService(configuration.windowId, mainProcessService) as INativeHostService;
-		serviceCollection.set(INativeHostService, this.nativeHostService);
-	}
-
 	private setEventHandlers(): void {
 		this.addEventListener('issue-type', 'change', (event: Event) => {
 			const issueType = parseInt((<HTMLInputElement>event.target).value);
@@ -356,7 +352,11 @@ export class IssueReporter extends Disposable {
 			this.searchIssues(title, fileOnExtension, fileOnMarketplace);
 		});
 
-		this.previewButton.onDidClick(() => this.createIssue());
+		this.previewButton.onDidClick(async () => {
+			this.delayedSubmit.trigger(async () => {
+				this.createIssue();
+			});
+		});
 
 		function sendWorkbenchCommand(commandId: string) {
 			ipcRenderer.send('vscode:workbenchCommand', { id: commandId, from: 'issueReporter' });
@@ -383,9 +383,11 @@ export class IssueReporter extends Disposable {
 			const cmdOrCtrlKey = isMacintosh ? e.metaKey : e.ctrlKey;
 			// Cmd/Ctrl+Enter previews issue and closes window
 			if (cmdOrCtrlKey && e.keyCode === 13) {
-				if (await this.createIssue()) {
-					ipcRenderer.send('vscode:closeIssueReporter');
-				}
+				this.delayedSubmit.trigger(async () => {
+					if (await this.createIssue()) {
+						ipcRenderer.send('vscode:closeIssueReporter');
+					}
+				});
 			}
 
 			// Cmd/Ctrl + w closes issue window
@@ -789,7 +791,7 @@ export class IssueReporter extends Disposable {
 		return isValid;
 	}
 
-	private async submitToGitHub(issueTitle: string, issueBody: string, gitHubDetails: { owner: string, repositoryName: string }): Promise<boolean> {
+	private async submitToGitHub(issueTitle: string, issueBody: string, gitHubDetails: { owner: string; repositoryName: string }): Promise<boolean> {
 		const url = `https://api.github.com/repos/${gitHubDetails.owner}/${gitHubDetails.repositoryName}/issues`;
 		const init = {
 			method: 'POST',
@@ -897,7 +899,7 @@ export class IssueReporter extends Disposable {
 				: this.configuration.product.reportIssueUrl!;
 	}
 
-	private parseGitHubUrl(url: string): undefined | { repositoryName: string, owner: string } {
+	private parseGitHubUrl(url: string): undefined | { repositoryName: string; owner: string } {
 		// Assumes a GitHub url to a particular repo, https://github.com/repositoryName/owner.
 		// Repository name and owner cannot contain '/'
 		const match = /^https?:\/\/github\.com\/([^\/]*)\/([^\/]*).*/.exec(url);
@@ -1151,6 +1153,19 @@ export class IssueReporter extends Disposable {
 		}
 	}
 
+	private updateRestrictedMode(restrictedMode: boolean) {
+		this.issueReporterModel.update({ restrictedMode });
+	}
+
+	// {{SQL CARBON EDIT}} Add preview features flag
+	private updatePreviewFeaturesEnabled(previewFeaturesEnabled: boolean) {
+		this.issueReporterModel.update({ previewFeaturesEnabled });
+	}
+
+	private updateUnsupportedMode(isUnsupported: boolean) {
+		this.issueReporterModel.update({ isUnsupported });
+	}
+
 	private updateExperimentsInfo(experimentInfo: string | undefined) {
 		this.issueReporterModel.update({ experimentInfo });
 		const target = document.querySelector<HTMLElement>('.block-experiments .block-info');
@@ -1194,21 +1209,15 @@ export class IssueReporter extends Disposable {
 
 	private addEventListener(elementId: string, eventType: string, handler: (event: Event) => void): void {
 		const element = this.getElementById(elementId);
-		if (element) {
-			element.addEventListener(eventType, handler);
-		}
+		element?.addEventListener(eventType, handler);
 	}
 }
 
 // helper functions
 
 function hide(el: Element | undefined | null) {
-	if (el) {
-		el.classList.add('hidden');
-	}
+	el?.classList.add('hidden');
 }
 function show(el: Element | undefined | null) {
-	if (el) {
-		el.classList.remove('hidden');
-	}
+	el?.classList.remove('hidden');
 }

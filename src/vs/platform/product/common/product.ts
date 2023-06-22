@@ -4,16 +4,19 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { FileAccess } from 'vs/base/common/network';
-import { isWeb, globals } from 'vs/base/common/platform';
+import { globals } from 'vs/base/common/platform';
 import { env } from 'vs/base/common/process';
-import { dirname, joinPath } from 'vs/base/common/resources';
 import { IProductConfiguration } from 'vs/base/common/product';
+import { dirname, joinPath } from 'vs/base/common/resources';
 import { ISandboxConfiguration } from 'vs/base/parts/sandbox/common/sandboxTypes';
 
+/**
+ * @deprecated You MUST use `IProductService` if possible.
+ */
 let product: IProductConfiguration;
 
 // Native sandbox environment
-if (typeof globals.vscode !== 'undefined') {
+if (typeof globals.vscode !== 'undefined' && typeof globals.vscode.context !== 'undefined') {
 	const configuration: ISandboxConfiguration | undefined = globals.vscode.context.configuration();
 	if (configuration) {
 		product = configuration.product;
@@ -29,14 +32,15 @@ else if (typeof require?.__$__nodeRequire === 'function') {
 	const rootPath = dirname(FileAccess.asFileUri('', require));
 
 	product = require.__$__nodeRequire(joinPath(rootPath, 'product.json').fsPath);
-	const pkg = require.__$__nodeRequire(joinPath(rootPath, 'package.json').fsPath) as { version: string; };
+	const pkg = require.__$__nodeRequire(joinPath(rootPath, 'package.json').fsPath) as { version: string };
 
 	// Running out of sources
 	if (env['VSCODE_DEV']) {
 		Object.assign(product, {
 			nameShort: `${product.nameShort} Dev`,
 			nameLong: `${product.nameLong} Dev`,
-			dataFolderName: `${product.dataFolderName}-dev`
+			dataFolderName: `${product.dataFolderName}-dev`,
+			serverDataFolderName: product.serverDataFolderName ? `${product.serverDataFolderName}-dev` : undefined
 		});
 	}
 
@@ -54,26 +58,21 @@ else {
 	// Running out of sources
 	if (Object.keys(product).length === 0) {
 		Object.assign(product, {
-			version: '1.27.0-dev',
-			vscodeVersion: '1.53.0-dev',
-			nameLong: isWeb ? 'Azure Data Studio Web Dev' : 'Azure Data Studio Dev',
-			nameShort: isWeb ? 'Azure Data Studio Web Dev' : 'Azure Data Studio Dev',
+			version: '1.67.0-dev',
+			vscodeVersion: '1.63.0-dev',
+			nameLong: 'Azure Data Studio Dev',
+			nameShort: 'Azure Data Studio Dev',
 			applicationName: 'azuredatastudio-oss',
 			dataFolderName: '.azuredatastudio-oss',
 			urlProtocol: 'azuredatastudio-oss',
 			reportIssueUrl: 'https://github.com/microsoft/azuredatastudio/issues/new',
 			licenseName: 'MIT',
-			licenseUrl: 'https://github.com/microsoft/azuredatastudio/blob/master/LICENSE.txt',
-			extensionAllowedProposedApi: [
-				'ms-vscode.vscode-js-profile-flame',
-				'ms-vscode.vscode-js-profile-table',
-				'ms-vscode.github-browser',
-				'ms-vscode.github-richnav',
-				'ms-vscode.remotehub',
-				'ms-vscode.remotehub-insiders'
-			],
+			licenseUrl: 'https://github.com/microsoft/vscode/blob/main/LICENSE.txt'
 		});
 	}
 }
 
+/**
+ * @deprecated You MUST use `IProductService` if possible.
+ */
 export default product;

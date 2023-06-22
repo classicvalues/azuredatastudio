@@ -21,7 +21,6 @@ import { IThemable } from 'vs/base/common/styler';
 import { isUndefinedOrNull } from 'vs/base/common/types';
 import { URI } from 'vs/base/common/uri';
 import { generateUuid } from 'vs/base/common/uuid';
-import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfigurationService';
 import { localize } from 'vs/nls';
 import { IClipboardService } from 'vs/platform/clipboard/common/clipboardService';
 import { IContextKey, IContextKeyService, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
@@ -29,6 +28,8 @@ import { ILayoutService } from 'vs/platform/layout/browser/layoutService';
 import { ILogService } from 'vs/platform/log/common/log';
 import { attachButtonStyler } from 'vs/platform/theme/common/styler';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
+import { Emitter } from 'vs/base/common/event';
+import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfiguration';
 
 export enum MessageLevel {
 	Error = 0,
@@ -80,9 +81,14 @@ export interface IModalOptions {
 	hasErrors?: boolean;
 	hasSpinner?: boolean;
 	spinnerTitle?: string;
+	onSpinnerHideText?: string;
 	renderHeader?: boolean;
 	renderFooter?: boolean;
 	dialogProperties?: IDialogProperties;
+	/**
+	 * The height of the dialog, only applicable when the dialog style is normal.
+	 */
+	height?: number;
 }
 
 const defaultOptions: IModalOptions = {
@@ -93,10 +99,11 @@ const defaultOptions: IModalOptions = {
 	hasBackButton: false,
 	hasTitleIcon: false,
 	hasErrors: false,
-	hasSpinner: false,
+	hasSpinner: true,
 	renderHeader: true,
 	renderFooter: true,
-	dialogProperties: undefined
+	dialogProperties: undefined,
+	height: 480
 };
 
 export type HideReason = 'close' | 'cancel' | 'ok';
@@ -147,6 +154,9 @@ export abstract class Modal extends Disposable implements IThemable {
 	private _modalShowingContext: IContextKey<Array<string>>;
 	private readonly _staticKey: string;
 
+	private _onClosed = new Emitter<HideReason>();
+	public onClosed = this._onClosed.event;
+
 	/**
 	 * Get the back button, only available after render and if the hasBackButton option is true
 	 */
@@ -161,13 +171,20 @@ export abstract class Modal extends Disposable implements IThemable {
 	 * (hyoshi - 10/2/2017 tracked by https://github.com/Microsoft/carbon/issues/1836)
 	 */
 	public setWide(isWide: boolean): void {
-		DOM.toggleClass(this._bodyContainer!, 'wide', isWide);
+		this._bodyContainer!.classList.toggle('wide', isWide);
 	}
 
 	/**
 	 * Constructor for modal
 	 * @param _title Title of the modal, if undefined, the title section is not rendered
 	 * @param _name Name of the modal, used for telemetry
+	 * @param _telemetryService
+	 * @param layoutService
+	 * @param _clipboardService
+	 * @param _themeService
+	 * @param logService
+	 * @param textResourcePropertiesService
+	 * @param _contextKeyService
 	 * @param options Modal options
 	 */
 	constructor(
@@ -198,9 +215,16 @@ export abstract class Modal extends Disposable implements IThemable {
 
 		let top: number;
 		let builderClass = '.modal.fade';
-		builderClass += this._modalOptions.dialogStyle === 'flyout' ? '.flyout-dialog'
-			: this._modalOptions.dialogStyle === 'callout' ? '.callout-dialog'
-				: '';
+		switch (this._modalOptions.dialogStyle) {
+			case 'flyout':
+				builderClass += '.flyout-dialog';
+				break;
+			case 'callout':
+				builderClass += '.callout-dialog';
+				break;
+			default:
+				builderClass += '.normal-dialog';
+		}
 
 		this._bodyContainer = DOM.$(`${builderClass}`, { role: 'dialog', 'aria-label': this._title });
 
@@ -211,12 +235,19 @@ export abstract class Modal extends Disposable implements IThemable {
 		}
 		this._bodyContainer.style.top = `${top}px`;
 		this._modalDialog = DOM.append(this._bodyContainer, DOM.$('.modal-dialog'));
+		const formElement = DOM.append(this._modalDialog, DOM.$('form'));
+
+		if (this._modalOptions.dialogStyle === 'normal') {
+			// set the height based on the available space and the expected height.
+			// so that the dialog can scroll vertically when needed.
+			this._modalDialog.style.height = `min(100%, ${this._modalOptions.height}px)`;
+		}
 
 		if (this._modalOptions.dialogStyle === 'callout') {
 			let arrowClass = `.callout-arrow.from-${this._modalOptions.dialogPosition}`;
-			this._modalContent = DOM.append(this._modalDialog, DOM.$(`.modal-content${arrowClass}`));
+			this._modalContent = DOM.append(formElement, DOM.$(`.modal-content${arrowClass}`));
 		} else {
-			this._modalContent = DOM.append(this._modalDialog, DOM.$('.modal-content'));
+			this._modalContent = DOM.append(formElement, DOM.$('.modal-content'));
 		}
 
 		if (typeof this._modalOptions.width === 'number') {
@@ -356,18 +387,18 @@ export abstract class Modal extends Disposable implements IThemable {
 		if (this.shouldShowExpandMessageButton) {
 			DOM.append(this._detailsButtonContainer!, this._toggleMessageDetailButton!.element);
 		} else {
-			DOM.removeNode(this._toggleMessageDetailButton!.element);
+			this._toggleMessageDetailButton!.element.remove();
 		}
 	}
 
 	private toggleMessageDetail() {
-		const isExpanded = DOM.hasClass(this._messageSummary!, MESSAGE_EXPANDED_MODE_CLASS);
-		DOM.toggleClass(this._messageSummary!, MESSAGE_EXPANDED_MODE_CLASS, !isExpanded);
+		const isExpanded = this._messageSummary!.classList.contains(MESSAGE_EXPANDED_MODE_CLASS);
+		this._messageSummary!.classList.toggle(MESSAGE_EXPANDED_MODE_CLASS, !isExpanded);
 		this._toggleMessageDetailButton!.label = isExpanded ? SHOW_DETAILS_TEXT : localize('hideMessageDetails', "Hide Details");
 
 		if (this._messageDetailText) {
 			if (isExpanded) {
-				DOM.removeNode(this._messageDetail!);
+				this._messageDetail!.remove();
 			} else {
 				DOM.append(this._messageBody!, this._messageDetail!);
 			}
@@ -458,7 +489,7 @@ export abstract class Modal extends Disposable implements IThemable {
 			}
 		}));
 		this.disposableStore.add(trapKeyboardNavigation(this._modalDialog!));
-		this.disposableStore.add(DOM.addDisposableListener(window, DOM.EventType.RESIZE, (e: Event) => {
+		this.disposableStore.add(DOM.addDisposableListener(window, DOM.EventType.RESIZE, e => {
 			this.layout(DOM.getTotalHeight(this._modalBodySection!));
 		}));
 
@@ -476,7 +507,7 @@ export abstract class Modal extends Disposable implements IThemable {
 	/**
 	 * Hides the modal and removes key listeners
 	 */
-	protected hide(reason?: HideReason, currentPageName?: string): void {
+	protected hide(reason: HideReason = 'close', currentPageName?: string): void {
 		this._modalShowingContext.get()!.pop();
 		this._bodyContainer!.remove();
 		this.disposableStore.clear();
@@ -488,6 +519,7 @@ export abstract class Modal extends Disposable implements IThemable {
 			})
 			.send();
 		this.restoreKeyboardFocus();
+		this._onClosed.fire(reason);
 	}
 
 	private restoreKeyboardFocus() {
@@ -525,7 +557,6 @@ export abstract class Modal extends Disposable implements IThemable {
 	/**
 	 * Returns a footer button matching the provided label
 	 * @param label Label to show on the button
-	 * @param onSelect The callback to call when the button is selected
 	 */
 	protected findFooterButton(label: string): Button | undefined {
 		return this._footerButtons.find(e => {
@@ -576,8 +607,8 @@ export abstract class Modal extends Disposable implements IThemable {
 					severityText = WARNING_ALT_TEXT;
 				}
 				levelClasses.forEach(level => {
-					DOM.toggleClass(this._messageIcon!, level, selectedLevel === level);
-					DOM.toggleClass(this._messageElement!, level, selectedLevel === level);
+					this._messageIcon!.classList.toggle(level, selectedLevel === level);
+					this._messageElement!.classList.toggle(level, selectedLevel === level);
 				});
 
 				this._messageIcon!.title = severityText;
@@ -586,7 +617,7 @@ export abstract class Modal extends Disposable implements IThemable {
 				this._messageSummary!.title = message!;
 				this._messageDetail!.innerText = description;
 			}
-			DOM.removeNode(this._messageDetail!);
+			this._messageDetail!.remove();
 			this.messagesElementVisible = !!this._messageSummaryText;
 			// Read out the description to screen readers so they don't have to
 			// search around for the alert box to hear the extra information
@@ -600,7 +631,11 @@ export abstract class Modal extends Disposable implements IThemable {
 	protected set messagesElementVisible(visible: boolean) {
 		if (visible) {
 			if (this._useDefaultMessageBoxLocation) {
-				DOM.prepend(this._modalContent!, this._messageElement!);
+				// To avoid stealing focus from the user, only reset the keyboard focus when the message is not currently visible.
+				if (!this._messageElement!.parentNode) {
+					DOM.prepend(this._modalContent!, this._messageElement!);
+					this.setInitialFocusedElement();
+				}
 			}
 		} else {
 			// only do the removal when the messageElement has parent element.
@@ -627,6 +662,9 @@ export abstract class Modal extends Disposable implements IThemable {
 				}
 			} else {
 				DOM.hide(this._spinnerElement!);
+				if (this._modalOptions.onSpinnerHideText) {
+					alert(this._modalOptions.onSpinnerHideText);
+				}
 			}
 		}
 	}
@@ -641,7 +679,7 @@ export abstract class Modal extends Disposable implements IThemable {
 	/**
 	 * Set the title of the modal
 	 */
-	protected set title(title: string) {
+	public set title(title: string) {
 		this._title = title;
 		if (this._modalTitle) {
 			this._modalTitle.innerText = title;
@@ -651,7 +689,7 @@ export abstract class Modal extends Disposable implements IThemable {
 		}
 	}
 
-	protected get title(): string {
+	public get title(): string {
 		return this._title;
 	}
 
@@ -739,6 +777,8 @@ export abstract class Modal extends Disposable implements IThemable {
 					box-shadow: 0px 3.2px 7.2px rgba(${shadowRgb.rgba.r}, ${shadowRgb.rgba.g}, ${shadowRgb.rgba.b}, 0.132),
 								0px 0.6px 1.8px rgba(${shadowRgb.rgba.r}, ${shadowRgb.rgba.g}, ${shadowRgb.rgba.b}, 0.108);
 				}
+
+				.hc-light .modal.callout-dialog .modal-dialog,
 				.hc-black .modal.callout-dialog .modal-dialog {
 					border-color: rgba(${exteriorBorderRgb.rgba.r}, ${exteriorBorderRgb.rgba.g}, ${exteriorBorderRgb.rgba.b}, 1);
 				}
@@ -749,6 +789,8 @@ export abstract class Modal extends Disposable implements IThemable {
 					background-color: ${this._dialogBodyBackground};
 					border-color: transparent transparent rgba(${exteriorBorderRgb.rgba.r}, ${exteriorBorderRgb.rgba.g}, ${exteriorBorderRgb.rgba.b}, 0.5) rgba(${exteriorBorderRgb.rgba.r}, ${exteriorBorderRgb.rgba.g}, ${exteriorBorderRgb.rgba.b}, 0.5);
 				}
+
+				.hc-light .callout-arrow:before,
 				.hc-black .callout-arrow:before {
 					border-color: transparent transparent rgba(${exteriorBorderRgb.rgba.r}, ${exteriorBorderRgb.rgba.g}, ${exteriorBorderRgb.rgba.b}, 1) rgba(${exteriorBorderRgb.rgba.r}, ${exteriorBorderRgb.rgba.g}, ${exteriorBorderRgb.rgba.b}, 1);
 				}

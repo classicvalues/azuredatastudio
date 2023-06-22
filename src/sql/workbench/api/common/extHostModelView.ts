@@ -7,18 +7,19 @@
 
 import { IMainContext } from 'vs/workbench/api/common/extHost.protocol';
 import { Emitter } from 'vs/base/common/event';
-import { deepClone, assign } from 'vs/base/common/objects';
+import { deepClone } from 'vs/base/common/objects';
 import { URI } from 'vs/base/common/uri';
 import * as nls from 'vs/nls';
 
 import * as vscode from 'vscode';
 import * as azdata from 'azdata';
 
-import { SqlMainContext, ExtHostModelViewShape, MainThreadModelViewShape, ExtHostModelViewTreeViewsShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
+import { ExtHostModelViewShape, MainThreadModelViewShape, ExtHostModelViewTreeViewsShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
 import { IItemConfig, ModelComponentTypes, IComponentShape, IComponentEventArgs, ComponentEventType, ColumnSizingMode, ModelViewAction } from 'sql/workbench/api/common/sqlExtHostTypes';
 import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
 import { ILogService } from 'vs/platform/log/common/log';
 import { onUnexpectedError } from 'vs/base/common/errors';
+import { SqlMainContext } from 'vs/workbench/api/common/extHost.protocol';
 
 class ModelBuilderImpl implements azdata.ModelBuilder {
 	private nextComponentId: number;
@@ -50,7 +51,7 @@ class ModelBuilderImpl implements azdata.ModelBuilder {
 
 	flexContainer(): azdata.FlexBuilder {
 		let id = this.getNextComponentId();
-		let container: GenericContainerBuilder<azdata.FlexContainer, any, any, azdata.ComponentProperties> = new GenericContainerBuilder<azdata.FlexContainer, azdata.FlexLayout, azdata.FlexItemLayout, azdata.ComponentProperties>(this._proxy, this._handle, ModelComponentTypes.FlexContainer, id, this.logService);
+		let container: GenericContainerBuilder<azdata.FlexContainer, any, any, azdata.ContainerProperties> = new GenericContainerBuilder<azdata.FlexContainer, azdata.FlexLayout, azdata.FlexItemLayout, azdata.ContainerProperties>(this._proxy, this._handle, ModelComponentTypes.FlexContainer, id, this.logService);
 		this._componentBuilders.set(id, container);
 		return container;
 	}
@@ -323,17 +324,17 @@ class ComponentBuilderImpl<T extends azdata.Component, TPropertyBag extends azda
 
 	withProperties<U>(properties: U): azdata.ComponentBuilder<T, TPropertyBag> {
 		// Keep any properties that may have been set during initial object construction
-		this._component.properties = assign({}, this._component.properties, properties);
+		this._component.properties = Object.assign({}, this._component.properties, properties);
 		return this;
 	}
 
 	withProps(properties: TPropertyBag): azdata.ComponentBuilder<T, TPropertyBag> {
-		this._component.properties = assign({}, this._component.properties, properties);
+		this._component.properties = Object.assign({}, this._component.properties, properties);
 		return this;
 	}
 
 	withValidation(validation: (component: T) => boolean | Thenable<boolean>): azdata.ComponentBuilder<T, TPropertyBag> {
-		this._component.customValidations.push(validation);
+		this._component.customValidations.push(validation as (component: ThisType<ComponentWrapper>) => boolean | Thenable<boolean>); // Use specific type to avoid type assertion error
 		return this;
 	}
 
@@ -342,9 +343,15 @@ class ComponentBuilderImpl<T extends azdata.Component, TPropertyBag extends azda
 	}
 }
 
-class ContainerBuilderImpl<TComponent extends azdata.Component, TLayout, TItemLayout, TPropertyBag extends azdata.ComponentProperties> extends ComponentBuilderImpl<TComponent, TPropertyBag> implements azdata.ContainerBuilder<TComponent, TLayout, TItemLayout, TPropertyBag> {
+class ContainerBuilderImpl<TComponent extends azdata.Component, TLayout, TItemLayout, TPropertyBag extends azdata.ContainerProperties> extends ComponentBuilderImpl<TComponent, TPropertyBag> implements azdata.ContainerBuilder<TComponent, TLayout, TItemLayout, TPropertyBag> {
 	constructor(componentWrapper: ComponentWrapper) {
 		super(componentWrapper);
+	}
+
+	override withProps(properties: TPropertyBag): azdata.ContainerBuilder<TComponent, TLayout, TItemLayout, TPropertyBag> {
+		// We use the same basic logic to set the properties but return this so we can return the container object type
+		super.withProps(properties);
+		return this;
 	}
 
 	withLayout(layout: TLayout): azdata.ContainerBuilder<TComponent, TLayout, TItemLayout, TPropertyBag> {
@@ -361,7 +368,7 @@ class ContainerBuilderImpl<TComponent extends azdata.Component, TLayout, TItemLa
 	}
 }
 
-class GenericContainerBuilder<T extends azdata.Component, TLayout, TItemLayout, TPropertyBag extends azdata.ComponentProperties> extends ContainerBuilderImpl<T, TLayout, TItemLayout, TPropertyBag> {
+class GenericContainerBuilder<T extends azdata.Component, TLayout, TItemLayout, TPropertyBag extends azdata.ContainerProperties> extends ContainerBuilderImpl<T, TLayout, TItemLayout, TPropertyBag> {
 	constructor(proxy: MainThreadModelViewShape, handle: number, type: ModelComponentTypes, id: string, logService: ILogService) {
 		super(new ComponentWrapper(proxy, handle, type, id, logService));
 	}
@@ -406,7 +413,7 @@ class FormContainerBuilder extends GenericContainerBuilder<azdata.FormContainer,
 			});
 		}
 
-		return new InternalItemConfig(componentWrapper, assign({}, itemLayout || {}, {
+		return new InternalItemConfig(componentWrapper, Object.assign({}, itemLayout || {}, {
 			title: formComponent.title,
 			actions: actions,
 			isFormComponent: true,
@@ -794,7 +801,7 @@ class ComponentWrapper implements azdata.Component {
 	}
 
 	public updateProperties(properties: { [key: string]: any }): Thenable<void> {
-		this.properties = assign(this.properties, properties);
+		this.properties = Object.assign(this.properties, properties);
 		return this.notifyPropertyChanged();
 	}
 
@@ -803,7 +810,7 @@ class ComponentWrapper implements azdata.Component {
 	}
 
 	public updateCssStyles(cssStyles: { [key: string]: string }): Thenable<void> {
-		this.properties.CSSStyles = assign(this.properties.CSSStyles || {}, cssStyles);
+		this.properties.CSSStyles = Object.assign(this.properties.CSSStyles || {}, cssStyles);
 		return this.notifyPropertyChanged();
 	}
 
@@ -997,10 +1004,10 @@ class InputBoxWrapper extends ComponentWrapper implements azdata.InputBoxCompone
 		this.setProperty('value', v);
 	}
 
-	public get ariaLive(): string {
+	public get ariaLive(): azdata.AriaLiveValue | undefined {
 		return this.properties['ariaLive'];
 	}
-	public set ariaLive(v: string) {
+	public set ariaLive(v: azdata.AriaLiveValue | undefined) {
 		this.setProperty('ariaLive', v);
 	}
 
@@ -1350,10 +1357,10 @@ class TextComponentWrapper extends ComponentWrapper implements azdata.TextCompon
 		this.properties = {};
 	}
 
-	public get value(): string {
+	public get value(): string | string[] {
 		return this.properties['value'];
 	}
-	public set value(v: string) {
+	public set value(v: string | string[]) {
 		this.setProperty('value', v);
 	}
 
@@ -1383,6 +1390,14 @@ class TextComponentWrapper extends ComponentWrapper implements azdata.TextCompon
 	}
 	public set textType(type: azdata.TextType | undefined) {
 		this.setProperty('textType', type);
+	}
+
+	public get ariaLive(): azdata.AriaLiveValue | undefined {
+		return this.properties['ariaLive'];
+	}
+
+	public set ariaLive(ariaLive: azdata.AriaLiveValue | undefined) {
+		this.setProperty('ariaLive', ariaLive);
 	}
 }
 
@@ -1488,6 +1503,10 @@ class TableComponentWrapper extends ComponentWrapper implements azdata.TableComp
 	public appendData(v: any[][]): Thenable<void> {
 		return this.doAction(ModelViewAction.AppendData, v);
 	}
+
+	public setActiveCell(row: number, column: number): void {
+		this.doAction(ModelViewAction.SetActiveCell, row, column);
+	}
 }
 
 class DropDownWrapper extends ComponentWrapper implements azdata.DropDownComponent {
@@ -1549,6 +1568,22 @@ class DropDownWrapper extends ComponentWrapper implements azdata.DropDownCompone
 	public get onValueChanged(): vscode.Event<any> {
 		let emitter = this._emitterMap.get(ComponentEventType.onDidChange);
 		return emitter && emitter.event;
+	}
+
+	public get placeholder(): string | undefined {
+		return this.properties['placeholder'];
+	}
+
+	public set placeholder(v: string) {
+		this.setProperty('placeholder', v);
+	}
+
+	public get validationErrorMessages(): string[] | undefined {
+		return this.properties['validationErrorMessages'];
+	}
+
+	public set validationErrorMessages(v: string[]) {
+		this.setProperty('validationErrorMessages', v);
 	}
 }
 
@@ -1648,7 +1683,7 @@ class DeclarativeTableWrapper extends ComponentWrapper implements azdata.Declara
 		// and so map them into their IDs instead. We don't want to update the actual
 		// data property though since the caller would still expect that to contain
 		// the Component objects they created
-		const properties = assign({}, this.properties);
+		const properties = Object.assign({}, this.properties);
 		const componentsToAdd: ComponentWrapper[] = [];
 		if (properties.data?.length > 0) {
 
@@ -2069,6 +2104,8 @@ class InfoBoxComponentWrapper extends ComponentWrapper implements azdata.InfoBox
 	constructor(proxy: MainThreadModelViewShape, handle: number, id: string, logService: ILogService) {
 		super(proxy, handle, ModelComponentTypes.InfoBox, id, logService);
 		this.properties = {};
+		this._emitterMap.set(ComponentEventType.onDidClick, new Emitter<any>());
+		this._emitterMap.set(ComponentEventType.onChildClick, new Emitter<any>());
 	}
 
 	public get style(): azdata.InfoBoxStyle {
@@ -2087,12 +2124,46 @@ class InfoBoxComponentWrapper extends ComponentWrapper implements azdata.InfoBox
 		this.setProperty('text', v);
 	}
 
+	public get links(): azdata.LinkArea[] {
+		return this.properties['links'];
+	}
+
+	public set links(v: azdata.LinkArea[]) {
+		this.setProperty('links', v);
+	}
+
 	public get announceText(): boolean {
 		return this.properties['announceText'];
 	}
 
 	public set announceText(v: boolean) {
 		this.setProperty('announceText', v);
+	}
+
+	public get isClickable(): boolean {
+		return this.properties['isClickable'];
+	}
+
+	public set isClickable(v: boolean) {
+		this.setProperty('isClickable', v);
+	}
+
+	public get clickableButtonAriaLabel(): string {
+		return this.properties['clickableButtonAriaLabel'];
+	}
+
+	public set clickableButtonAriaLabel(v: string) {
+		this.setProperty('clickableButtonAriaLabel', v);
+	}
+
+	public get onDidClick(): vscode.Event<void> {
+		let emitter = this._emitterMap.get(ComponentEventType.onDidClick);
+		return emitter && emitter.event;
+	}
+
+	public get onLinkClick(): vscode.Event<azdata.InfoBoxLinkClickEventArgs> {
+		let emitter = this._emitterMap.get(ComponentEventType.onChildClick);
+		return emitter && emitter.event;
 	}
 }
 

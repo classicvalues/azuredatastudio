@@ -1,11 +1,11 @@
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
- *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
 import { UriComponents } from 'vs/base/common/uri';
-import { IRawTerminalTabLayoutInfo, ITerminalEnvironment, ITerminalTabLayoutInfoById } from 'vs/platform/terminal/common/terminal';
-import { ISerializableEnvironmentVariableCollection } from 'vs/platform/terminal/common/environmentVariable';
+import { ISerializableEnvironmentVariableCollection, ISerializableEnvironmentVariableCollections } from 'vs/platform/terminal/common/environmentVariable';
+import { IFixedTerminalDimensions, IRawTerminalTabLayoutInfo, ITerminalEnvironment, ITerminalTabLayoutInfoById, TerminalIcon, TerminalType, TitleEventSource, WaitOnExitValue } from 'vs/platform/terminal/common/terminal';
 
 export interface ISingleTerminalConfiguration<T> {
 	userValue: T | undefined;
@@ -26,7 +26,6 @@ export interface ICompleteTerminalConfiguration {
 	'terminal.integrated.env.windows': ISingleTerminalConfiguration<ITerminalEnvironment>;
 	'terminal.integrated.env.osx': ISingleTerminalConfiguration<ITerminalEnvironment>;
 	'terminal.integrated.env.linux': ISingleTerminalConfiguration<ITerminalEnvironment>;
-	'terminal.integrated.inheritEnv': boolean;
 	'terminal.integrated.cwd': string;
 	'terminal.integrated.detectLocale': 'auto' | 'off' | 'on';
 }
@@ -52,16 +51,53 @@ export interface IProcessDetails {
 	id: number;
 	pid: number;
 	title: string;
+	titleSource: TitleEventSource;
 	cwd: string;
 	workspaceId: string;
 	workspaceName: string;
 	isOrphan: boolean;
-	icon: string | undefined;
+	icon: TerminalIcon | undefined;
+	color: string | undefined;
+	fixedDimensions: IFixedTerminalDimensions | undefined;
+	environmentVariableCollections: ISerializableEnvironmentVariableCollections | undefined;
+	reconnectionOwner?: string;
+	task?: { label: string; id: string; lastTask: string; group?: string };
+	waitOnExit?: WaitOnExitValue;
+	hideFromUser?: boolean;
+	isFeatureTerminal?: boolean;
+	type?: TerminalType;
 }
 
 export type ITerminalTabLayoutInfoDto = IRawTerminalTabLayoutInfo<IProcessDetails>;
 
-export interface ReplayEntry { cols: number; rows: number; data: string; }
+export interface ReplayEntry {
+	cols: number;
+	rows: number;
+	data: string;
+}
+export interface ISerializedCommand {
+	command: string;
+	cwd: string | undefined;
+	startLine: number | undefined;
+	startX: number | undefined;
+	endLine: number | undefined;
+	executedLine: number | undefined;
+	exitCode: number | undefined;
+	commandStartLineContent: string | undefined;
+	timestamp: number;
+	genericMarkProperties?: IGenericMarkProperties;
+}
+
+export interface IGenericMarkProperties {
+	hoverMessage?: string;
+	disableCommandStorage?: boolean;
+}
+
+export interface ISerializedCommandDetectionCapability {
+	isWindowsPty: boolean;
+	commands: ISerializedCommand[];
+}
 export interface IPtyHostProcessReplayEvent {
 	events: ReplayEntry[];
+	commands: ISerializedCommandDetectionCapability;
 }

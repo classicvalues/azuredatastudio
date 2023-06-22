@@ -14,22 +14,22 @@ import { AzureResourceAccountTreeNode } from './accountTreeNode';
 import { AzureResourceAccountNotSignedInTreeNode } from './accountNotSignedInTreeNode';
 import { AzureResourceMessageTreeNode } from '../messageTreeNode';
 import { AzureResourceContainerTreeNodeBase } from './baseTreeNodes';
-import { AzureResourceErrorMessageUtil, equals } from '../utils';
+import { AzureResourceErrorMessageUtil, equals, filterAccounts } from '../utils';
 import { IAzureResourceTreeChangeHandler } from './treeChangeHandler';
 import { AzureAccount } from 'azurecore';
-
 
 export class AzureResourceTreeProvider implements vscode.TreeDataProvider<TreeNode>, IAzureResourceTreeChangeHandler {
 	public isSystemInitialized: boolean = false;
 
-	private accounts: AzureAccount[];
-	private _onDidChangeTreeData = new vscode.EventEmitter<TreeNode>();
-	private loadingAccountsPromise: Promise<void>;
+	private accounts: AzureAccount[] = [];
+	private _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined>();
+	private loadingAccountsPromise: Promise<void> | undefined;
 
-	public constructor(private readonly appContext: AppContext) {
+	public constructor(private readonly appContext: AppContext,
+		private readonly authLibrary: string) {
 		azdata.accounts.onDidChangeAccounts(async (e: azdata.DidChangeAccountsParams) => {
 			// This event sends it per provider, we need to make sure we get all the azure related accounts
-			let accounts = await azdata.accounts.getAllAccounts();
+			let accounts = filterAccounts(await azdata.accounts.getAllAccounts(), authLibrary);
 			accounts = accounts.filter(a => a.key.providerId.startsWith('azure'));
 			// the onDidChangeAccounts event will trigger in many cases where the accounts didn't actually change
 			// the notifyNodeChanged event triggers a refresh which triggers a getChildren which can trigger this callback
@@ -44,7 +44,7 @@ export class AzureResourceTreeProvider implements vscode.TreeDataProvider<TreeNo
 
 	public async getChildren(element?: TreeNode): Promise<TreeNode[]> {
 		if (element) {
-			return element.getChildren(true);
+			return element.getChildren();
 		}
 
 		if (!this.isSystemInitialized) {
@@ -55,10 +55,15 @@ export class AzureResourceTreeProvider implements vscode.TreeDataProvider<TreeNo
 		}
 
 		try {
-			if (this.accounts && this.accounts.length > 0) {
-				return this.accounts.map((account) => new AzureResourceAccountTreeNode(account, this.appContext, this));
+			if (this.accounts) {
+				if (this.accounts.length === 0) {
+					return [new AzureResourceAccountNotSignedInTreeNode()];
+				} else {
+					this.accounts = filterAccounts(this.accounts, this.authLibrary);
+					return this.accounts.map((account) => new AzureResourceAccountTreeNode(account, this.appContext, this));
+				}
 			} else {
-				return [new AzureResourceAccountNotSignedInTreeNode()];
+				return [AzureResourceMessageTreeNode.create(localize('azure.resource.tree.treeProvider.loadingLabel', "Loading ..."), undefined)];
 			}
 		} catch (error) {
 			return [AzureResourceMessageTreeNode.create(AzureResourceErrorMessageUtil.getErrorMessage(error), undefined)];
@@ -67,7 +72,10 @@ export class AzureResourceTreeProvider implements vscode.TreeDataProvider<TreeNo
 
 	private async loadAccounts(): Promise<void> {
 		try {
-			this.accounts = await azdata.accounts.getAllAccounts();
+			let accounts = await azdata.accounts.getAllAccounts();
+			if (accounts) {
+				this.accounts = filterAccounts(accounts, this.authLibrary);
+			}
 			// System has been initialized
 			this.setSystemInitialized();
 			this._onDidChangeTreeData.fire(undefined);
@@ -82,21 +90,20 @@ export class AzureResourceTreeProvider implements vscode.TreeDataProvider<TreeNo
 		this.loadingAccountsPromise = undefined;
 	}
 
-	public get onDidChangeTreeData(): vscode.Event<TreeNode> {
+	public get onDidChangeTreeData(): vscode.Event<TreeNode | undefined> {
 		return this._onDidChangeTreeData.event;
 	}
 
-	public notifyNodeChanged(node: TreeNode): void {
+	public notifyNodeChanged(node: TreeNode | undefined): void {
 		this._onDidChangeTreeData.fire(node);
 	}
 
-	public async refresh(node: TreeNode, isClearingCache: boolean): Promise<void> {
+	public async refresh(node: TreeNode | undefined, isClearingCache: boolean): Promise<void> {
 		if (isClearingCache) {
 			if ((node instanceof AzureResourceContainerTreeNodeBase)) {
 				node.clearCache();
 			}
 		}
-
 		this._onDidChangeTreeData.fire(node);
 	}
 

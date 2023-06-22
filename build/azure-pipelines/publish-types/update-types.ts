@@ -3,8 +3,6 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import * as fs from 'fs';
 import * as cp from 'child_process';
 import * as path from 'path';
@@ -75,8 +73,8 @@ function getNewFileHeader(tag: string) {
 		``,
 		`/*---------------------------------------------------------------------------------------------`,
 		` *  Copyright (c) Microsoft Corporation. All rights reserved.`,
-		` *  Licensed under the MIT License.`,
-		` *  See https://github.com/Microsoft/azuredatastudio/blob/main/LICENSE.txt for license information.`,
+		` *  Licensed under the Source EULA.`,
+		` *  See https://github.com/microsoft/azuredatastudio/blob/main/LICENSE.txt for license information.`,
 		` *--------------------------------------------------------------------------------------------*/`,
 		``,
 		`/**`,

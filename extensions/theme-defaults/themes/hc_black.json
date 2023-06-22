@@ -10,7 +10,8 @@
 		"selection.background": "#008000",
 		"editor.selectionBackground": "#FFFFFF",
 		"statusBarItem.remoteBackground": "#00000000",
-		"ports.iconRunningProcessforeground": "#FFFFFF"
+		"ports.iconRunningProcessForeground": "#FFFFFF",
+		"editorWhitespace.foreground": "#7c7c7c"
 	},
 	"tokenColors": [
 		{
@@ -137,6 +138,12 @@
 			"scope": "markup.italic",
 			"settings": {
 				"fontStyle": "italic"
+			}
+		},
+		{
+			"scope": "markup.strikethrough",
+			"settings": {
+				"fontStyle": "strikethrough"
 			}
 		},
 		{
@@ -346,7 +353,6 @@
 		{
 			"name": "Types declaration and references",
 			"scope": [
-				"meta.return-type",
 				"support.class",
 				"support.type",
 				"entity.name.type",

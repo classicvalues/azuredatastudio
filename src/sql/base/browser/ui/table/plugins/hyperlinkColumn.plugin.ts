@@ -4,21 +4,22 @@
  *--------------------------------------------------------------------------------------------*/
 import 'vs/css!./media/hyperlinkColumn.plugin';
 import 'vs/css!./media/iconColumn';
-import { BaseClickableColumn, getIconCellValue, IconColumnOptions } from 'sql/base/browser/ui/table/plugins/tableColumn';
+import { BaseClickableColumn, getIconCellValue, ClickableColumnOptions, IconColumnOptions } from 'sql/base/browser/ui/table/plugins/tableColumn';
 import { escape } from 'sql/base/common/strings';
 
 export interface HyperlinkCellValue {
 	iconCssClass?: string;
 	title: string;
 	url?: string;
+	role?: 'button' | 'link';
 }
 
-export interface HyperlinkColumnOptions extends IconColumnOptions {
+export interface HyperlinkColumnOptions extends IconColumnOptions, ClickableColumnOptions {
 }
 
 export class HyperlinkColumn<T extends Slick.SlickData> extends BaseClickableColumn<T> {
 	constructor(private options: HyperlinkColumnOptions) {
-		super();
+		super(options);
 	}
 
 	public get definition(): Slick.Column<T> {
@@ -31,7 +32,8 @@ export class HyperlinkColumn<T extends Slick.SlickData> extends BaseClickableCol
 				const cellValue = dataContext[this.options.field] as HyperlinkCellValue;
 				const cssClasses = iconValue.iconCssClass ? `codicon icon slick-plugin-icon ${iconValue.iconCssClass}` : '';
 				const urlPart = cellValue?.url ? `href="${encodeURI(cellValue.url)}" target="blank"` : '';
-				return `<a ${urlPart} class="slick-hyperlink-cell ${cssClasses}" tabindex=-1 title="${escapedTitle}" aria-label="${escapedTitle}">${escapedTitle}</a>`;
+				const disabledAttribute = this.isCellEnabled(row, cell) ? '' : 'disabled';
+				return `<a ${urlPart} class="slick-hyperlink-cell ${cssClasses}" tabindex=-1 title="${escapedTitle}" aria-label="${escapedTitle}" role="${cellValue.role ?? 'link'}" ${disabledAttribute}>${escapedTitle}</a>`;
 			},
 			name: this.options.name,
 			resizable: true,

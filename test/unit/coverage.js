@@ -37,11 +37,11 @@ exports.createReport = function (isSingle) {
 	const coverageMap = iLibCoverage.createCoverageMap(global.__coverage__);
 	return mapStore.transformCoverage(coverageMap).then((transformed) => {
 		// Paths come out all broken
-		let newData = Object.create(null);
+		const newData = Object.create(null);
 		Object.keys(transformed.data).forEach((file) => {
 			const entry = transformed.data[file];
 			const fixedPath = fixPath(entry.path);
-			if (fixedPath.includes('\\vs\\') || fixedPath.includes('/vs/')) { return; } // {{SQL CARBON EDIT}} skip vscode files
+			if (fixedPath.includes(`/vs/`)  || fixedPath.includes('\\vs\\') || path.basename(fixedPath) === 'marked.js') { return; } // {{SQL CARBON EDIT}} skip vscode files and imported marked.js
 			entry.data.path = fixedPath;
 			newData[fixedPath] = entry;
 		});
@@ -53,7 +53,7 @@ exports.createReport = function (isSingle) {
 		});
 		const tree = context.getTree('flat');
 
-		let reports = [];
+		const reports = [];
 		if (isSingle) {
 			reports.push(iReports.create('lcovonly'));
 			reports.push(iReports.create('json')); // {{SQL CARBON EDIT}} add json for code coverage merging

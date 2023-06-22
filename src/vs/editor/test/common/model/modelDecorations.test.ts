@@ -9,7 +9,7 @@ import { Position } from 'vs/editor/common/core/position';
 import { Range } from 'vs/editor/common/core/range';
 import { EndOfLineSequence, IModelDeltaDecoration, TrackedRangeStickiness } from 'vs/editor/common/model';
 import { TextModel } from 'vs/editor/common/model/textModel';
-import { createTextModel } from 'vs/editor/test/common/editorTestUtils';
+import { createTextModel } from 'vs/editor/test/common/testTextModel';
 
 // --------- utils
 
@@ -19,8 +19,8 @@ interface ILightWeightDecoration2 {
 }
 
 function modelHasDecorations(model: TextModel, decorations: ILightWeightDecoration2[]) {
-	let modelDecorations: ILightWeightDecoration2[] = [];
-	let actualDecorations = model.getAllDecorations();
+	const modelDecorations: ILightWeightDecoration2[] = [];
+	const actualDecorations = model.getAllDecorations();
 	for (let i = 0, len = actualDecorations.length; i < len; i++) {
 		modelDecorations.push({
 			range: actualDecorations[i].range,
@@ -45,14 +45,15 @@ function modelHasNoDecorations(model: TextModel) {
 function addDecoration(model: TextModel, startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number, className: string): string {
 	return model.changeDecorations((changeAccessor) => {
 		return changeAccessor.addDecoration(new Range(startLineNumber, startColumn, endLineNumber, endColumn), {
+			description: 'test',
 			className: className
 		});
 	})!;
 }
 
-function lineHasDecorations(model: TextModel, lineNumber: number, decorations: { start: number; end: number; className: string; }[]) {
-	let lineDecorations: Array<{ start: number; end: number; className: string | null | undefined; }> = [];
-	let decs = model.getLineDecorations(lineNumber);
+function lineHasDecorations(model: TextModel, lineNumber: number, decorations: { start: number; end: number; className: string }[]) {
+	const lineDecorations: Array<{ start: number; end: number; className: string | null | undefined }> = [];
+	const decs = model.getLineDecorations(lineNumber);
 	for (let i = 0, len = decs.length; i < len; i++) {
 		lineDecorations.push({
 			start: decs[i].range.startColumn,
@@ -121,11 +122,11 @@ suite('Editor Model - Model Decorations', () => {
 	test('full line decoration', () => {
 		addDecoration(thisModel, 1, 1, 2, 1, 'myType');
 
-		let line1Decorations = thisModel.getLineDecorations(1);
+		const line1Decorations = thisModel.getLineDecorations(1);
 		assert.strictEqual(line1Decorations.length, 1);
 		assert.strictEqual(line1Decorations[0].options.className, 'myType');
 
-		let line2Decorations = thisModel.getLineDecorations(1);
+		const line2Decorations = thisModel.getLineDecorations(1);
 		assert.strictEqual(line2Decorations.length, 1);
 		assert.strictEqual(line2Decorations[0].options.className, 'myType');
 
@@ -137,15 +138,15 @@ suite('Editor Model - Model Decorations', () => {
 	test('multiple line decoration', () => {
 		addDecoration(thisModel, 1, 2, 3, 2, 'myType');
 
-		let line1Decorations = thisModel.getLineDecorations(1);
+		const line1Decorations = thisModel.getLineDecorations(1);
 		assert.strictEqual(line1Decorations.length, 1);
 		assert.strictEqual(line1Decorations[0].options.className, 'myType');
 
-		let line2Decorations = thisModel.getLineDecorations(1);
+		const line2Decorations = thisModel.getLineDecorations(1);
 		assert.strictEqual(line2Decorations.length, 1);
 		assert.strictEqual(line2Decorations[0].options.className, 'myType');
 
-		let line3Decorations = thisModel.getLineDecorations(1);
+		const line3Decorations = thisModel.getLineDecorations(1);
 		assert.strictEqual(line3Decorations.length, 1);
 		assert.strictEqual(line3Decorations[0].options.className, 'myType');
 
@@ -156,7 +157,7 @@ suite('Editor Model - Model Decorations', () => {
 	// --------- removing, changing decorations
 
 	test('decoration gets removed', () => {
-		let decId = addDecoration(thisModel, 1, 2, 3, 2, 'myType');
+		const decId = addDecoration(thisModel, 1, 2, 3, 2, 'myType');
 		modelHasDecoration(thisModel, 1, 2, 3, 2, 'myType');
 		thisModel.changeDecorations((changeAccessor) => {
 			changeAccessor.removeDecoration(decId);
@@ -165,8 +166,8 @@ suite('Editor Model - Model Decorations', () => {
 	});
 
 	test('decorations get removed', () => {
-		let decId1 = addDecoration(thisModel, 1, 2, 3, 2, 'myType1');
-		let decId2 = addDecoration(thisModel, 1, 2, 3, 1, 'myType2');
+		const decId1 = addDecoration(thisModel, 1, 2, 3, 2, 'myType1');
+		const decId2 = addDecoration(thisModel, 1, 2, 3, 1, 'myType2');
 		modelHasDecorations(thisModel, [
 			{
 				range: new Range(1, 2, 3, 1),
@@ -193,7 +194,7 @@ suite('Editor Model - Model Decorations', () => {
 	});
 
 	test('decoration range can be changed', () => {
-		let decId = addDecoration(thisModel, 1, 2, 3, 2, 'myType');
+		const decId = addDecoration(thisModel, 1, 2, 3, 2, 'myType');
 		modelHasDecoration(thisModel, 1, 2, 3, 2, 'myType');
 		thisModel.changeDecorations((changeAccessor) => {
 			changeAccessor.changeDecoration(decId, new Range(1, 1, 1, 2));
@@ -214,7 +215,7 @@ suite('Editor Model - Model Decorations', () => {
 
 	test('decorations emit event on change', () => {
 		let listenerCalled = 0;
-		let decId = addDecoration(thisModel, 1, 2, 3, 2, 'myType');
+		const decId = addDecoration(thisModel, 1, 2, 3, 2, 'myType');
 		thisModel.onDidChangeDecorations((e) => {
 			listenerCalled++;
 		});
@@ -226,7 +227,7 @@ suite('Editor Model - Model Decorations', () => {
 
 	test('decorations emit event on remove', () => {
 		let listenerCalled = 0;
-		let decId = addDecoration(thisModel, 1, 2, 3, 2, 'myType');
+		const decId = addDecoration(thisModel, 1, 2, 3, 2, 'myType');
 		thisModel.onDidChangeDecorations((e) => {
 			listenerCalled++;
 		});
@@ -401,13 +402,13 @@ suite('Editor Model - Model Decorations', () => {
 	});
 
 	test('removeAllDecorationsWithOwnerId can be called after model dispose', () => {
-		let model = createTextModel('asd');
+		const model = createTextModel('asd');
 		model.dispose();
 		model.removeAllDecorationsWithOwnerId(1);
 	});
 
 	test('removeAllDecorationsWithOwnerId works', () => {
-		thisModel.deltaDecorations([], [{ range: new Range(1, 2, 4, 1), options: { className: 'myType1' } }], 1);
+		thisModel.deltaDecorations([], [{ range: new Range(1, 2, 4, 1), options: { description: 'test', className: 'myType1' } }], 1);
 		thisModel.removeAllDecorationsWithOwnerId(1);
 		modelHasNoDecorations(thisModel);
 	});
@@ -416,13 +417,13 @@ suite('Editor Model - Model Decorations', () => {
 suite('Decorations and editing', () => {
 
 	function _runTest(decRange: Range, stickiness: TrackedRangeStickiness, editRange: Range, editText: string, editForceMoveMarkers: boolean, expectedDecRange: Range, msg: string): void {
-		let model = createTextModel([
+		const model = createTextModel([
 			'My First Line',
 			'My Second Line',
 			'Third Line'
 		].join('\n'));
 
-		const id = model.deltaDecorations([], [{ range: decRange, options: { stickiness: stickiness } }])[0];
+		const id = model.deltaDecorations([], [{ range: decRange, options: { description: 'test', stickiness: stickiness } }])[0];
 		model.applyEdits([{
 			range: editRange,
 			text: editText,
@@ -1123,6 +1124,7 @@ suite('deltaDecorations', () => {
 		return {
 			range: dec.range,
 			options: {
+				description: 'test',
 				className: dec.id
 			}
 		};
@@ -1149,11 +1151,11 @@ suite('deltaDecorations', () => {
 
 	function testDeltaDecorations(text: string[], decorations: ILightWeightDecoration[], newDecorations: ILightWeightDecoration[]): void {
 
-		let model = createTextModel(text.join('\n'));
+		const model = createTextModel(text.join('\n'));
 
 		// Add initial decorations & assert they are added
-		let initialIds = model.deltaDecorations([], decorations.map(toModelDeltaDecoration));
-		let actualDecorations = readModelDecorations(model, initialIds);
+		const initialIds = model.deltaDecorations([], decorations.map(toModelDeltaDecoration));
+		const actualDecorations = readModelDecorations(model, initialIds);
 
 		assert.strictEqual(initialIds.length, decorations.length, 'returns expected cnt of ids');
 		assert.strictEqual(initialIds.length, model.getAllDecorations().length, 'does not leak decorations');
@@ -1161,8 +1163,8 @@ suite('deltaDecorations', () => {
 		decorations.sort((a, b) => strcmp(a.id, b.id));
 		assert.deepStrictEqual(actualDecorations, decorations);
 
-		let newIds = model.deltaDecorations(initialIds, newDecorations.map(toModelDeltaDecoration));
-		let actualNewDecorations = readModelDecorations(model, newIds);
+		const newIds = model.deltaDecorations(initialIds, newDecorations.map(toModelDeltaDecoration));
+		const actualNewDecorations = readModelDecorations(model, newIds);
 
 		assert.strictEqual(newIds.length, newDecorations.length, 'returns expected cnt of ids');
 		assert.strictEqual(newIds.length, model.getAllDecorations().length, 'does not leak decorations');
@@ -1178,12 +1180,12 @@ suite('deltaDecorations', () => {
 	}
 
 	test('result respects input', () => {
-		let model = createTextModel([
+		const model = createTextModel([
 			'Hello world,',
 			'How are you?'
 		].join('\n'));
 
-		let ids = model.deltaDecorations([], [
+		const ids = model.deltaDecorations([], [
 			toModelDeltaDecoration(decoration('a', 1, 1, 1, 12)),
 			toModelDeltaDecoration(decoration('b', 2, 1, 2, 13))
 		]);
@@ -1266,7 +1268,7 @@ suite('deltaDecorations', () => {
 
 	test('issue #4317: editor.setDecorations doesn\'t update the hover message', () => {
 
-		let model = createTextModel('Hello world!');
+		const model = createTextModel('Hello world!');
 
 		let ids = model.deltaDecorations([], [{
 			range: {
@@ -1276,6 +1278,7 @@ suite('deltaDecorations', () => {
 				endColumn: 1
 			},
 			options: {
+				description: 'test',
 				hoverMessage: { value: 'hello1' }
 			}
 		}]);
@@ -1288,11 +1291,12 @@ suite('deltaDecorations', () => {
 				endColumn: 1
 			},
 			options: {
+				description: 'test',
 				hoverMessage: { value: 'hello2' }
 			}
 		}]);
 
-		let actualDecoration = model.getDecorationOptions(ids[0]);
+		const actualDecoration = model.getDecorationOptions(ids[0]);
 
 		assert.deepStrictEqual(actualDecoration!.hoverMessage, { value: 'hello2' });
 
@@ -1300,21 +1304,23 @@ suite('deltaDecorations', () => {
 	});
 
 	test('model doesn\'t get confused with individual tracked ranges', () => {
-		let model = createTextModel([
+		const model = createTextModel([
 			'Hello world,',
 			'How are you?'
 		].join('\n'));
 
-		let trackedRangeId = model.changeDecorations((changeAcessor) => {
+		const trackedRangeId = model.changeDecorations((changeAcessor) => {
 			return changeAcessor.addDecoration(
 				{
 					startLineNumber: 1,
 					startColumn: 1,
 					endLineNumber: 1,
 					endColumn: 1
-				}, {
-				stickiness: TrackedRangeStickiness.AlwaysGrowsWhenTypingAtEdges
-			}
+				},
+				{
+					description: 'test',
+					stickiness: TrackedRangeStickiness.AlwaysGrowsWhenTypingAtEdges
+				}
 			);
 		});
 		model.changeDecorations((changeAccessor) => {
@@ -1341,7 +1347,7 @@ suite('deltaDecorations', () => {
 	});
 
 	test('issue #16922: Clicking on link doesn\'t seem to do anything', () => {
-		let model = createTextModel([
+		const model = createTextModel([
 			'Hello world,',
 			'How are you?',
 			'Fine.',
@@ -1349,21 +1355,21 @@ suite('deltaDecorations', () => {
 		].join('\n'));
 
 		model.deltaDecorations([], [
-			{ range: new Range(1, 1, 1, 1), options: { className: '1' } },
-			{ range: new Range(1, 13, 1, 13), options: { className: '2' } },
-			{ range: new Range(2, 1, 2, 1), options: { className: '3' } },
-			{ range: new Range(2, 1, 2, 4), options: { className: '4' } },
-			{ range: new Range(2, 8, 2, 13), options: { className: '5' } },
-			{ range: new Range(3, 1, 4, 6), options: { className: '6' } },
-			{ range: new Range(1, 1, 3, 6), options: { className: 'x1' } },
-			{ range: new Range(2, 5, 2, 8), options: { className: 'x2' } },
-			{ range: new Range(1, 1, 2, 8), options: { className: 'x3' } },
-			{ range: new Range(2, 5, 3, 1), options: { className: 'x4' } },
+			{ range: new Range(1, 1, 1, 1), options: { description: 'test', className: '1' } },
+			{ range: new Range(1, 13, 1, 13), options: { description: 'test', className: '2' } },
+			{ range: new Range(2, 1, 2, 1), options: { description: 'test', className: '3' } },
+			{ range: new Range(2, 1, 2, 4), options: { description: 'test', className: '4' } },
+			{ range: new Range(2, 8, 2, 13), options: { description: 'test', className: '5' } },
+			{ range: new Range(3, 1, 4, 6), options: { description: 'test', className: '6' } },
+			{ range: new Range(1, 1, 3, 6), options: { description: 'test', className: 'x1' } },
+			{ range: new Range(2, 5, 2, 8), options: { description: 'test', className: 'x2' } },
+			{ range: new Range(1, 1, 2, 8), options: { description: 'test', className: 'x3' } },
+			{ range: new Range(2, 5, 3, 1), options: { description: 'test', className: 'x4' } },
 		]);
 
-		let inRange = model.getDecorationsInRange(new Range(2, 6, 2, 6));
+		const inRange = model.getDecorationsInRange(new Range(2, 6, 2, 6));
 
-		let inRangeClassNames = inRange.map(d => d.options.className);
+		const inRangeClassNames = inRange.map(d => d.options.className);
 		inRangeClassNames.sort();
 		assert.deepStrictEqual(inRangeClassNames, ['x1', 'x2', 'x3', 'x4']);
 
@@ -1372,11 +1378,11 @@ suite('deltaDecorations', () => {
 
 	test('issue #41492: URL highlighting persists after pasting over url', () => {
 
-		let model = createTextModel([
+		const model = createTextModel([
 			'My First Line'
 		].join('\n'));
 
-		const id = model.deltaDecorations([], [{ range: new Range(1, 2, 1, 14), options: { stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges, collapseOnReplaceEdit: true } }])[0];
+		const id = model.deltaDecorations([], [{ range: new Range(1, 2, 1, 14), options: { description: 'test', stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges, collapseOnReplaceEdit: true } }])[0];
 		model.applyEdits([{
 			range: new Range(1, 1, 1, 14),
 			text: 'Some new text that is longer than the previous one',

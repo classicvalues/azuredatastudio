@@ -3,7 +3,7 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { MenuRegistry, ICommandAction } from 'vs/platform/actions/common/actions';
+import { MenuRegistry } from 'vs/platform/actions/common/actions';
 import { IDisposable } from 'vs/base/common/lifecycle';
 import { ITaskRegistry, ITaskHandler, ITask, ITaskHandlerDescription, ITaskOptions } from 'sql/workbench/services/tasks/common/tasks';
 import * as types from 'vs/base/common/types';
@@ -15,6 +15,7 @@ import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation
 import { IConnectionProfile } from 'sql/platform/connection/common/interfaces';
 import { IdGenerator } from 'vs/base/common/idGenerator';
 import { ThemeIcon } from 'vs/platform/theme/common/themeService';
+import { ICommandAction } from 'vs/platform/action/common/action';
 
 const ids = new IdGenerator('task-icon-');
 
@@ -61,7 +62,7 @@ export const TaskRegistry: ITaskRegistry = new class implements ITaskRegistry {
 			// TODO
 		} else if (item.icon?.dark) { // at the very least we need a dark icon
 			iconClass = ids.nextId();
-			createCSSRule(`.codicon.${iconClass}`, `background-image: ${asCSSUrl(item.icon.light || item.icon.dark)}`);
+			createCSSRule(`.codicon.${iconClass}, .hc-light .codicon.${iconClass}`, `background-image: ${asCSSUrl(item.icon.light || item.icon.dark)}`);
 			createCSSRule(`.vs-dark .codicon.${iconClass}, .hc-black .codicon.${iconClass}`, `background-image: ${asCSSUrl(item.icon.dark)}`);
 			this.taskIdToIconClassNameMap.set(item.id, iconClass);
 		}

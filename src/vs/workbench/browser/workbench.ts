@@ -7,20 +7,20 @@ import 'vs/workbench/browser/style';
 import { localize } from 'vs/nls';
 import { Event, Emitter, setGlobalLeakWarningThreshold } from 'vs/base/common/event';
 import { RunOnceScheduler, runWhenIdle, timeout } from 'vs/base/common/async';
-import { getZoomLevel, isFirefox, isSafari, isChrome, getPixelRatio } from 'vs/base/browser/browser';
+import { isFirefox, isSafari, isChrome, PixelRatio } from 'vs/base/browser/browser';
 import { mark } from 'vs/base/common/performance';
 import { onUnexpectedError, setUnexpectedErrorHandler } from 'vs/base/common/errors';
 import { Registry } from 'vs/platform/registry/common/platform';
 import { isWindows, isLinux, isWeb, isNative, isMacintosh } from 'vs/base/common/platform';
 import { IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions } from 'vs/workbench/common/contributions';
-import { IEditorInputFactoryRegistry, EditorExtensions } from 'vs/workbench/common/editor';
+import { IEditorFactoryRegistry, EditorExtensions } from 'vs/workbench/common/editor';
 import { getSingletonServiceDescriptors } from 'vs/platform/instantiation/common/extensions';
 import { Position, Parts, IWorkbenchLayoutService, positionToString } from 'vs/workbench/services/layout/browser/layoutService';
 import { IStorageService, WillSaveStateReason, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { ServiceCollection } from 'vs/platform/instantiation/common/serviceCollection';
-import { LifecyclePhase, ILifecycleService, WillShutdownEvent, BeforeShutdownEvent } from 'vs/workbench/services/lifecycle/common/lifecycle';
+import { LifecyclePhase, ILifecycleService, WillShutdownEvent } from 'vs/workbench/services/lifecycle/common/lifecycle';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { NotificationService } from 'vs/workbench/services/notification/common/notificationService';
 import { NotificationsCenter } from 'vs/workbench/browser/parts/notifications/notificationsCenter';
@@ -30,7 +30,7 @@ import { NotificationsTelemetry } from 'vs/workbench/browser/parts/notifications
 import { registerNotificationCommands } from 'vs/workbench/browser/parts/notifications/notificationsCommands';
 import { NotificationsToasts } from 'vs/workbench/browser/parts/notifications/notificationsToasts';
 import { setARIAContainer } from 'vs/base/browser/ui/aria/aria';
-import { readFontInfo, restoreFontInfo, serializeFontInfo } from 'vs/editor/browser/config/configuration';
+import { FontMeasurements } from 'vs/editor/browser/config/fontMeasurements';
 import { BareFontInfo } from 'vs/editor/common/config/fontInfo';
 import { ILogService } from 'vs/platform/log/common/log';
 import { toErrorMessage } from 'vs/base/common/errorMessage';
@@ -39,13 +39,18 @@ import { coalesce } from 'vs/base/common/arrays';
 import { InstantiationService } from 'vs/platform/instantiation/common/instantiationService';
 import { Layout } from 'vs/workbench/browser/layout';
 import { IHostService } from 'vs/workbench/services/host/browser/host';
-// {{SQL CARBON EDIT}}
+import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
 import { ILanguageAssociationRegistry, Extensions as LanguageExtensions } from 'sql/workbench/services/languageAssociation/common/languageAssociation';
 
-export class Workbench extends Layout {
+export interface IWorkbenchOptions {
 
-	private readonly _onBeforeShutdown = this._register(new Emitter<BeforeShutdownEvent>());
-	readonly onBeforeShutdown = this._onBeforeShutdown.event;
+	/**
+	 * Extra classes to be added to the workbench container.
+	 */
+	extraClasses?: string[];
+}
+
+export class Workbench extends Layout {
 
 	private readonly _onWillShutdown = this._register(new Emitter<WillShutdownEvent>());
 	readonly onWillShutdown = this._onWillShutdown.event;
@@ -55,6 +60,7 @@ export class Workbench extends Layout {
 
 	constructor(
 		parent: HTMLElement,
+		private readonly options: IWorkbenchOptions | undefined,
 		private readonly serviceCollection: ServiceCollection,
 		logService: ILogService
 	) {
@@ -105,7 +111,7 @@ export class Workbench extends Layout {
 		});
 	}
 
-	private previousUnexpectedError: { message: string | undefined, time: number } = { message: undefined, time: 0 };
+	private previousUnexpectedError: { message: string | undefined; time: number } = { message: undefined, time: 0 };
 	private handleUnexpectedError(error: unknown, logService: ILogService): void {
 		const message = toErrorMessage(error, true);
 		if (!message) {
@@ -138,20 +144,21 @@ export class Workbench extends Layout {
 				const storageService = accessor.get(IStorageService);
 				const configurationService = accessor.get(IConfigurationService);
 				const hostService = accessor.get(IHostService);
+				const dialogService = accessor.get(IDialogService);
 
 				// Layout
 				this.initLayout(accessor);
 
 				// Registries
 				Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).start(accessor);
-				Registry.as<IEditorInputFactoryRegistry>(EditorExtensions.EditorInputFactories).start(accessor);
+				Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor);
 				Registry.as<ILanguageAssociationRegistry>(LanguageExtensions.LanguageAssociations).start(accessor); // {{SQL CARBON EDIT}}
 
 				// Context Keys
 				this._register(instantiationService.createInstance(WorkbenchContextKeysHandler));
 
 				// Register Listeners
-				this.registerListeners(lifecycleService, storageService, configurationService, hostService);
+				this.registerListeners(lifecycleService, storageService, configurationService, hostService, dialogService);
 
 				// Render Workbench
 				this.renderWorkbench(instantiationService, accessor.get(INotificationService) as NotificationService, storageService, configurationService);
@@ -183,17 +190,14 @@ export class Workbench extends Layout {
 		//
 		// NOTE: Please do NOT register services here. Use `registerSingleton()`
 		//       from `workbench.common.main.ts` if the service is shared between
-		//       native and web or `workbench.sandbox.main.ts` if the service
-		//       is native only.
-		//
-		//       DO NOT add services to `workbench.desktop.main.ts`, always add
-		//       to `workbench.sandbox.main.ts` to support our Electron sandbox
+		//       desktop and web or `workbench.desktop.main.ts` if the service
+		//       is desktop only.
 		//
 		// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 		// All Contributed Services
 		const contributedServices = getSingletonServiceDescriptors();
-		for (let [id, descriptor] of contributedServices) {
+		for (const [id, descriptor] of contributedServices) {
 			serviceCollection.set(id, descriptor);
 		}
 
@@ -206,9 +210,7 @@ export class Workbench extends Layout {
 			// TODO@Sandeep debt around cyclic dependencies
 			const configurationService = accessor.get(IConfigurationService) as any;
 			if (typeof configurationService.acquireInstantiationService === 'function') {
-				setTimeout(() => {
-					configurationService.acquireInstantiationService(instantiationService);
-				}, 0);
+				configurationService.acquireInstantiationService(instantiationService);
 			}
 
 			// Signal to lifecycle that services are set
@@ -218,7 +220,7 @@ export class Workbench extends Layout {
 		return instantiationService;
 	}
 
-	private registerListeners(lifecycleService: ILifecycleService, storageService: IStorageService, configurationService: IConfigurationService, hostService: IHostService): void {
+	private registerListeners(lifecycleService: ILifecycleService, storageService: IStorageService, configurationService: IConfigurationService, hostService: IHostService, dialogService: IDialogService): void {
 
 		// Configuration changes
 		this._register(configurationService.onDidChangeConfiguration(() => this.setFontAliasing(configurationService)));
@@ -235,7 +237,6 @@ export class Workbench extends Layout {
 		}
 
 		// Lifecycle
-		this._register(lifecycleService.onBeforeShutdown(event => this._onBeforeShutdown.fire(event)));
 		this._register(lifecycleService.onWillShutdown(event => this._onWillShutdown.fire(event)));
 		this._register(lifecycleService.onDidShutdown(() => {
 			this._onDidShutdown.fire();
@@ -252,6 +253,10 @@ export class Workbench extends Layout {
 				storageService.flush();
 			}
 		}));
+
+		// Dialogs showing/hiding
+		this._register(dialogService.onWillShowDialog(() => this.container.classList.add('modal-dialog-visible')));
+		this._register(dialogService.onDidShowDialog(() => this.container.classList.remove('modal-dialog-visible')));
 	}
 
 	private fontAliasing: 'default' | 'antialiased' | 'none' | 'auto' | undefined;
@@ -278,37 +283,25 @@ export class Workbench extends Layout {
 	}
 
 	private restoreFontInfo(storageService: IStorageService, configurationService: IConfigurationService): void {
-
-		// Restore (native: use storage service, web: use browser specific local storage)
-		const storedFontInfoRaw = isNative ? storageService.get('editorFontInfo', StorageScope.GLOBAL) : window.localStorage.getItem('vscode.editorFontInfo');
+		const storedFontInfoRaw = storageService.get('editorFontInfo', StorageScope.APPLICATION);
 		if (storedFontInfoRaw) {
 			try {
 				const storedFontInfo = JSON.parse(storedFontInfoRaw);
 				if (Array.isArray(storedFontInfo)) {
-					restoreFontInfo(storedFontInfo);
+					FontMeasurements.restoreFontInfo(storedFontInfo);
 				}
 			} catch (err) {
 				/* ignore */
 			}
 		}
 
-		readFontInfo(BareFontInfo.createFromRawSettings(configurationService.getValue('editor'), getZoomLevel(), getPixelRatio()));
+		FontMeasurements.readFontInfo(BareFontInfo.createFromRawSettings(configurationService.getValue('editor'), PixelRatio.value));
 	}
 
 	private storeFontInfo(storageService: IStorageService): void {
-		const serializedFontInfo = serializeFontInfo();
+		const serializedFontInfo = FontMeasurements.serializeFontInfo();
 		if (serializedFontInfo) {
-			const serializedFontInfoRaw = JSON.stringify(serializedFontInfo);
-
-			// Font info is very specific to the machine the workbench runs
-			// on. As such, in the web, we prefer to store this info in
-			// local storage and not global storage because it would not make
-			// much sense to synchronize to other machines.
-			if (isNative) {
-				storageService.store('editorFontInfo', serializedFontInfoRaw, StorageScope.GLOBAL, StorageTarget.MACHINE);
-			} else {
-				window.localStorage.setItem('vscode.editorFontInfo', serializedFontInfoRaw);
-			}
+			storageService.store('editorFontInfo', JSON.stringify(serializedFontInfo), StorageScope.APPLICATION, StorageTarget.MACHINE);
 		}
 	}
 
@@ -324,7 +317,8 @@ export class Workbench extends Layout {
 			platformClass,
 			isWeb ? 'web' : undefined,
 			isChrome ? 'chromium' : isFirefox ? 'firefox' : isSafari ? 'safari' : undefined,
-			...this.getLayoutClasses()
+			...this.getLayoutClasses(),
+			...(this.options?.extraClasses ? this.options.extraClasses : [])
 		]);
 
 		this.container.classList.add(...workbenchClasses);
@@ -341,18 +335,20 @@ export class Workbench extends Layout {
 		this.restoreFontInfo(storageService, configurationService);
 
 		// Create Parts
-		[
+		for (const { id, role, classes, options } of [
 			{ id: Parts.TITLEBAR_PART, role: 'contentinfo', classes: ['titlebar'] },
-			{ id: Parts.ACTIVITYBAR_PART, role: 'none', classes: ['activitybar', this.state.sideBar.position === Position.LEFT ? 'left' : 'right'] }, // Use role 'none' for some parts to make screen readers less chatty #114892
-			{ id: Parts.SIDEBAR_PART, role: 'none', classes: ['sidebar', this.state.sideBar.position === Position.LEFT ? 'left' : 'right'] },
-			{ id: Parts.EDITOR_PART, role: 'main', classes: ['editor'], options: { restorePreviousState: this.state.editor.restoreEditors } },
-			{ id: Parts.PANEL_PART, role: 'none', classes: ['panel', positionToString(this.state.panel.position)] },
+			{ id: Parts.BANNER_PART, role: 'banner', classes: ['banner'] },
+			{ id: Parts.ACTIVITYBAR_PART, role: 'none', classes: ['activitybar', this.getSideBarPosition() === Position.LEFT ? 'left' : 'right'] }, // Use role 'none' for some parts to make screen readers less chatty #114892
+			{ id: Parts.SIDEBAR_PART, role: 'none', classes: ['sidebar', this.getSideBarPosition() === Position.LEFT ? 'left' : 'right'] },
+			{ id: Parts.EDITOR_PART, role: 'main', classes: ['editor'], options: { restorePreviousState: this.willRestoreEditors() } },
+			{ id: Parts.PANEL_PART, role: 'none', classes: ['panel', 'basepanel', positionToString(this.getPanelPosition())] },
+			{ id: Parts.AUXILIARYBAR_PART, role: 'none', classes: ['auxiliarybar', 'basepanel', this.getSideBarPosition() === Position.LEFT ? 'right' : 'left'] },
 			{ id: Parts.STATUSBAR_PART, role: 'status', classes: ['statusbar'] }
-		].forEach(({ id, role, classes, options }) => {
+		]) {
 			const partContainer = this.createPart(id, role, classes);
 
 			this.getPart(id).create(partContainer, options);
-		});
+		}
 
 		// Notification Handlers
 		this.createNotificationsHandlers(instantiationService, notificationService);
@@ -411,7 +407,7 @@ export class Workbench extends Layout {
 		}
 
 		// Transition into restored phase after layout has restored
-		// but do not wait indefinitly on this to account for slow
+		// but do not wait indefinitely on this to account for slow
 		// editors restoring. Since the workbench is fully functional
 		// even when the visible editors have not resolved, we still
 		// want contributions on the `Restored` phase to work before

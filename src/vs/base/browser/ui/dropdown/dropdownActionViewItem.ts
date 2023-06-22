@@ -3,19 +3,20 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./dropdown';
-import { Action, IAction, IActionRunner } from 'vs/base/common/actions';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { AnchorAlignment } from 'vs/base/browser/ui/contextview/contextview';
-import { KeyCode, ResolvedKeybinding } from 'vs/base/common/keyCodes';
-import { append, $, addDisposableListener, EventType } from 'vs/base/browser/dom';
-import { Emitter } from 'vs/base/common/event';
-import { ActionViewItem, BaseActionViewItem, IActionViewItemOptions, IBaseActionViewItemOptions } from 'vs/base/browser/ui/actionbar/actionViewItems';
-import { IActionProvider, DropdownMenu, IDropdownMenuOptions, ILabelRenderer } from 'vs/base/browser/ui/dropdown/dropdown';
 import { IContextMenuProvider } from 'vs/base/browser/contextmenu';
-import { Codicon } from 'vs/base/common/codicons';
-import { IActionViewItemProvider } from 'vs/base/browser/ui/actionbar/actionbar';
+import { $, addDisposableListener, append, EventType } from 'vs/base/browser/dom';
 import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
+import { IActionViewItemProvider } from 'vs/base/browser/ui/actionbar/actionbar';
+import { ActionViewItem, BaseActionViewItem, IActionViewItemOptions, IBaseActionViewItemOptions } from 'vs/base/browser/ui/actionbar/actionViewItems';
+import { AnchorAlignment } from 'vs/base/browser/ui/contextview/contextview';
+import { DropdownMenu, IActionProvider, IDropdownMenuOptions, ILabelRenderer } from 'vs/base/browser/ui/dropdown/dropdown';
+import { Action, IAction, IActionRunner } from 'vs/base/common/actions';
+import { Codicon } from 'vs/base/common/codicons';
+import { Emitter } from 'vs/base/common/event';
+import { KeyCode } from 'vs/base/common/keyCodes';
+import { ResolvedKeybinding } from 'vs/base/common/keybindings';
+import { IDisposable } from 'vs/base/common/lifecycle';
+import 'vs/css!./dropdown';
 
 export interface IKeybindingProvider {
 	(action: IAction): ResolvedKeybinding | undefined;
@@ -87,6 +88,7 @@ export class DropdownMenuActionViewItem extends BaseActionViewItem {
 			this.element.setAttribute('aria-haspopup', 'true');
 			this.element.setAttribute('aria-expanded', 'false');
 			this.element.title = this._action.label || '';
+			this.element.ariaLabel = this._action.label || '';
 
 			return null;
 		};
@@ -124,7 +126,20 @@ export class DropdownMenuActionViewItem extends BaseActionViewItem {
 			};
 		}
 
+		this.updateTooltip();
 		this.updateEnabled();
+	}
+
+	override getTooltip(): string | undefined {
+		let title: string | null = null;
+
+		if (this.getAction().tooltip) {
+			title = this.getAction().tooltip;
+		} else if (this.getAction().label) {
+			title = this.getAction().label;
+		}
+
+		return title ?? undefined;
 	}
 
 	override setActionContext(newContext: unknown): void {
@@ -177,16 +192,17 @@ export class ActionWithDropdownActionViewItem extends ActionViewItem {
 			const menuActionsProvider = {
 				getActions: () => {
 					const actionsProvider = (<IActionWithDropdownActionViewItemOptions>this.options).menuActionsOrProvider;
-					return [this._action, ...(Array.isArray(actionsProvider)
-						? actionsProvider
-						: (actionsProvider as IActionProvider).getActions()) // TODO: microsoft/TypeScript#42768
-					];
+					return Array.isArray(actionsProvider) ? actionsProvider : (actionsProvider as IActionProvider).getActions(); // TODO: microsoft/TypeScript#42768
 				}
 			};
 			this.dropdownMenuActionViewItem = new DropdownMenuActionViewItem(this._register(new Action('dropdownAction', undefined)), menuActionsProvider, this.contextMenuProvider, { classNames: ['dropdown', ...Codicon.dropDownButton.classNamesArray, ...(<IActionWithDropdownActionViewItemOptions>this.options).menuActionClassNames || []] });
 			this.dropdownMenuActionViewItem.render(this.element);
 
 			this._register(addDisposableListener(this.element, EventType.KEY_DOWN, e => {
+				// {{SQL CARBON EDIT}} If we don't have any items then the dropdown is hidden so don't try to focus it #20877
+				if (menuActionsProvider.getActions().length === 0) {
+					return;
+				}
 				const event = new StandardKeyboardEvent(e);
 				let handled: boolean = false;
 				if (this.dropdownMenuActionViewItem?.isFocused() && event.equals(KeyCode.LeftArrow)) {

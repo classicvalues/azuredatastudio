@@ -7,30 +7,36 @@ import * as azdata from 'azdata';
 import { AppContext } from './appContext';
 import { AzureResourceServiceNames } from './azureResource/constants';
 import { IAzureResourceSubscriptionService } from './azureResource/interfaces';
-import { azureResource } from 'azureResource';
+import { AzureAccountProperties, azureResource } from 'azurecore';
 import * as azureResourceUtils from './azureResource/utils';
 import * as constants from './constants';
 import * as loc from './localizedConstants';
 import * as utils from './utils';
+import { Logger } from './utils/Logger';
 
 const typesClause = [
 	azureResource.AzureResourceType.sqlDatabase,
 	azureResource.AzureResourceType.sqlServer,
+	azureResource.AzureResourceType.sqlSynapseWorkspace,
+	azureResource.AzureResourceType.sqlSynapseSqlPool,
 	azureResource.AzureResourceType.sqlManagedInstance,
 	azureResource.AzureResourceType.postgresServer,
+	azureResource.AzureResourceType.postgresFlexibleServer,
 	azureResource.AzureResourceType.azureArcService,
 	azureResource.AzureResourceType.azureArcSqlManagedInstance,
 	azureResource.AzureResourceType.azureArcPostgresServer
 ].map(type => `type == "${type}"`).join(' or ');
 
 export class AzureDataGridProvider implements azdata.DataGridProvider {
-	constructor(private _appContext: AppContext) { }
+	constructor(private _appContext: AppContext,
+		private readonly authLibrary: string) { }
 
 	public providerId = constants.dataGridProviderId;
 	public title = loc.azureResourcesGridTitle;
 
 	public async getDataGridItems() {
-		const accounts = await azdata.accounts.getAllAccounts();
+		let accounts: azdata.Account[];
+		accounts = azureResourceUtils.filterAccounts(await azdata.accounts.getAllAccounts(), this.authLibrary);
 		const items: any[] = [];
 		await Promise.all(accounts.map(async (account) => {
 			await Promise.all(account.properties.tenants.map(async (tenant: { id: string; }) => {
@@ -51,15 +57,15 @@ export class AzureDataGridProvider implements azdata.DataGridProvider {
 									type: item.type,
 									typeDisplayName: utils.getResourceTypeDisplayName(item.type),
 									iconPath: utils.getResourceTypeIcon(this._appContext, item.type),
-									portalEndpoint: account.properties.providerSettings.settings.portalEndpoint
+									portalEndpoint: (account.properties as AzureAccountProperties).providerSettings.settings.portalEndpoint
 								};
 							});
 						items.push(...newItems);
 					} catch (err) {
-						console.log(err);
+						Logger.error(err);
 					}
 				} catch (err) {
-					console.log(err);
+					Logger.error(err);
 				}
 			}));
 		}));
