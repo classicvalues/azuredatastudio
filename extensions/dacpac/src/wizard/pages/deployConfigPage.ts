@@ -31,7 +31,7 @@ export class DeployConfigPage extends DacFxConfigPage {
 		this.databaseComponent = await this.createDatabaseTextBox(loc.databaseName);
 		this.databaseDropdownComponent = await this.createDeployDatabaseDropdown();
 		this.databaseDropdownComponent.title = loc.databaseName;
-		let radioButtons = await this.createRadiobuttons();
+		let radioButtons = this.createRadiobuttons();
 
 		this.formBuilder = this.view.modelBuilder.formContainer()
 			.withFormItems(
@@ -137,7 +137,8 @@ export class DeployConfigPage extends DacFxConfigPage {
 	protected async createDeployDatabaseDropdown(): Promise<azdata.FormComponent> {
 		const targetDatabaseTitle = loc.databaseName;
 		this.databaseDropdown = this.view.modelBuilder.dropDown().withProps({
-			ariaLabel: targetDatabaseTitle
+			ariaLabel: targetDatabaseTitle,
+			required: true
 		}).component();
 
 		//Handle database changes

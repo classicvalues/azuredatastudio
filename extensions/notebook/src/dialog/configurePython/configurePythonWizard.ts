@@ -13,6 +13,8 @@ import * as utils from '../../common/utils';
 import { promises as fs } from 'fs';
 import { Deferred } from '../../common/promise';
 import { PythonPathLookup } from '../pythonPathLookup';
+import { linuxPlatform, macPlatform } from '../../common/constants';
+import * as os from 'os';
 
 const localize = nls.loadMessageBundle();
 
@@ -56,6 +58,10 @@ export class ConfigurePythonWizard {
 			pythonLocation: JupyterServerInstallation.getPythonPathSetting(),
 			useExistingPython: JupyterServerInstallation.getExistingPythonSetting()
 		};
+		// Default to using existing Python on Mac and Linux, since they have python installed by default
+		if (os.platform() === macPlatform || os.platform() === linuxPlatform) {
+			this.model.useExistingPython = true;
+		}
 
 		let pages: Map<number, BasePage> = new Map<number, BasePage>();
 
@@ -99,6 +105,10 @@ export class ConfigurePythonWizard {
 		});
 
 		this._wizard.registerNavigationValidator(async (info) => {
+			// The pages have not been registered yet
+			if (pages.size === 0) {
+				return false;
+			}
 			let lastPage = pages.get(info.lastPage);
 			let newPage = pages.get(info.newPage);
 
@@ -126,6 +136,13 @@ export class ConfigurePythonWizard {
 
 	public async close(): Promise<void> {
 		await this._wizard.close();
+	}
+
+	public showInfoMessage(errorMsg: string) {
+		this._wizard.message = <azdata.window.DialogMessage>{
+			text: errorMsg,
+			level: azdata.window.MessageLevel.Information
+		};
 	}
 
 	public showErrorMessage(errorMsg: string) {

@@ -10,11 +10,12 @@ import { AccountProviderStub, TestAccountManagementService } from 'sql/platform/
 import { ExtHostAccountManagement } from 'sql/workbench/api/common/extHostAccountManagement';
 import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
 import { IRPCProtocol } from 'vs/workbench/services/extensions/common/proxyIdentifier';
-import { SqlMainContext } from 'sql/workbench/api/common/sqlExtHost.protocol';
 import { MainThreadAccountManagement } from 'sql/workbench/api/browser/mainThreadAccountManagement';
-import { IAccountManagementService, AzureResource } from 'sql/platform/accounts/common/interfaces';
+import { IAccountManagementService } from 'sql/platform/accounts/common/interfaces';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { TestRPCProtocol } from 'vs/workbench/test/browser/api/testRPCProtocol';
+import { AzureResource } from 'sql/workbench/api/common/sqlExtHostTypes';
+import { TestRPCProtocol } from 'vs/workbench/api/test/common/testRPCProtocol';
+import { SqlMainContext } from 'vs/workbench/api/common/extHost.protocol';
 
 const IRPCProtocol = createDecorator<IRPCProtocol>('rpcProtocol');
 
@@ -65,7 +66,7 @@ suite('ExtHostAccountManagement', () => {
 		let extHost = new ExtHostAccountManagement(threadService);
 
 		// Then: There shouldn't be any account providers registered
-		assert.equal(extHost.getProviderCount(), 0);
+		assert.strictEqual(extHost.getProviderCount(), 0);
 	});
 
 	// REGISTER TESTS //////////////////////////////////////////////////////
@@ -78,7 +79,7 @@ suite('ExtHostAccountManagement', () => {
 		extHost.$registerAccountProvider(mockAccountMetadata, mockProvider.object);
 
 		// Then: The account provider should be registered
-		assert.equal(extHost.getProviderCount(), 1);
+		assert.strictEqual(extHost.getProviderCount(), 1);
 	});
 
 	test('Register Account Provider - Account Provider Already Registered', () => {
@@ -95,7 +96,7 @@ suite('ExtHostAccountManagement', () => {
 		});
 
 		// ... There should only be one account provider
-		assert.equal(extHost.getProviderCount(), 1);
+		assert.strictEqual(extHost.getProviderCount(), 1);
 	});
 
 	// TODO: Test for unregistering a provider
@@ -310,7 +311,7 @@ suite('ExtHostAccountManagement', () => {
 				);
 
 				assert.ok(Array.isArray(accounts));
-				assert.equal(accounts.length, expectedAccounts.length);
+				assert.strictEqual(accounts.length, expectedAccounts.length);
 				assert.deepStrictEqual(accounts, expectedAccounts);
 			});
 	});

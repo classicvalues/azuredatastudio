@@ -20,6 +20,8 @@ import { Editors } from './editors';
 import { Code } from './code';
 import { Terminal } from './terminal';
 import { Notebook } from './notebook';
+import { Localization } from './localization';
+import { Task } from './task';
 
 // {{SQL CARBON EDIT}}
 import { ConnectionDialog } from './sql/connectionDialog';
@@ -28,9 +30,11 @@ import { QueryEditors } from './sql/queryEditors';
 import { QueryEditor } from './sql/queryEditor';
 import { Notebook as SqlNotebook } from './sql/notebook';
 import { ConfigurePythonDialog } from './sql/configurePythonDialog';
+import { ManagePackagesDialog } from './sql/managePackagesDialog';
 import { CreateBookDialog } from './sql/createBookDialog';
 import { NotificationToast } from './sql/notificationToast';
 import { AddRemoteBookDialog } from './sql/addRemoteBookDialog';
+import { TaskPanel } from './sql/taskPanel';
 // {{END}}
 
 export interface Commands {
@@ -55,6 +59,8 @@ export class Workbench {
 	readonly keybindingsEditor: KeybindingsEditor;
 	readonly terminal: Terminal;
 	readonly notebook: Notebook;
+	readonly localization: Localization;
+	readonly task: Task;
 
 	// {{SQL CARBON EDIT}}
 	readonly connectionDialog: ConnectionDialog;
@@ -64,15 +70,17 @@ export class Workbench {
 	readonly sqlNotebook: SqlNotebook;
 	readonly createBookDialog: CreateBookDialog;
 	readonly configurePythonDialog: ConfigurePythonDialog;
+	readonly managePackagesDialog: ManagePackagesDialog;
 	readonly notificationToast: NotificationToast;
 	readonly addRemoteBookDialog: AddRemoteBookDialog;
+	readonly taskPanel: TaskPanel;
 	// {{END}}
 
-	constructor(code: Code, userDataPath: string) {
+	constructor(code: Code) {
 		this.editors = new Editors(code);
 		this.quickinput = new QuickInput(code);
 		this.quickaccess = new QuickAccess(code, this.editors, this.quickinput);
-		this.explorer = new Explorer(code, this.editors);
+		this.explorer = new Explorer(code);
 		this.activitybar = new ActivityBar(code);
 		this.search = new Search(code);
 		this.extensions = new Extensions(code);
@@ -81,9 +89,9 @@ export class Workbench {
 		this.debug = new Debug(code, this.quickaccess, this.editors, this.editor);
 		this.statusbar = new StatusBar(code);
 		this.problems = new Problems(code, this.quickaccess);
-		this.settingsEditor = new SettingsEditor(code, userDataPath, this.editors, this.editor, this.quickaccess);
+		this.settingsEditor = new SettingsEditor(code, this.editors, this.editor, this.quickaccess);
 		this.keybindingsEditor = new KeybindingsEditor(code);
-		this.terminal = new Terminal(code, this.quickaccess);
+		this.terminal = new Terminal(code, this.quickaccess, this.quickinput);
 		// {{SQL CARBON EDIT}}
 		this.notificationToast = new NotificationToast(code);
 		this.connectionDialog = new ConnectionDialog(code);
@@ -93,8 +101,12 @@ export class Workbench {
 		this.sqlNotebook = new SqlNotebook(code, this.quickaccess, this.quickinput, this.editors);
 		this.createBookDialog = new CreateBookDialog(code);
 		this.configurePythonDialog = new ConfigurePythonDialog(code);
+		this.managePackagesDialog = new ManagePackagesDialog(code, this.quickinput);
 		this.addRemoteBookDialog = new AddRemoteBookDialog(code);
+		this.taskPanel = new TaskPanel(code, this.quickaccess);
 		// {{END}}
-		this.notebook = new Notebook(this.quickaccess, code);
+		this.notebook = new Notebook(this.quickaccess, this.quickinput, code);
+		this.localization = new Localization(code);
+		this.task = new Task(code, this.editor, this.editors, this.quickaccess, this.quickinput, this.terminal);
 	}
 }

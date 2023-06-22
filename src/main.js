@@ -21,19 +21,16 @@ const os = require('os');
 const bootstrap = require('./bootstrap');
 const bootstrapNode = require('./bootstrap-node');
 const { getUserDataPath } = require('./vs/platform/environment/node/userDataPath');
+const { stripComments } = require('./vs/base/common/stripComments');
 /** @type {Partial<IProductConfiguration>} */
 const product = require('../product.json');
 const { app, protocol, crashReporter } = require('electron');
-
-// Disable render process reuse, we still have
-// non-context aware native modules in the renderer.
-app.allowRendererProcessReuse = false;
 
 // Enable portable support
 const portable = bootstrapNode.configurePortable(product);
 
 // Enable ASAR support
-bootstrap.enableASARSupport(undefined);
+bootstrap.enableASARSupport();
 
 // Set userData path before app 'ready' event
 const args = parseCLIArgs();
@@ -47,12 +44,26 @@ if (args['nogpu']) { // {{SQL CARBON EDIT}}
 const userDataPath = getUserDataPath(args);
 app.setPath('userData', userDataPath);
 
+// Resolve code cache path
+const codeCachePath = getCodeCachePath();
+
 // Configure static command line arguments
 const argvConfig = configureCommandlineSwitchesSync(args);
 
 // Configure crash reporter
 perf.mark('code/willStartCrashReporter');
-configureCrashReporter();
+// If a crash-reporter-directory is specified we store the crash reports
+// in the specified directory and don't upload them to the crash server.
+//
+// Appcenter crash reporting is enabled if
+// * enable-crash-reporter runtime argument is set to 'true'
+// * --disable-crash-reporter command line parameter is not set
+//
+// Disable crash reporting in all other cases.
+if (args['crash-reporter-directory'] ||
+	(argvConfig['enable-crash-reporter'] && !args['disable-crash-reporter'])) {
+	configureCrashReporter();
+}
 perf.mark('code/didStartCrashReporter');
 
 // Set logs path before app 'ready' event if running portable
@@ -78,14 +89,11 @@ protocol.registerSchemesAsPrivileged([
 // Global app listeners
 registerListeners();
 
-// Cached data
-const nodeCachedDataDir = getNodeCachedDir();
-
 /**
  * Support user defined locale: load it early before app('ready')
  * to have more things running in parallel.
  *
- * @type {Promise<NLSConfiguration> | undefined}
+ * @type {Promise<NLSConfiguration> | undefined}
  */
 let nlsConfigurationPromise = undefined;
 
@@ -115,14 +123,14 @@ app.once('ready', function () {
 /**
  * Main startup routine
  *
- * @param {string | undefined} cachedDataDir
+ * @param {string | undefined} codeCachePath
  * @param {NLSConfiguration} nlsConfig
  */
-function startup(cachedDataDir, nlsConfig) {
+function startup(codeCachePath, nlsConfig) {
 	nlsConfig._languagePackSupport = true;
 
 	process.env['VSCODE_NLS_CONFIG'] = JSON.stringify(nlsConfig);
-	process.env['VSCODE_NODE_CACHED_DATA_DIR'] = cachedDataDir || '';
+	process.env['VSCODE_CODE_CACHE_PATH'] = codeCachePath || '';
 
 	// Load main in AMD
 	perf.mark('code/willLoadMainBundle');
@@ -135,9 +143,9 @@ async function onReady() {
 	perf.mark('code/mainAppReady');
 
 	try {
-		const [cachedDataDir, nlsConfig] = await Promise.all([nodeCachedDataDir.ensureExists(), resolveNlsConfiguration()]);
+		const [, nlsConfig] = await Promise.all([mkdirpIgnoreError(codeCachePath), resolveNlsConfiguration()]);
 
-		startup(cachedDataDir, nlsConfig);
+		startup(codeCachePath, nlsConfig);
 	} catch (error) {
 		console.error(error);
 	}
@@ -151,9 +159,6 @@ function configureCommandlineSwitchesSync(cliArgs) {
 
 		// alias from us for --disable-gpu
 		'disable-hardware-acceleration',
-
-		// provided by Electron
-		'disable-color-correct-rendering',
 
 		// override for the color profile to use
 		'force-color-profile'
@@ -170,18 +175,12 @@ function configureCommandlineSwitchesSync(cliArgs) {
 		// Persistently enable proposed api via argv.json: https://github.com/microsoft/vscode/issues/99775
 		'enable-proposed-api',
 
-		// TODO@sandbox remove me once testing is done on `vscode-file` protocol
-		// (all traces of `enable-browser-code-loading` and `VSCODE_BROWSER_CODE_LOADING`)
-		'enable-browser-code-loading',
-
 		// Log level to use. Default is 'info'. Allowed values are 'critical', 'error', 'warn', 'info', 'debug', 'trace', 'off'.
 		'log-level'
 	];
 
 	// Read argv config
 	const argvConfig = readArgvConfigSync();
-
-	let browserCodeLoadingStrategy = undefined;
 
 	Object.keys(argvConfig).forEach(argvKey => {
 		const argvValue = argvConfig[argvKey];
@@ -217,14 +216,6 @@ function configureCommandlineSwitchesSync(cliArgs) {
 					}
 					break;
 
-				case 'enable-browser-code-loading':
-					if (argvValue === false) {
-						browserCodeLoadingStrategy = undefined;
-					} else if (typeof argvValue === 'string') {
-						browserCodeLoadingStrategy = argvValue;
-					}
-					break;
-
 				case 'log-level':
 					if (typeof argvValue === 'string') {
 						process.argv.push('--log', argvValue);
@@ -238,11 +229,6 @@ function configureCommandlineSwitchesSync(cliArgs) {
 	const jsFlags = getJSFlags(cliArgs);
 	if (jsFlags) {
 		app.commandLine.appendSwitch('js-flags', jsFlags);
-	}
-
-	// Configure vscode-file:// code loading environment
-	if (cliArgs.__sandbox || browserCodeLoadingStrategy) {
-		process.env['VSCODE_BROWSER_CODE_LOADING'] = browserCodeLoadingStrategy || 'bypassHeatCheck';
 	}
 
 	return argvConfig;
@@ -265,9 +251,7 @@ function readArgvConfigSync() {
 
 	// Fallback to default
 	if (!argvConfig) {
-		argvConfig = {
-			'disable-color-correct-rendering': true // Force pre-Chrome-60 color profile handling (for https://github.com/Microsoft/vscode/issues/51791)
-		};
+		argvConfig = {};
 	}
 
 	return argvConfig;
@@ -297,11 +281,7 @@ function createDefaultArgvConfigSync(argvConfigPath) {
 			'{',
 			'	// Use software rendering instead of hardware accelerated rendering.',
 			'	// This can help in cases where you see rendering issues in VS Code.',
-			'	// "disable-hardware-acceleration": true,',
-			'',
-			'	// Enabled by default by VS Code to resolve color issues in the renderer',
-			'	// See https://github.com/Microsoft/vscode/issues/51791 for details',
-			'	"disable-color-correct-rendering": true',
+			'	// "disable-hardware-acceleration": true',
 			'}'
 		];
 
@@ -328,8 +308,6 @@ function getArgvConfigPath() {
 
 function configureCrashReporter() {
 
-	// If a crash-reporter-directory is specified we store the crash reports
-	// in the specified directory and don't upload them to the crash server.
 	let crashReporterDirectory = args['crash-reporter-directory'];
 	let submitURL = '';
 	if (crashReporterDirectory) {
@@ -342,7 +320,7 @@ function configureCrashReporter() {
 
 		if (!fs.existsSync(crashReporterDirectory)) {
 			try {
-				fs.mkdirSync(crashReporterDirectory);
+				fs.mkdirSync(crashReporterDirectory, { recursive: true });
 			} catch (error) {
 				console.error(`The path '${crashReporterDirectory}' specified for --crash-reporter-directory does not seem to exist or cannot be created.`);
 				app.exit(1);
@@ -358,11 +336,7 @@ function configureCrashReporter() {
 	// Otherwise we configure the crash reporter from product.json
 	else {
 		const appCenter = product.appCenter;
-		// Disable Appcenter crash reporting if
-		// * --crash-reporter-directory is specified
-		// * enable-crash-reporter runtime argument is set to 'false'
-		// * --disable-crash-reporter command line parameter is set
-		if (appCenter && argvConfig['enable-crash-reporter'] && !args['disable-crash-reporter']) {
+		if (appCenter) {
 			const isWindows = (process.platform === 'win32');
 			const isLinux = (process.platform === 'linux');
 			const isDarwin = (process.platform === 'darwin');
@@ -415,15 +389,27 @@ function configureCrashReporter() {
 	}
 
 	// Start crash reporter for all processes
+	/* {{SQL CARBON EDIT}} Disable crash reporting until we're actually set up to use it
 	const productName = (product.crashReporter ? product.crashReporter.productName : undefined) || product.nameShort;
 	const companyName = (product.crashReporter ? product.crashReporter.companyName : undefined) || 'Microsoft';
-	crashReporter.start({
-		companyName: companyName,
-		productName: process.env['VSCODE_DEV'] ? `${productName} Dev` : productName,
-		submitURL,
-		uploadToServer: !crashReporterDirectory,
-		compress: true
-	});
+	if (process.env['VSCODE_DEV']) {
+		crashReporter.start({
+			companyName: companyName,
+			productName: process.env['VSCODE_DEV'] ? `${productName} Dev` : productName,
+			submitURL,
+			uploadToServer: false,
+			compress: true
+		});
+	} else {
+		crashReporter.start({
+			companyName: companyName,
+			productName: productName,
+			submitURL,
+			uploadToServer: !crashReporterDirectory,
+			compress: true
+		});
+	}
+	*/
 }
 
 /**
@@ -506,46 +492,28 @@ function registerListeners() {
 }
 
 /**
- * @returns {{ ensureExists: () => Promise<string | undefined> }}
+ * @returns {string | undefined} the location to use for the code cache
+ * or `undefined` if disabled.
  */
-function getNodeCachedDir() {
-	return new class {
+function getCodeCachePath() {
 
-		constructor() {
-			this.value = this.compute();
-		}
+	// explicitly disabled via CLI args
+	if (process.argv.indexOf('--no-cached-data') > 0) {
+		return undefined;
+	}
 
-		async ensureExists() {
-			if (typeof this.value === 'string') {
-				try {
-					await mkdirp(this.value);
+	// running out of sources
+	if (process.env['VSCODE_DEV']) {
+		return undefined;
+	}
 
-					return this.value;
-				} catch (error) {
-					// ignore
-				}
-			}
-		}
+	// require commit id
+	const commit = product.commit;
+	if (!commit) {
+		return undefined;
+	}
 
-		compute() {
-			if (process.argv.indexOf('--no-cached-data') > 0) {
-				return undefined;
-			}
-
-			// IEnvironmentService.isBuilt
-			if (process.env['VSCODE_DEV']) {
-				return undefined;
-			}
-
-			// find commit id
-			const commit = product.commit;
-			if (!commit) {
-				return undefined;
-			}
-
-			return path.join(userDataPath, 'CachedData', commit);
-		}
-	};
+	return path.join(userDataPath, 'CachedData', commit);
 }
 
 /**
@@ -553,11 +521,27 @@ function getNodeCachedDir() {
  * @returns {Promise<string>}
  */
 function mkdirp(dir) {
-	const fs = require('fs');
-
 	return new Promise((resolve, reject) => {
 		fs.mkdir(dir, { recursive: true }, err => (err && err.code !== 'EEXIST') ? reject(err) : resolve(dir));
 	});
+}
+
+/**
+ * @param {string | undefined} dir
+ * @returns {Promise<string | undefined>}
+ */
+async function mkdirpIgnoreError(dir) {
+	if (typeof dir === 'string') {
+		try {
+			await mkdirp(dir);
+
+			return dir;
+		} catch (error) {
+			// ignore
+		}
+	}
+
+	return undefined;
 }
 
 //#region NLS Support
@@ -582,7 +566,7 @@ async function resolveNlsConfiguration() {
 			nlsConfiguration = { locale: 'en', availableLanguages: {} };
 		} else {
 
-			// See above the comment about the loader and case sensitiviness
+			// See above the comment about the loader and case sensitiveness
 			appLocale = appLocale.toLowerCase();
 
 			const { getNLSConfiguration } = require('./vs/base/node/languagePacks');
@@ -596,34 +580,6 @@ async function resolveNlsConfiguration() {
 	}
 
 	return nlsConfiguration;
-}
-
-/**
- * @param {string} content
- * @returns {string}
- */
-function stripComments(content) {
-	const regexp = /("(?:[^\\"]*(?:\\.)?)*")|('(?:[^\\']*(?:\\.)?)*')|(\/\*(?:\r?\n|.)*?\*\/)|(\/{2,}.*?(?:(?:\r?\n)|$))/g;
-
-	return content.replace(regexp, function (match, m1, m2, m3, m4) {
-		// Only one of m1, m2, m3, m4 matches
-		if (m3) {
-			// A block comment. Replace with nothing
-			return '';
-		} else if (m4) {
-			// A line comment. If it ends in \r?\n then keep it.
-			const length_1 = m4.length;
-			if (length_1 > 2 && m4[length_1 - 1] === '\n') {
-				return m4[length_1 - 2] === '\r' ? '\r\n' : '\n';
-			}
-			else {
-				return '';
-			}
-		} else {
-			// We match a string
-			return match;
-		}
-	});
 }
 
 /**

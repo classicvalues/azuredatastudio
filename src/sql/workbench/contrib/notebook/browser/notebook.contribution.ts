@@ -3,28 +3,27 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { Registry } from 'vs/platform/registry/common/platform';
-import { EditorDescriptor, IEditorRegistry } from 'vs/workbench/browser/editor';
+import { EditorPaneDescriptor, IEditorPaneRegistry } from 'vs/workbench/browser/editor';
 
 import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
 import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
 import { localize } from 'vs/nls';
-import { IEditorInputFactoryRegistry, ActiveEditorContext, IEditorInput, EditorExtensions } from 'vs/workbench/common/editor';
+import { IEditorFactoryRegistry, EditorExtensions } from 'vs/workbench/common/editor';
 import { ILanguageAssociationRegistry, Extensions as LanguageAssociationExtensions } from 'sql/workbench/services/languageAssociation/common/languageAssociation';
 import { UntitledNotebookInput } from 'sql/workbench/contrib/notebook/browser/models/untitledNotebookInput';
 import { FileNotebookInput } from 'sql/workbench/contrib/notebook/browser/models/fileNotebookInput';
-import { FileNoteBookEditorInputSerializer, NotebookEditorInputAssociation, UntitledNotebookEditorInputSerializer } from 'sql/workbench/contrib/notebook/browser/models/notebookInputFactory';
+import { FileNoteBookEditorSerializer, NotebookEditorLanguageAssociation, UntitledNotebookEditorSerializer } from 'sql/workbench/contrib/notebook/browser/models/notebookEditorFactory';
 import { IWorkbenchActionRegistry, Extensions as WorkbenchActionsExtensions } from 'vs/workbench/common/actions';
 import { SyncActionDescriptor, registerAction2, MenuRegistry, MenuId, Action2 } from 'vs/platform/actions/common/actions';
 
 import { NotebookEditor } from 'sql/workbench/contrib/notebook/browser/notebookEditor';
-import { NewNotebookAction } from 'sql/workbench/contrib/notebook/browser/notebookActions';
+import { NewNotebookAction, NewNotebookTask } from 'sql/workbench/contrib/notebook/browser/notebookActions';
 import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
 import { IConfigurationRegistry, Extensions as ConfigExtensions, ConfigurationScope } from 'vs/platform/configuration/common/configurationRegistry';
 import { GridOutputComponent } from 'sql/workbench/contrib/notebook/browser/outputs/gridOutput.component';
 import { PlotlyOutputComponent } from 'sql/workbench/contrib/notebook/browser/outputs/plotlyOutput.component';
 import { registerComponentType } from 'sql/workbench/contrib/notebook/browser/outputs/mimeRegistry';
 import { MimeRendererComponent } from 'sql/workbench/contrib/notebook/browser/outputs/mimeRenderer.component';
-import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
 import { URI } from 'vs/base/common/uri';
 import { IWorkspaceEditingService } from 'vs/workbench/services/workspaces/common/workspaceEditing';
 import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
@@ -45,7 +44,6 @@ import { TextCellComponent } from 'sql/workbench/contrib/notebook/browser/cellVi
 import { IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions, IWorkbenchContribution } from 'vs/workbench/common/contributions';
 import { NotebookThemingContribution } from 'sql/workbench/contrib/notebook/browser/notebookThemingContribution';
 import { LifecyclePhase } from 'vs/workbench/services/lifecycle/common/lifecycle';
-import { ToggleTabFocusModeAction } from 'vs/editor/contrib/toggleTabFocusMode/toggleTabFocusMode';
 import 'vs/css!./media/notebook.contribution';
 import { isMacintosh } from 'vs/base/common/platform';
 import { SearchSortOrder } from 'vs/workbench/services/search/common/search';
@@ -53,26 +51,38 @@ import { ImageMimeTypes, TextCellEditModes } from 'sql/workbench/services/notebo
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { NotebookInput } from 'sql/workbench/contrib/notebook/browser/models/notebookInput';
 import { INotebookModel } from 'sql/workbench/services/notebook/browser/models/modelInterfaces';
-import { INotebookManager } from 'sql/workbench/services/notebook/browser/notebookService';
+import { DefaultNotebookProviders, IExecuteManager, INotebookService } from 'sql/workbench/services/notebook/browser/notebookService';
 import { NotebookExplorerViewletViewsContribution } from 'sql/workbench/contrib/notebook/browser/notebookExplorer/notebookExplorerViewlet';
 import { Disposable, DisposableStore } from 'vs/base/common/lifecycle';
-import { ContributedEditorPriority, IEditorOverrideService } from 'vs/workbench/services/editor/common/editorOverrideService';
-import { FileEditorInput } from 'vs/workbench/contrib/files/common/editors/fileEditorInput';
-import { IModeService } from 'vs/editor/common/services/modeService';
+import { IEditorResolverService, RegisteredEditorPriority } from 'vs/workbench/services/editor/common/editorResolverService';
+import { FileEditorInput } from 'vs/workbench/contrib/files/browser/editors/fileEditorInput';
 import { ILogService } from 'vs/platform/log/common/log';
 import { DiffEditorInput } from 'vs/workbench/common/editor/diffEditorInput';
+import { useNewMarkdownRendererKey } from 'sql/workbench/contrib/notebook/common/notebookCommon';
+import { DEFAULT_NOTEBOOK_FILETYPE, JUPYTER_PROVIDER_ID, NotebookLanguage } from 'sql/workbench/common/constants';
+import { INotebookProviderRegistry, NotebookProviderRegistryId } from 'sql/workbench/services/notebook/common/notebookRegistry';
+import { EditorInput } from 'vs/workbench/common/editor/editorInput';
+import { IPaneCompositePartService } from 'vs/workbench/services/panecomposite/browser/panecomposite';
+import { IViewDescriptorService, ViewContainerLocation } from 'vs/workbench/common/views';
+import { ToggleTabFocusModeAction } from 'vs/editor/contrib/toggleTabFocusMode/browser/toggleTabFocusMode';
+import { ActiveEditorContext } from 'vs/workbench/common/contextkeys';
+import { ILanguageService } from 'vs/editor/common/languages/language';
+import { ConnectionType, IConnectableInput, IConnectionCompletionOptions, IConnectionManagementService } from 'sql/platform/connection/common/connectionManagement';
+import { ICapabilitiesService } from 'sql/platform/capabilities/common/capabilitiesService';
+import { ConnectionProfile } from 'sql/platform/connection/common/connectionProfile';
+import { onUnexpectedError } from 'vs/base/common/errors';
 
-Registry.as<IEditorInputFactoryRegistry>(EditorExtensions.EditorInputFactories)
-	.registerEditorInputSerializer(FileNotebookInput.ID, FileNoteBookEditorInputSerializer);
+Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory)
+	.registerEditorSerializer(FileNotebookInput.ID, FileNoteBookEditorSerializer);
 
-Registry.as<IEditorInputFactoryRegistry>(EditorExtensions.EditorInputFactories)
-	.registerEditorInputSerializer(UntitledNotebookInput.ID, UntitledNotebookEditorInputSerializer);
+Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory)
+	.registerEditorSerializer(UntitledNotebookInput.ID, UntitledNotebookEditorSerializer);
 
 Registry.as<ILanguageAssociationRegistry>(LanguageAssociationExtensions.LanguageAssociations)
-	.registerLanguageAssociation(NotebookEditorInputAssociation.languages, NotebookEditorInputAssociation);
+	.registerLanguageAssociation(NotebookEditorLanguageAssociation.languages, NotebookEditorLanguageAssociation);
 
-Registry.as<IEditorRegistry>(EditorExtensions.Editors)
-	.registerEditor(EditorDescriptor.create(NotebookEditor, NotebookEditor.ID, NotebookEditor.LABEL), [new SyncDescriptor(UntitledNotebookInput), new SyncDescriptor(FileNotebookInput)]);
+Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane)
+	.registerEditorPane(EditorPaneDescriptor.create(NotebookEditor, NotebookEditor.ID, NotebookEditor.LABEL), [new SyncDescriptor(UntitledNotebookInput), new SyncDescriptor(FileNotebookInput)]);
 
 Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench)
 	.registerWorkbenchContribution(NotebookThemingContribution, LifecyclePhase.Restored);
@@ -85,24 +95,47 @@ actionRegistry.registerWorkbenchAction(
 		NewNotebookAction,
 		NewNotebookAction.ID,
 		NewNotebookAction.LABEL,
-		{ primary: KeyMod.WinCtrl | KeyMod.Alt | KeyCode.KEY_N },
+		{ primary: KeyMod.WinCtrl | KeyMod.Alt | KeyCode.KeyN },
 
 	),
 	NewNotebookAction.LABEL
 );
 
-const DE_NEW_NOTEBOOK_COMMAND_ID = 'dataExplorer.newNotebook';
 // New Notebook
+new NewNotebookTask().registerTask();
+
+const DE_NEW_NOTEBOOK_COMMAND_ID = 'dataExplorer.newNotebook';
 CommandsRegistry.registerCommand({
 	id: DE_NEW_NOTEBOOK_COMMAND_ID,
-	handler: (accessor, args: TreeViewItemHandleArg) => {
-		const instantiationService = accessor.get(IInstantiationService);
-		const connectedContext: ConnectedContext = { connectionProfile: args.$treeItem.payload };
-		return instantiationService.createInstance(NewNotebookAction, NewNotebookAction.ID, NewNotebookAction.LABEL).run({ connectionProfile: connectedContext.connectionProfile, isConnectionNode: false, nodeInfo: undefined });
+	handler: async (accessor, args: TreeViewItemHandleArg) => {
+		const notebookService = accessor.get(INotebookService);
+		const connectionService = accessor.get(IConnectionManagementService);
+		const capabilitiesService = accessor.get(ICapabilitiesService);
+		let payload = await connectionService.fixProfile(args.$treeItem.payload);
+		let editor = await notebookService.openNotebook(URI.from({ scheme: 'untitled' }), {});
+		// Connect our editor to the input connection
+		let connectableInput: IConnectableInput = {
+			uri: editor.input.resource.toString(),
+			onConnectCanceled: () => undefined,
+			onConnectReject: () => undefined,
+			onConnectStart: () => undefined,
+			onDisconnect: () => undefined,
+			onConnectSuccess: (params, profile) => {
+				let notebookEditor = notebookService.findNotebookEditor(editor.input.resource);
+				notebookEditor.model.changeContext(profile.connectionName, profile).catch(e => onUnexpectedError(e));
+			}
+		};
+		let options: IConnectionCompletionOptions = {
+			params: { connectionType: ConnectionType.editor, input: connectableInput },
+			saveTheConnection: false,
+			showDashboard: false,
+			showConnectionDialogOnError: true,
+			showFirewallRuleOnError: true
+		};
+		await connectionService.connect(new ConnectionProfile(capabilitiesService, payload), editor.input.resource.toString(), options);
 	}
 });
 
-// New Notebook
 MenuRegistry.appendMenuItem(MenuId.DataExplorerContext, {
 	group: '0_query',
 	order: 3,
@@ -132,7 +165,7 @@ MenuRegistry.appendMenuItem(MenuId.ObjectExplorerItemContext, {
 		id: OE_NEW_NOTEBOOK_COMMAND_ID,
 		title: localize('newQuery', "New Notebook")
 	},
-	when: ContextKeyExpr.or(ContextKeyExpr.and(TreeNodeContextKey.Status.notEqualsTo('Unavailable'), TreeNodeContextKey.NodeType.isEqualTo('Server')), ContextKeyExpr.and(TreeNodeContextKey.Status.notEqualsTo('Unavailable'), TreeNodeContextKey.NodeType.isEqualTo('Database')))
+	when: ContextKeyExpr.and(TreeNodeContextKey.Status.notEqualsTo('Unavailable'), TreeNodeContextKey.IsQueryProvider.isEqualTo(true), ContextKeyExpr.or(TreeNodeContextKey.NodeType.isEqualTo('Server'), TreeNodeContextKey.NodeType.isEqualTo('Database')))
 });
 
 const ExplorerNotebookActionID = 'explorer.notebook';
@@ -182,16 +215,16 @@ CommandsRegistry.registerCommand({
 	id: RESTART_JUPYTER_NOTEBOOK_SESSIONS,
 	handler: async (accessor: ServicesAccessor, restartJupyterServer: boolean = true) => {
 		const editorService: IEditorService = accessor.get(IEditorService);
-		const editors: readonly IEditorInput[] = editorService.editors;
+		const editors: readonly EditorInput[] = editorService.editors;
 		let jupyterServerRestarted: boolean = false;
 
 		for (let editor of editors) {
 			if (editor instanceof NotebookInput) {
 				let model: INotebookModel = editor.notebookModel;
-				if (model.providerId === 'jupyter' && model.clientSession.isReady) {
+				if (model.providerId === JUPYTER_PROVIDER_ID && model.clientSession.isReady) {
 					// Jupyter server needs to be restarted so that the correct Python installation is used
 					if (!jupyterServerRestarted && restartJupyterServer) {
-						let jupyterNotebookManager: INotebookManager = model.notebookManagers.find(x => x.providerId === 'jupyter');
+						let jupyterNotebookManager: IExecuteManager = model.executeManagers.find(x => x.providerId === JUPYTER_PROVIDER_ID);
 						// Shutdown all current Jupyter sessions before stopping the server
 						await jupyterNotebookManager.sessionManager.shutdownAll();
 						// Jupyter session manager needs to be disposed so that a new one is created with the new server info
@@ -216,13 +249,16 @@ CommandsRegistry.registerCommand({
 	id: STOP_JUPYTER_NOTEBOOK_SESSIONS,
 	handler: async (accessor: ServicesAccessor) => {
 		const editorService: IEditorService = accessor.get(IEditorService);
-		const editors: readonly IEditorInput[] = editorService.editors;
+		const editors: readonly EditorInput[] = editorService.editors;
 
 		for (let editor of editors) {
 			if (editor instanceof NotebookInput) {
+				// Wait for NotebookInput.resolve() to be called to ensure the _model field in NotebookInput
+				// is not undefined when trying to get the notebookModel.
+				await editor.modelResolved;
 				let model: INotebookModel = editor.notebookModel;
-				if (model?.providerId === 'jupyter') {
-					let jupyterNotebookManager: INotebookManager = model.notebookManagers.find(x => x.providerId === 'jupyter');
+				if (model?.providerId === JUPYTER_PROVIDER_ID) {
+					let jupyterNotebookManager: IExecuteManager = model.executeManagers.find(x => x.providerId === JUPYTER_PROVIDER_ID);
 					await jupyterNotebookManager.sessionManager.shutdownAll();
 					jupyterNotebookManager.sessionManager.dispose();
 					await jupyterNotebookManager.serverManager.stopServer();
@@ -231,6 +267,24 @@ CommandsRegistry.registerCommand({
 			}
 		}
 	}
+});
+
+CommandsRegistry.registerCommand({
+	id: 'notebook.restartKernel',
+	handler: async (accessor: ServicesAccessor) => {
+		const editorService: IEditorService = accessor.get(IEditorService);
+		if (editorService.activeEditor instanceof NotebookInput) {
+			await editorService.activeEditor.notebookModel?.clientSession?.restart();
+		}
+	}
+});
+
+MenuRegistry.appendMenuItem(MenuId.CommandPalette, {
+	command: {
+		id: 'notebook.restartKernel',
+		title: localize('restartNotebookKernel', "Restart Notebook Kernel"),
+	},
+	when: ContextKeyExpr.and(ActiveEditorContext.isEqualTo(NotebookEditor.ID))
 });
 
 MenuRegistry.appendMenuItem(MenuId.CommandPalette, {
@@ -249,8 +303,9 @@ registerAction2(class extends Action2 {
 		});
 	}
 
-	run = async (accessor, options: { forceNewWindow: boolean, folderPath: URI }) => {
-		const viewletService = accessor.get(IViewletService);
+	run = async (accessor, options: { forceNewWindow: boolean; folderPath: URI }) => {
+		const viewletService: IPaneCompositePartService = accessor.get(IPaneCompositePartService);
+		const viewDescriptorService: IViewDescriptorService = accessor.get(IViewDescriptorService);
 		const workspaceEditingService = accessor.get(IWorkspaceEditingService);
 		const hostService = accessor.get(IHostService);
 		let folders = [];
@@ -259,7 +314,8 @@ registerAction2(class extends Action2 {
 		}
 		folders.push(options.folderPath);
 		await workspaceEditingService.addFolders(folders.map(folder => ({ uri: folder })));
-		await viewletService.openViewlet(viewletService.getDefaultViewletId(), true);
+		await viewletService.openPaneComposite(viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Sidebar)?.id,
+			ViewContainerLocation.Sidebar, true);
 		if (options.forceNewWindow) {
 			return hostService.openWindow([{ folderUri: folders[0] }], { forceNewWindow: options.forceNewWindow });
 		}
@@ -279,15 +335,7 @@ configurationRegistry.registerConfiguration({
 			'type': 'boolean',
 			'default': true,
 			'description': localize('notebook.sqlStopOnError', "SQL kernel: stop Notebook execution when error occurs in a cell.")
-		}
-	}
-});
-
-configurationRegistry.registerConfiguration({
-	'id': 'notebook',
-	'title': 'Notebook',
-	'type': 'object',
-	'properties': {
+		},
 		'notebook.showAllKernels': {
 			'type': 'boolean',
 			'default': false,
@@ -336,6 +384,11 @@ configurationRegistry.registerConfiguration({
 			'minimum': 10,
 			'description': localize('notebook.maxRichTextUndoHistory', "The maximum number of changes stored in the undo history for the notebook Rich Text editor.")
 		},
+		'notebook.renderTablesInHtml': {
+			'type': 'boolean',
+			'default': false,
+			'description': localize('notebook.renderTablesInHtml', "Display and save tables in HTML format in text cells instead of converting to markdown tables.")
+		},
 		'notebook.useAbsoluteFilePaths': {
 			'type': 'boolean',
 			'default': false,
@@ -345,6 +398,11 @@ configurationRegistry.registerConfiguration({
 			'type': 'boolean',
 			'default': false,
 			'description': localize('notebook.enableIncrementalGridRendering', "Enable incremental grid rendering for notebooks. This will improve the initial rendering time for large notebooks. There may be performance issues when interacting with the notebook while the rest of the grids are rendering.")
+		},
+		[useNewMarkdownRendererKey]: {
+			'type': 'boolean',
+			default: true,
+			'description': localize('notebook.useNewMarkdownRenderer', "Whether to use the newer version of the markdown renderer for Notebooks. This may result in markdown being rendered differently than previous versions.")
 		}
 	}
 });
@@ -688,69 +746,87 @@ configurationRegistry.registerConfiguration({
 });
 
 const languageAssociationRegistry = Registry.as<ILanguageAssociationRegistry>(LanguageAssociationExtensions.LanguageAssociations);
+const notebookRegistry = Registry.as<INotebookProviderRegistry>(NotebookProviderRegistryId);
 
 export class NotebookEditorOverrideContribution extends Disposable implements IWorkbenchContribution {
 
 	private _registeredOverrides = new DisposableStore();
+	private _newFileExtensions: string[] = [];
 
 	constructor(
 		@ILogService private _logService: ILogService,
 		@IEditorService private _editorService: IEditorService,
-		@IEditorOverrideService private _editorOverrideService: IEditorOverrideService,
-		@IModeService private _modeService: IModeService
+		@IEditorResolverService private _editorResolverService: IEditorResolverService,
+		@ILanguageService private _languageService: ILanguageService
 	) {
 		super();
 		this.registerEditorOverrides();
 		// Refresh the editor overrides whenever the languages change so we ensure we always have
 		// the latest up to date list of extensions for each language
-		this._modeService.onLanguagesMaybeChanged(() => {
+		this._languageService.onDidChange(() => {
 			this.registerEditorOverrides();
+		});
+		notebookRegistry.onNewDescriptionRegistration(({ id, registration }) => {
+			if (!DefaultNotebookProviders.includes(id) && registration?.fileExtensions?.length > 0) {
+				let extensions = registration.fileExtensions
+					.filter(ext => ext?.length > 0 && ext.toLowerCase() !== DEFAULT_NOTEBOOK_FILETYPE);
+				this._newFileExtensions = this._newFileExtensions.concat(extensions);
+				this.registerEditorOverrides();
+			}
 		});
 	}
 
 	private registerEditorOverrides(): void {
 		this._registeredOverrides.clear();
-		// List of language IDs to associate the query editor for. These are case sensitive.
-		NotebookEditorInputAssociation.languages.map(lang => {
-			const langExtensions = this._modeService.getExtensions(lang);
-			if (langExtensions.length === 0) {
-				return;
-			}
-			// Create the selector from the list of all the language extensions we want to associate with the
-			// notebook editor (filtering out any languages which didn't have any extensions registered yet)
-			const selector = `*{${langExtensions.join(',')}}`;
-			this._registeredOverrides.add(this._editorOverrideService.registerContributionPoint(
-				selector,
-				{
-					id: NotebookEditor.ID,
-					label: NotebookEditor.LABEL,
-					describes: (currentEditor) => currentEditor instanceof FileNotebookInput,
-					priority: ContributedEditorPriority.builtin
-				},
-				{},
-				(resource, options, group) => {
-					const fileInput = this._editorService.createEditorInput({
-						resource: resource
-					}) as FileEditorInput;
-					// Try to convert the input, falling back to just a plain file input if we're unable to
-					const newInput = this.tryConvertInput(fileInput, lang) ?? fileInput;
-					return { editor: newInput, options: options, group: group };
-				},
-				(diffEditorInput, options, group) => {
-					// Try to convert the input, falling back to the original input if we're unable to
-					const newInput = this.tryConvertInput(diffEditorInput, lang) ?? diffEditorInput;
-					return { editor: newInput, options: options, group: group };
-				}
-			));
+		let allExtensions: string[] = [];
+
+		// List of built-in language IDs to associate the query editor for. These are case sensitive.
+		NotebookEditorLanguageAssociation.languages.forEach(lang => {
+			const langExtensions = this._languageService.getExtensions(lang);
+			allExtensions = allExtensions.concat(langExtensions);
 		});
+
+		// Add newly registered file extensions
+		allExtensions = allExtensions.concat(this._newFileExtensions);
+		if (allExtensions.length === 0) {
+			return;
+		}
+
+		// Create the selector from the list of all the language extensions we want to associate with the
+		// notebook editor
+		const selector = `*{${allExtensions.join(',')}}`;
+		this._registeredOverrides.add(this._editorResolverService.registerEditor(
+			selector,
+			{
+				id: NotebookEditor.ID,
+				label: NotebookEditor.LABEL,
+				priority: RegisteredEditorPriority.builtin
+			},
+			{},
+			{
+				createEditorInput: async (editorInput, group) => {
+					const fileInput = await this._editorService.createEditorInput(editorInput) as FileEditorInput;
+					// Try to convert the input, falling back to just a plain file input if we're unable to
+					const newInput = this.convertInput(fileInput);
+					return { editor: newInput, options: editorInput.options, group: group };
+				},
+				createDiffEditorInput: async (diffEditorInput, group) => {
+					const diffEditorInputImpl = await this._editorService.createEditorInput(diffEditorInput) as DiffEditorInput;
+					// Try to convert the input, falling back to the original input if we're unable to
+					const newInput = this.convertInput(diffEditorInputImpl);
+					return { editor: newInput, options: diffEditorInput.options, group: group };
+				}
+			}
+		));
 	}
 
-	private tryConvertInput(input: IEditorInput, lang: string): IEditorInput | undefined {
-		const langAssociation = languageAssociationRegistry.getAssociationForLanguage(lang);
-		const notebookEditorInput = langAssociation?.syncConvertinput?.(input);
+	private convertInput(input: EditorInput): EditorInput {
+		const langAssociation = languageAssociationRegistry.getAssociationForLanguage(NotebookLanguage.Ipynb);
+		const notebookEditorInput = langAssociation?.syncConvertInput?.(input);
 		if (!notebookEditorInput) {
-			this._logService.warn('Unable to create input for overriding editor ', input instanceof DiffEditorInput ? `${input.primary.resource.toString()} <-> ${input.secondary.resource.toString()}` : input.resource.toString());
-			return undefined;
+			// Fall back to original input if we failed to convert
+			this._logService.warn('Unable to create input for resolving editor ', input instanceof DiffEditorInput ? `${input.primary.resource.toString()} <-> ${input.secondary.resource.toString()}` : input.resource.toString());
+			return input;
 		}
 		return notebookEditorInput;
 	}

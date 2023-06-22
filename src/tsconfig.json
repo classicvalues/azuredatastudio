@@ -5,11 +5,10 @@
 		"preserveConstEnums": true,
 		"sourceMap": false,
 		"outDir": "../out/vs",
-		"target": "es2017",
+		"target": "es2020",
 		"types": [
 			"keytar",
 			"mocha",
-			"semver",
 			"sinon",
 			"winreg",
 			"trusted-types",
@@ -25,6 +24,8 @@
 	"include": [
 		"./typings",
 		"./vs",
-		"./sql"
+		"./sql",
+		"vscode-dts/vscode.proposed.*.d.ts",
+		"vscode-dts/vscode.d.ts"
 	]
 }

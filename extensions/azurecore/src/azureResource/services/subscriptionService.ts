@@ -6,15 +6,15 @@
 import * as azdata from 'azdata';
 import * as vscode from 'vscode';
 import { SubscriptionClient } from '@azure/arm-subscriptions';
-
-import { azureResource } from 'azureResource';
+import { AzureAccount, azureResource } from 'azurecore';
 import { IAzureResourceSubscriptionService } from '../interfaces';
 import { TokenCredentials } from '@azure/ms-rest-js';
 import { AzureSubscriptionError } from '../errors';
 import { AzureResourceErrorMessageUtil } from '../utils';
+import { Logger } from '../../utils/Logger';
 
 import * as nls from 'vscode-nls';
-import { AzureAccount } from 'azurecore';
+import { TenantIgnoredError } from '../../utils/TenantIgnoredError';
 const localize = nls.loadMessageBundle();
 
 export class AzureResourceSubscriptionService implements IAzureResourceSubscriptionService {
@@ -29,25 +29,34 @@ export class AzureResourceSubscriptionService implements IAzureResourceSubscript
 		const subscriptions: azureResource.AzureResourceSubscription[] = [];
 		let gotSubscriptions = false;
 		const errors: Error[] = [];
-
 		for (const tenantId of tenantIds ?? account.properties.tenants.map(t => t.id)) {
 			try {
 				const token = await azdata.accounts.getAccountSecurityToken(account, tenantId, azdata.AzureResource.ResourceManagement);
-				const subClient = new SubscriptionClient(new TokenCredentials(token.token, token.tokenType), { baseUri: account.properties.providerSettings.settings.armResource.endpoint });
-				const newSubs = await subClient.subscriptions.list();
-				subscriptions.push(...newSubs.map(newSub => {
-					return {
-						id: newSub.subscriptionId,
-						name: newSub.displayName,
-						tenant: tenantId
-					};
-				}));
-				gotSubscriptions = true;
+				if (token !== undefined) {
+					const subClient = new SubscriptionClient(new TokenCredentials(token.token, token.tokenType), { baseUri: account.properties.providerSettings.settings.armResource.endpoint });
+					const newSubs = await subClient.subscriptions.list();
+					subscriptions.push(...newSubs.map(newSub => {
+						return {
+							id: newSub.subscriptionId || '',
+							name: newSub.displayName || '',
+							tenant: tenantId
+						};
+					}));
+					Logger.verbose(`AzureResourceSubscriptionService.getSubscriptions: Retrieved ${newSubs.length} subscriptions for tenant ${tenantId} / account ${account.displayInfo.displayName}`);
+					gotSubscriptions = true;
+				}
+				else if (!account.isStale) {
+					const errorMsg = localize('azure.resource.tenantTokenError', "Failed to acquire Access Token for account '{0}' (tenant '{1}').", account.displayInfo.displayName, tenantId);
+					Logger.error(`Failed to acquire Access Token for account '${account.displayInfo.displayName}' (tenant '${tenantId}').`);
+					void vscode.window.showWarningMessage(errorMsg);
+				}
 			} catch (error) {
-				const errorMsg = localize('azure.resource.tenantSubscriptionsError', "Failed to get subscriptions for account {0} (tenant '{1}'). {2}", account.key.accountId, tenantId, AzureResourceErrorMessageUtil.getErrorMessage(error));
-				console.warn(errorMsg);
-				errors.push(error);
-				vscode.window.showWarningMessage(errorMsg);
+				if (!account.isStale && !(error instanceof TenantIgnoredError)) {
+					const errorMsg = localize('azure.resource.tenantSubscriptionsError', "Failed to get subscriptions for account {0} (tenant '{1}'). {2}", account.displayInfo.displayName, tenantId, AzureResourceErrorMessageUtil.getErrorMessage(error));
+					Logger.error(`Failed to get subscriptions for account ${account.displayInfo.displayName} (tenant '${tenantId}'). ${AzureResourceErrorMessageUtil.getErrorMessage(error)}`);
+					errors.push(error);
+					void vscode.window.showWarningMessage(errorMsg);
+				}
 			}
 		}
 		if (!gotSubscriptions) {

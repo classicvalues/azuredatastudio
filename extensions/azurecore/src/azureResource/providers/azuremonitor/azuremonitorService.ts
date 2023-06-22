@@ -3,36 +3,26 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { azureResource } from 'azureResource';
-import { ResourceServiceBase, GraphData } from '../resourceTreeDataProviderBase';
+import { azureResource } from 'azurecore';
+import { logAnalyticsQuery } from '../queryStringConstants';
+import { ResourceServiceBase } from '../resourceTreeDataProviderBase';
+import { AzureMonitorGraphData } from '../../interfaces';
+import { AZURE_MONITOR_PROVIDER_ID } from '../../../constants';
 
-export interface AzureMonitorGraphData extends GraphData {
-	properties: {
-		fullyQualifiedDomainName: string;
-		administratorLogin: string;
-		uri: string;
-		customerId: string
-	};
-}
+export class AzureMonitorResourceService extends ResourceServiceBase<AzureMonitorGraphData> {
+	public override queryFilter: string = logAnalyticsQuery;
 
-const instanceQuery = `where type == "${azureResource.AzureResourceType.logAnalytics}"`;
-
-export class AzureMonitorResourceService extends ResourceServiceBase<AzureMonitorGraphData, azureResource.AzureResourceDatabaseServer> {
-
-	protected get query(): string {
-		return instanceQuery;
-	}
-
-	protected convertResource(resource: AzureMonitorGraphData): azureResource.AzureResourceDatabaseServer {
+	public convertServerResource(resource: AzureMonitorGraphData): azureResource.AzureResourceDatabaseServer {
 		return {
 			id: resource.id,
 			name: resource.name,
+			provider: AZURE_MONITOR_PROVIDER_ID,
 			fullName: resource.properties.customerId,
 			loginName: '',
 			defaultDatabaseName: '',
 			subscription: {
 				id: resource.subscriptionId,
-				name: resource.subscriptionName
+				name: resource.subscriptionName || ''
 			},
 			tenant: resource.tenantId,
 			resourceGroup: resource.resourceGroup

@@ -6,10 +6,10 @@
 import * as should from 'should';
 import * as TypeMoq from 'typemoq';
 import * as vscode from 'vscode';
+import * as azdata from 'azdata';
 import 'mocha';
 import { AppContext } from '../../../appContext';
 
-import { azureResource } from 'azureResource';
 import { IAzureResourceTreeChangeHandler } from '../../../azureResource/tree/treeChangeHandler';
 import { AzureResourceSubscriptionTreeNode } from '../../../azureResource/tree/subscriptionTreeNode';
 import { AzureResourceItemType, AzureResourceServiceNames } from '../../../azureResource/constants';
@@ -17,7 +17,8 @@ import { AzureResourceService } from '../../../azureResource/resourceService';
 import { AzureResourceResourceTreeNode } from '../../../azureResource/resourceTreeNode';
 import { IAzureResourceCacheService } from '../../../azureResource/interfaces';
 import { generateGuid } from '../../../azureResource/utils';
-import { AzureAccount } from 'azurecore';
+import { AzureAccount, AzureAccountProperties, Tenant, azureResource } from 'azurecore';
+import { TreeNode } from '../../../azureResource/treeNode';
 
 // Mock services
 let appContext: AppContext;
@@ -39,12 +40,19 @@ const mockAccount: AzureAccount = {
 		contextualDisplayName: 'test',
 		userId: 'test@email.com'
 	},
-	properties: undefined,
+	properties: TypeMoq.Mock.ofType<AzureAccountProperties>().object,
 	isStale: false
 };
 
 const mockTenantId: string = 'mock_tenant';
 const mockSubscriptionId: string = 'mock_subscription';
+
+const mockTenant: Tenant = {
+	id: mockTenantId,
+	displayName: 'mock_tenant',
+	userId: 'test@email.com',
+	tenantCategory: 'Home'
+}
 
 const mockSubscription: azureResource.AzureResourceSubscription = {
 	id: mockSubscriptionId,
@@ -60,7 +68,7 @@ let mockResourceProvider2: TypeMoq.IMock<azureResource.IAzureResourceProvider>;
 
 const resourceService: AzureResourceService = new AzureResourceService();
 
-describe('AzureResourceSubscriptionTreeNode.info', function(): void {
+describe('AzureResourceSubscriptionTreeNode.info', function (): void {
 	beforeEach(() => {
 		mockExtensionContext = TypeMoq.Mock.ofType<vscode.ExtensionContext>();
 		mockCacheService = TypeMoq.Mock.ofType<IAzureResourceCacheService>();
@@ -70,15 +78,15 @@ describe('AzureResourceSubscriptionTreeNode.info', function(): void {
 		mockTreeChangeHandler = TypeMoq.Mock.ofType<IAzureResourceTreeChangeHandler>();
 
 		mockResourceTreeDataProvider1 = TypeMoq.Mock.ofType<azureResource.IAzureResourceTreeDataProvider>();
-		mockResourceTreeDataProvider1.setup((o) => o.getChildren()).returns(() => Promise.resolve([TypeMoq.Mock.ofType<azureResource.IAzureResourceNode>().object]));
-		mockResourceTreeDataProvider1.setup((o) => o.getTreeItem(TypeMoq.It.isAny())).returns(() => Promise.resolve(TypeMoq.It.isAny()));
+		mockResourceTreeDataProvider1.setup((o) => o.getRootChildren()).returns(() => Promise.resolve([TypeMoq.Mock.ofType<azdata.TreeItem>().object]));
+		mockResourceTreeDataProvider1.setup((x: any) => x.then).returns(() => undefined);
 		mockResourceProvider1 = TypeMoq.Mock.ofType<azureResource.IAzureResourceProvider>();
 		mockResourceProvider1.setup((o) => o.providerId).returns(() => 'mockResourceProvider1');
 		mockResourceProvider1.setup((o) => o.getTreeDataProvider()).returns(() => mockResourceTreeDataProvider1.object);
 
 		mockResourceTreeDataProvider2 = TypeMoq.Mock.ofType<azureResource.IAzureResourceTreeDataProvider>();
-		mockResourceTreeDataProvider2.setup((o) => o.getChildren()).returns(() => Promise.resolve([TypeMoq.Mock.ofType<azureResource.IAzureResourceNode>().object]));
-		mockResourceTreeDataProvider2.setup((o) => o.getTreeItem(TypeMoq.It.isAny())).returns(() => Promise.resolve(TypeMoq.It.isAny()));
+		mockResourceTreeDataProvider2.setup((o) => o.getRootChildren()).returns(() => Promise.resolve([TypeMoq.Mock.ofType<azdata.TreeItem>().object]));
+		mockResourceTreeDataProvider2.setup((x: any) => x.then).returns(() => undefined);
 		mockResourceProvider2 = TypeMoq.Mock.ofType<azureResource.IAzureResourceProvider>();
 		mockResourceProvider2.setup((o) => o.providerId).returns(() => 'mockResourceProvider2');
 		mockResourceProvider2.setup((o) => o.getTreeDataProvider()).returns(() => mockResourceTreeDataProvider2.object);
@@ -94,10 +102,10 @@ describe('AzureResourceSubscriptionTreeNode.info', function(): void {
 
 	});
 
-	it('Should be correct when created.', async function(): Promise<void> {
-		const subscriptionTreeNode = new AzureResourceSubscriptionTreeNode(mockAccount, mockSubscription, mockTenantId, appContext, mockTreeChangeHandler.object, undefined);
+	it('Should be correct when created.', async function (): Promise<void> {
+		const subscriptionTreeNode = new AzureResourceSubscriptionTreeNode(mockAccount, mockSubscription, mockTenant, appContext, mockTreeChangeHandler.object, TypeMoq.Mock.ofType<TreeNode>().object);
 
-		should(subscriptionTreeNode.nodePathValue).equal(`account_${mockAccount.key.accountId}.subscription_${mockSubscription.id}.tenant_${mockTenantId}`);
+		should(subscriptionTreeNode.nodePathValue).equal(`account_${mockAccount.key.accountId}.tenant_${mockTenantId}.subscription_${mockSubscription.id}`);
 
 		const treeItem = await subscriptionTreeNode.getTreeItem();
 		should(treeItem.label).equal(mockSubscription.name);
@@ -112,7 +120,7 @@ describe('AzureResourceSubscriptionTreeNode.info', function(): void {
 	});
 });
 
-describe('AzureResourceSubscriptionTreeNode.getChildren', function(): void {
+describe('AzureResourceSubscriptionTreeNode.getChildren', function (): void {
 	beforeEach(() => {
 		mockExtensionContext = TypeMoq.Mock.ofType<vscode.ExtensionContext>();
 		mockCacheService = TypeMoq.Mock.ofType<IAzureResourceCacheService>();
@@ -122,15 +130,14 @@ describe('AzureResourceSubscriptionTreeNode.getChildren', function(): void {
 		mockTreeChangeHandler = TypeMoq.Mock.ofType<IAzureResourceTreeChangeHandler>();
 
 		mockResourceTreeDataProvider1 = TypeMoq.Mock.ofType<azureResource.IAzureResourceTreeDataProvider>();
-		mockResourceTreeDataProvider1.setup((o) => o.getChildren()).returns(() => Promise.resolve([TypeMoq.Mock.ofType<azureResource.IAzureResourceNode>().object]));
-		mockResourceTreeDataProvider1.setup((o) => o.getTreeItem(TypeMoq.It.isAny())).returns(() => Promise.resolve(TypeMoq.It.isAny()));
+		mockResourceTreeDataProvider1.setup((o) => o.getRootChildren()).returns(() => Promise.resolve([{ label: 'Item1' }] as azdata.TreeItem[]));
+
 		mockResourceProvider1 = TypeMoq.Mock.ofType<azureResource.IAzureResourceProvider>();
 		mockResourceProvider1.setup((o) => o.providerId).returns(() => 'mockResourceProvider1');
 		mockResourceProvider1.setup((o) => o.getTreeDataProvider()).returns(() => mockResourceTreeDataProvider1.object);
 
 		mockResourceTreeDataProvider2 = TypeMoq.Mock.ofType<azureResource.IAzureResourceTreeDataProvider>();
-		mockResourceTreeDataProvider2.setup((o) => o.getChildren()).returns(() => Promise.resolve([TypeMoq.Mock.ofType<azureResource.IAzureResourceNode>().object]));
-		mockResourceTreeDataProvider2.setup((o) => o.getTreeItem(TypeMoq.It.isAny())).returns(() => Promise.resolve(TypeMoq.It.isAny()));
+		mockResourceTreeDataProvider2.setup((o) => o.getRootChildren()).returns(() => Promise.resolve([{ label: 'Item2' }] as azdata.TreeItem[]));
 		mockResourceProvider2 = TypeMoq.Mock.ofType<azureResource.IAzureResourceProvider>();
 		mockResourceProvider2.setup((o) => o.providerId).returns(() => 'mockResourceProvider2');
 		mockResourceProvider2.setup((o) => o.getTreeDataProvider()).returns(() => mockResourceTreeDataProvider2.object);
@@ -146,18 +153,18 @@ describe('AzureResourceSubscriptionTreeNode.getChildren', function(): void {
 
 	});
 
-	it('Should return resource containers.', async function(): Promise<void> {
-		const subscriptionTreeNode = new AzureResourceSubscriptionTreeNode(mockAccount, mockSubscription, mockTenantId, appContext, mockTreeChangeHandler.object, undefined);
+	it('Should return resource containers.', async function (): Promise<void> {
+		const subscriptionTreeNode = new AzureResourceSubscriptionTreeNode(mockAccount, mockSubscription, mockTenant, appContext, mockTreeChangeHandler.object, TypeMoq.Mock.ofType<TreeNode>().object);
 		const children = await subscriptionTreeNode.getChildren();
 
-		mockResourceTreeDataProvider1.verify((o) => o.getChildren(), TypeMoq.Times.once());
+		mockResourceTreeDataProvider1.verify((o) => o.getRootChildren(), TypeMoq.Times.once());
 
-		mockResourceTreeDataProvider2.verify((o) => o.getChildren(), TypeMoq.Times.once());
+		mockResourceTreeDataProvider2.verify((o) => o.getRootChildren(), TypeMoq.Times.once());
 
-		const expectedChildren = await resourceService.listResourceProviderIds();
+		const expectedResourceProviderIds = await resourceService.listResourceProviderIds();
 
 		should(children).Array();
-		should(children.length).equal(expectedChildren.length);
+		should(children.length).equal(expectedResourceProviderIds.length, 'There should be one child for each resource provider');
 		for (const child of children) {
 			should(child).instanceOf(AzureResourceResourceTreeNode);
 		}

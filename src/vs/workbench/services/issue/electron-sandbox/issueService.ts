@@ -6,7 +6,7 @@
 import { IssueReporterStyles, IssueReporterData, ProcessExplorerData, IssueReporterExtensionData } from 'vs/platform/issue/common/issue';
 import { IIssueService } from 'vs/platform/issue/electron-sandbox/issue';
 import { IColorTheme, IThemeService } from 'vs/platform/theme/common/themeService';
-import { textLinkForeground, inputBackground, inputBorder, inputForeground, buttonBackground, buttonHoverBackground, buttonForeground, inputValidationErrorBorder, foreground, inputActiveOptionBorder, scrollbarSliderActiveBackground, scrollbarSliderBackground, scrollbarSliderHoverBackground, editorBackground, editorForeground, listHoverBackground, listHoverForeground, textLinkActiveForeground, inputValidationErrorBackground, inputValidationErrorForeground } from 'vs/platform/theme/common/colorRegistry';
+import { textLinkForeground, inputBackground, inputBorder, inputForeground, buttonBackground, buttonHoverBackground, buttonForeground, inputValidationErrorBorder, foreground, inputActiveOptionBorder, scrollbarSliderActiveBackground, scrollbarSliderBackground, scrollbarSliderHoverBackground, editorBackground, editorForeground, listHoverBackground, listHoverForeground, textLinkActiveForeground, inputValidationErrorBackground, inputValidationErrorForeground, listActiveSelectionBackground, listActiveSelectionForeground, listFocusOutline, listFocusBackground, listFocusForeground, activeContrastBorder } from 'vs/platform/theme/common/colorRegistry';
 import { SIDE_BAR_BACKGROUND } from 'vs/workbench/common/theme';
 import { IExtensionManagementService } from 'vs/platform/extensionManagement/common/extensionManagement';
 import { IWorkbenchExtensionEnablementService } from 'vs/workbench/services/extensionManagement/common/extensionManagement';
@@ -16,9 +16,13 @@ import { INativeWorkbenchEnvironmentService } from 'vs/workbench/services/enviro
 import { ExtensionType } from 'vs/platform/extensions/common/extensions';
 import { platform } from 'vs/base/common/process';
 import { IProductService } from 'vs/platform/product/common/productService';
-import { ITASExperimentService } from 'vs/workbench/services/experiment/common/experimentService';
-import { IAuthenticationService } from 'vs/workbench/services/authentication/browser/authenticationService';
+import { IWorkbenchAssignmentService } from 'vs/workbench/services/assignment/common/assignmentService';
+import { IAuthenticationService } from 'vs/workbench/services/authentication/common/authentication';
 import { registerMainProcessRemoteService } from 'vs/platform/ipc/electron-sandbox/services';
+import { IWorkspaceTrustManagementService } from 'vs/platform/workspace/common/workspaceTrust';
+import { IConfigurationService } from 'vs/platform/configuration/common/configuration'; // {{SQL CARBON EDIT}} Add preview features flag
+import { CONFIG_WORKBENCH_ENABLEPREVIEWFEATURES } from 'sql/workbench/common/constants'; // {{SQL CARBON EDIT}} Add preview features flag
+import { IIntegrityService } from 'vs/workbench/services/integrity/common/integrity';
 
 export class WorkbenchIssueService implements IWorkbenchIssueService {
 	declare readonly _serviceBrand: undefined;
@@ -29,9 +33,12 @@ export class WorkbenchIssueService implements IWorkbenchIssueService {
 		@IExtensionManagementService private readonly extensionManagementService: IExtensionManagementService,
 		@IWorkbenchExtensionEnablementService private readonly extensionEnablementService: IWorkbenchExtensionEnablementService,
 		@INativeWorkbenchEnvironmentService private readonly environmentService: INativeWorkbenchEnvironmentService,
+		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService,
 		@IProductService private readonly productService: IProductService,
-		@ITASExperimentService private readonly experimentService: ITASExperimentService,
-		@IAuthenticationService private readonly authenticationService: IAuthenticationService
+		@IWorkbenchAssignmentService private readonly experimentService: IWorkbenchAssignmentService,
+		@IAuthenticationService private readonly authenticationService: IAuthenticationService,
+		@IConfigurationService private readonly configurationService: IConfigurationService, // {{SQL CARBON EDIT}} Add preview features flag
+		@IIntegrityService private readonly integrityService: IIntegrityService
 	) { }
 
 	async openReporter(dataOverrides: Partial<IssueReporterData> = {}): Promise<void> {
@@ -70,15 +77,34 @@ export class WorkbenchIssueService implements IWorkbenchIssueService {
 			});
 		}
 		const experiments = await this.experimentService.getCurrentExperiments();
-		const githubSessions = await this.authenticationService.getSessions('github');
-		const potentialSessions = githubSessions.filter(session => session.scopes.includes('repo'));
+
+		let githubAccessToken = '';
+		try {
+			const githubSessions = await this.authenticationService.getSessions('github');
+			const potentialSessions = githubSessions.filter(session => session.scopes.includes('repo'));
+			githubAccessToken = potentialSessions[0]?.accessToken;
+		} catch (e) {
+			// Ignore
+		}
+
+		// air on the side of caution and have false be the default
+		let isUnsupported = false;
+		try {
+			isUnsupported = !(await this.integrityService.isPure()).isPure;
+		} catch (e) {
+			// Ignore
+		}
+
 		const theme = this.themeService.getColorTheme();
 		const issueReporterData: IssueReporterData = Object.assign({
 			styles: getIssueReporterStyles(theme),
 			zoomLevel: getZoomLevel(),
 			enabledExtensions: extensionData,
 			experiments: experiments?.join('\n'),
-			githubAccessToken: potentialSessions[0]?.accessToken
+			restrictedMode: !this.workspaceTrustManagementService.isWorkspaceTrusted(),
+			previewFeaturesEnabled: this.configurationService.getValue(CONFIG_WORKBENCH_ENABLEPREVIEWFEATURES), // {{SQL CARBON EDIT}} Add preview features flag
+			isUnsupported,
+			githubAccessToken,
 		}, dataOverrides);
 		return this.issueService.openReporter(issueReporterData);
 	}
@@ -86,13 +112,19 @@ export class WorkbenchIssueService implements IWorkbenchIssueService {
 	openProcessExplorer(): Promise<void> {
 		const theme = this.themeService.getColorTheme();
 		const data: ProcessExplorerData = {
-			pid: this.environmentService.configuration.mainPid,
+			pid: this.environmentService.mainPid,
 			zoomLevel: getZoomLevel(),
 			styles: {
 				backgroundColor: getColor(theme, editorBackground),
 				color: getColor(theme, editorForeground),
-				hoverBackground: getColor(theme, listHoverBackground),
-				hoverForeground: getColor(theme, listHoverForeground)
+				listHoverBackground: getColor(theme, listHoverBackground),
+				listHoverForeground: getColor(theme, listHoverForeground),
+				listFocusBackground: getColor(theme, listFocusBackground),
+				listFocusForeground: getColor(theme, listFocusForeground),
+				listFocusOutline: getColor(theme, listFocusOutline),
+				listActiveSelectionBackground: getColor(theme, listActiveSelectionBackground),
+				listActiveSelectionForeground: getColor(theme, listActiveSelectionForeground),
+				listHoverOutline: getColor(theme, activeContrastBorder),
 			},
 			platform: platform,
 			applicationName: this.productService.applicationName

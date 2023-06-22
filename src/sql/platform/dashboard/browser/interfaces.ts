@@ -22,7 +22,8 @@ export enum ComponentEventType {
 	onCellAction,
 	onEnterKeyPressed,
 	onInput,
-	onComponentLoaded
+	onComponentLoaded,
+	onChildClick
 }
 
 /**
@@ -31,7 +32,8 @@ export enum ComponentEventType {
 export enum ModelViewAction {
 	SelectTab = 'selectTab',
 	AppendData = 'appendData',
-	Filter = 'filter'
+	Filter = 'filter',
+	SetActiveCell = 'setActiveCell'
 }
 
 /**

@@ -30,7 +30,7 @@ export namespace Iterable {
 		return iterable[Symbol.iterator]().next().value;
 	}
 
-	export function some<T>(iterable: Iterable<T>, predicate: (t: T) => boolean): boolean {
+	export function some<T>(iterable: Iterable<T>, predicate: (t: T) => unknown): boolean {
 		for (const element of iterable) {
 			if (predicate(element)) {
 				return true;
@@ -61,9 +61,10 @@ export namespace Iterable {
 		}
 	}
 
-	export function* map<T, R>(iterable: Iterable<T>, fn: (t: T) => R): Iterable<R> {
+	export function* map<T, R>(iterable: Iterable<T>, fn: (t: T, index: number) => R): Iterable<R> {
+		let index = 0;
 		for (const element of iterable) {
-			yield fn(element);
+			yield fn(element, index++);
 		}
 	}
 
@@ -89,6 +90,13 @@ export namespace Iterable {
 			value = reducer(value, element);
 		}
 		return value;
+	}
+
+	export function forEach<T>(iterable: Iterable<T>, fn: (t: T, index: number) => any): void {
+		let index = 0;
+		for (const element of iterable) {
+			fn(element, index++);
+		}
 	}
 
 	/**
@@ -134,6 +142,14 @@ export namespace Iterable {
 		}
 
 		return [consumed, { [Symbol.iterator]() { return iterator; } }];
+	}
+
+	/**
+	 * Consumes `atMost` elements from iterable and returns the consumed elements,
+	 * and an iterable for the rest of the elements.
+	 */
+	export function collect<T>(iterable: Iterable<T>): T[] {
+		return consume(iterable)[0];
 	}
 
 	/**

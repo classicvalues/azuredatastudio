@@ -3,8 +3,8 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import * as assert from 'assert';
-import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
-import { isMacintosh, isLinux, isWindows } from 'vs/base/common/platform';
+import { isLinux, isMacintosh, isWindows } from 'vs/base/common/platform';
+import { ContextKeyExpr, ContextKeyExpression, implies } from 'vs/platform/contextkey/common/contextkey';
 
 function createContext(ctx: any) {
 	return {
@@ -16,7 +16,7 @@ function createContext(ctx: any) {
 
 suite('ContextKeyExpr', () => {
 	test('ContextKeyExpr.equals', () => {
-		let a = ContextKeyExpr.and(
+		const a = ContextKeyExpr.and(
 			ContextKeyExpr.has('a1'),
 			ContextKeyExpr.and(ContextKeyExpr.has('and.a')),
 			ContextKeyExpr.has('a2'),
@@ -27,9 +27,9 @@ suite('ContextKeyExpr', () => {
 			ContextKeyExpr.notEquals('c1', 'cc1'),
 			ContextKeyExpr.notEquals('c2', 'cc2'),
 			ContextKeyExpr.not('d1'),
-			ContextKeyExpr.not('d2'),
+			ContextKeyExpr.not('d2')
 		)!;
-		let b = ContextKeyExpr.and(
+		const b = ContextKeyExpr.and(
 			ContextKeyExpr.equals('b2', 'bb2'),
 			ContextKeyExpr.notEquals('c1', 'cc1'),
 			ContextKeyExpr.not('d1'),
@@ -45,11 +45,24 @@ suite('ContextKeyExpr', () => {
 		assert(a.equals(b), 'expressions should be equal');
 	});
 
+	test('issue #134942: Equals in comparator expressions', () => {
+		function testEquals(expr: ContextKeyExpression | undefined, str: string): void {
+			const deserialized = ContextKeyExpr.deserialize(str);
+			assert.ok(expr);
+			assert.ok(deserialized);
+			assert.strictEqual(expr.equals(deserialized), true, str);
+		}
+		testEquals(ContextKeyExpr.greater('value', 0), 'value > 0');
+		testEquals(ContextKeyExpr.greaterEquals('value', 0), 'value >= 0');
+		testEquals(ContextKeyExpr.smaller('value', 0), 'value < 0');
+		testEquals(ContextKeyExpr.smallerEquals('value', 0), 'value <= 0');
+	});
+
 	test('normalize', () => {
-		let key1IsTrue = ContextKeyExpr.equals('key1', true);
-		let key1IsNotFalse = ContextKeyExpr.notEquals('key1', false);
-		let key1IsFalse = ContextKeyExpr.equals('key1', false);
-		let key1IsNotTrue = ContextKeyExpr.notEquals('key1', true);
+		const key1IsTrue = ContextKeyExpr.equals('key1', true);
+		const key1IsNotFalse = ContextKeyExpr.notEquals('key1', false);
+		const key1IsFalse = ContextKeyExpr.equals('key1', false);
+		const key1IsNotTrue = ContextKeyExpr.notEquals('key1', true);
 
 		assert.ok(key1IsTrue.equals(ContextKeyExpr.has('key1')));
 		assert.ok(key1IsNotFalse.equals(ContextKeyExpr.has('key1')));
@@ -58,7 +71,7 @@ suite('ContextKeyExpr', () => {
 	});
 
 	test('evaluate', () => {
-		let context = createContext({
+		const context = createContext({
 			'a': true,
 			'b': false,
 			'c': '5',
@@ -66,7 +79,7 @@ suite('ContextKeyExpr', () => {
 		});
 		function testExpression(expr: string, expected: boolean): void {
 			// console.log(expr + ' ' + expected);
-			let rules = ContextKeyExpr.deserialize(expr);
+			const rules = ContextKeyExpr.deserialize(expr);
 			assert.strictEqual(rules!.evaluate(context), expected, expr);
 		}
 		function testBatch(expr: string, value: any): void {
@@ -170,6 +183,21 @@ suite('ContextKeyExpr', () => {
 		assert.strictEqual(ainb.evaluate(createContext({ 'a': 'prototype', 'b': {} })), false);
 	});
 
+	test('ContextKeyNotInExpr', () => {
+		const aNotInB = ContextKeyExpr.deserialize('a not in b')!;
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 3, 'b': [3, 2, 1] })), false);
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 3, 'b': [1, 2, 3] })), false);
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 3, 'b': [1, 2] })), true);
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 3 })), true);
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 3, 'b': null })), true);
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 'x', 'b': ['x'] })), false);
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 'x', 'b': ['y'] })), true);
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 'x', 'b': {} })), true);
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 'x', 'b': { 'x': false } })), false);
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 'x', 'b': { 'x': true } })), false);
+		assert.strictEqual(aNotInB.evaluate(createContext({ 'a': 'prototype', 'b': {} })), true);
+	});
+
 	test('issue #106524: distributing AND should normalize', () => {
 		const actual = ContextKeyExpr.and(
 			ContextKeyExpr.or(
@@ -189,6 +217,47 @@ suite('ContextKeyExpr', () => {
 			)
 		);
 		assert.strictEqual(actual!.equals(expected!), true);
+	});
+
+	test('issue #129625: Removes duplicated terms in OR expressions', () => {
+		const expr = ContextKeyExpr.or(
+			ContextKeyExpr.has('A'),
+			ContextKeyExpr.has('B'),
+			ContextKeyExpr.has('A')
+		)!;
+		assert.strictEqual(expr.serialize(), 'A || B');
+	});
+
+	test('issue #129625: Removes duplicated terms in AND expressions', () => {
+		const expr = ContextKeyExpr.and(
+			ContextKeyExpr.has('A'),
+			ContextKeyExpr.has('B'),
+			ContextKeyExpr.has('A')
+		)!;
+		assert.strictEqual(expr.serialize(), 'A && B');
+	});
+
+	test('issue #129625: Remove duplicated terms when negating', () => {
+		const expr = ContextKeyExpr.and(
+			ContextKeyExpr.has('A'),
+			ContextKeyExpr.or(
+				ContextKeyExpr.has('B1'),
+				ContextKeyExpr.has('B2'),
+			)
+		)!;
+		assert.strictEqual(expr.serialize(), 'A && B1 || A && B2');
+		assert.strictEqual(expr.negate()!.serialize(), '!A || !B1 && !B2');
+		assert.strictEqual(expr.negate()!.negate()!.serialize(), 'A && B1 || A && B2');
+		assert.strictEqual(expr.negate()!.negate()!.negate()!.serialize(), '!A || !B1 && !B2');
+	});
+
+	test('issue #129625: remove redundant terms in OR expressions', () => {
+		function strImplies(p0: string, q0: string): boolean {
+			const p = ContextKeyExpr.deserialize(p0)!;
+			const q = ContextKeyExpr.deserialize(q0)!;
+			return implies(p, q);
+		}
+		assert.strictEqual(strImplies('a', 'a && b'), true);
 	});
 
 	test('Greater, GreaterEquals, Smaller, SmallerEquals evaluate', () => {

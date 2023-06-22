@@ -3,17 +3,17 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./dropdown';
-import { Gesture, EventType as GestureEventType } from 'vs/base/browser/touch';
-import { ActionRunner, IAction } from 'vs/base/common/actions';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { IContextViewProvider, IAnchor, AnchorAlignment } from 'vs/base/browser/ui/contextview/contextview';
-import { IMenuOptions } from 'vs/base/browser/ui/menu/menu';
-import { KeyCode } from 'vs/base/common/keyCodes';
-import { EventHelper, EventType, append, $, addDisposableListener, DOMEvent } from 'vs/base/browser/dom';
 import { IContextMenuProvider } from 'vs/base/browser/contextmenu';
+import { $, addDisposableListener, append, EventHelper, EventType } from 'vs/base/browser/dom';
 import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
+import { EventType as GestureEventType, Gesture } from 'vs/base/browser/touch';
+import { AnchorAlignment, IAnchor, IContextViewProvider } from 'vs/base/browser/ui/contextview/contextview';
+import { IMenuOptions } from 'vs/base/browser/ui/menu/menu';
+import { ActionRunner, IAction } from 'vs/base/common/actions';
 import { Emitter } from 'vs/base/common/event';
+import { KeyCode } from 'vs/base/common/keyCodes';
+import { IDisposable } from 'vs/base/common/lifecycle';
+import 'vs/css!./dropdown';
 
 export interface ILabelRenderer {
 	(container: HTMLElement): IDisposable | null;
@@ -31,7 +31,7 @@ export class BaseDropdown extends ActionRunner {
 	private contents?: HTMLElement;
 
 	private visible: boolean | undefined;
-	private _onDidChangeVisibility = new Emitter<boolean>();
+	private _onDidChangeVisibility = this._register(new Emitter<boolean>());
 	readonly onDidChangeVisibility = this._onDidChangeVisibility.event;
 
 	constructor(container: HTMLElement, options: IBaseDropdownOptions) {
@@ -56,8 +56,10 @@ export class BaseDropdown extends ActionRunner {
 
 		for (const event of [EventType.MOUSE_DOWN, GestureEventType.Tap]) {
 			this._register(addDisposableListener(this._label, event, e => {
-				if (e instanceof MouseEvent && e.detail > 1) {
-					return; // prevent multiple clicks to open multiple context menus (https://github.com/Microsoft/vscode/issues/41363)
+				if (e instanceof MouseEvent && (e.detail > 1 || e.button !== 0)) {
+					// prevent right click trigger to allow separate context menu (https://github.com/microsoft/vscode/issues/151064)
+					// prevent multiple clicks to open multiple context menus (https://github.com/microsoft/vscode/issues/41363)
+					return;
 				}
 
 				if (this.visible) {
@@ -71,7 +73,7 @@ export class BaseDropdown extends ActionRunner {
 		this._register(addDisposableListener(this._label, EventType.KEY_UP, e => {
 			const event = new StandardKeyboardEvent(e);
 			if (event.equals(KeyCode.Enter) || event.equals(KeyCode.Space)) {
-				EventHelper.stop(e, true); // https://github.com/Microsoft/vscode/issues/57997
+				EventHelper.stop(e, true); // https://github.com/microsoft/vscode/issues/57997
 
 				if (this.visible) {
 					this.hide();
@@ -121,7 +123,7 @@ export class BaseDropdown extends ActionRunner {
 		return !!this.visible;
 	}
 
-	protected onEvent(e: DOMEvent, activeElement: HTMLElement): void {
+	protected onEvent(_e: Event, activeElement: HTMLElement): void {
 		this.hide();
 	}
 

@@ -1,13 +1,13 @@
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
- *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
 import { EndOfLineSequence } from 'vs/editor/common/model';
 import { SingleModelEditStackData } from 'vs/editor/common/model/editStack';
 import { Selection } from 'vs/editor/common/core/selection';
-import { TextChange } from 'vs/editor/common/model/textChange';
+import { TextChange } from 'vs/editor/common/core/textChange';
 
 suite('EditStack', () => {
 

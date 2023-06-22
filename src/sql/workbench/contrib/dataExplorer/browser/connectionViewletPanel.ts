@@ -19,7 +19,7 @@ import { IOpenerService } from 'vs/platform/opener/common/opener';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { ILogService } from 'vs/platform/log/common/log';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { ITree } from 'vs/base/parts/tree/browser/tree';
+import { ITree } from 'sql/base/parts/tree/browser/tree';
 import { AsyncServerTree } from 'sql/workbench/services/objectExplorer/browser/asyncServerTree';
 
 export class ConnectionViewletPanel extends ViewPane {
@@ -74,7 +74,7 @@ export class ConnectionViewletPanel extends ViewPane {
 
 	override layoutBody(size: number): void {
 		this._serverTreeView.layout(size);
-		DOM.toggleClass(this._root!, 'narrow', this._root!.clientWidth < 300);
+		this._root!.classList.toggle('narrow', this._root!.clientWidth < 300);
 	}
 
 	show(): void {

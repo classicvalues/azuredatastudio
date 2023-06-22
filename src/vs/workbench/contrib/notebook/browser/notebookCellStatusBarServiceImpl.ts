@@ -10,21 +10,18 @@ import { Disposable, IDisposable, toDisposable } from 'vs/base/common/lifecycle'
 import { URI } from 'vs/base/common/uri';
 import { INotebookCellStatusBarService } from 'vs/workbench/contrib/notebook/common/notebookCellStatusBarService';
 import { INotebookCellStatusBarItemList, INotebookCellStatusBarItemProvider } from 'vs/workbench/contrib/notebook/common/notebookCommon';
-import { score } from 'vs/workbench/contrib/notebook/common/notebookSelector';
 
 export class NotebookCellStatusBarService extends Disposable implements INotebookCellStatusBarService {
 
-	private _onDidChangeProviders = new Emitter<void>();
+	readonly _serviceBrand: undefined;
+
+	private readonly _onDidChangeProviders = this._register(new Emitter<void>());
 	readonly onDidChangeProviders: Event<void> = this._onDidChangeProviders.event;
 
-	private _onDidChangeItems = new Emitter<void>();
+	private readonly _onDidChangeItems = this._register(new Emitter<void>());
 	readonly onDidChangeItems: Event<void> = this._onDidChangeItems.event;
 
-	private _providers: INotebookCellStatusBarItemProvider[] = [];
-
-	constructor() {
-		super();
-	}
+	private readonly _providers: INotebookCellStatusBarItemProvider[] = [];
 
 	registerCellStatusBarItemProvider(provider: INotebookCellStatusBarItemProvider): IDisposable {
 		this._providers.push(provider);
@@ -43,7 +40,7 @@ export class NotebookCellStatusBarService extends Disposable implements INoteboo
 	}
 
 	async getStatusBarItemsForCell(docUri: URI, cellIndex: number, viewType: string, token: CancellationToken): Promise<INotebookCellStatusBarItemList[]> {
-		const providers = this._providers.filter(p => score(p.selector, docUri, viewType) > 0);
+		const providers = this._providers.filter(p => p.viewType === viewType || p.viewType === '*');
 		return await Promise.all(providers.map(async p => {
 			try {
 				return await p.provideCellStatusBarItems(docUri, cellIndex, token) ?? { items: [] };
@@ -53,6 +50,4 @@ export class NotebookCellStatusBarService extends Disposable implements INoteboo
 			}
 		}));
 	}
-
-	readonly _serviceBrand: undefined;
 }

@@ -6,7 +6,7 @@
 import { localize } from 'vs/nls';
 import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
 import { IAction } from 'vs/base/common/actions';
-import { $, toggleClass, Dimension, IFocusTracker, getTotalHeight, prepend } from 'vs/base/browser/dom';
+import { $, Dimension, IFocusTracker, getTotalHeight, prepend } from 'vs/base/browser/dom';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
@@ -30,7 +30,6 @@ import { IChangeEvent } from 'vs/workbench/contrib/search/common/searchModel';
 import { Delayer } from 'vs/base/common/async';
 import { ITextQuery, IPatternInfo } from 'vs/workbench/services/search/common/search';
 import { MessageType } from 'vs/base/browser/ui/inputbox/inputBox';
-import { QueryBuilder, ITextQueryBuilderOptions } from 'vs/workbench/contrib/search/common/queryBuilder';
 import { IFileService } from 'vs/platform/files/common/files';
 import { getOutOfWorkspaceEditorResources } from 'vs/workbench/contrib/search/common/search';
 import { NotebookSearchView } from 'sql/workbench/contrib/notebook/browser/notebookExplorer/notebookSearch';
@@ -40,6 +39,9 @@ import { TreeViewPane } from 'vs/workbench/browser/parts/views/treeView';
 import * as TelemetryKeys from 'sql/platform/telemetry/common/telemetryKeys';
 import { IAdsTelemetryService } from 'sql/platform/telemetry/common/telemetry';
 import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
+import { ITextQueryBuilderOptions, QueryBuilder } from 'vs/workbench/services/search/common/queryBuilder';
+import { registerIcon } from 'vs/platform/theme/common/iconRegistry';
+import { Codicon } from 'vs/base/common/codicons';
 
 export const VIEWLET_ID = 'workbench.view.notebooks';
 
@@ -151,7 +153,7 @@ export class NotebookExplorerViewPaneContainer extends ViewPaneContainer {
 		return false;
 	}
 
-	triggerQueryChange(_options?: { preserveFocus?: boolean, triggeredOnType?: boolean, delay?: number }) {
+	triggerQueryChange(_options?: { preserveFocus?: boolean; triggeredOnType?: boolean; delay?: number }) {
 		const options = { preserveFocus: true, triggeredOnType: false, delay: 0, ..._options };
 
 		if (!this.pauseSearching) {
@@ -381,7 +383,7 @@ export class NotebookExplorerViewPaneContainer extends ViewPaneContainer {
 	}
 
 	override layout(dimension: Dimension): void {
-		toggleClass(this.root, 'narrow', dimension.width <= 300);
+		this.root.classList.toggle('narrow', dimension.width <= 300);
 		super.layout(new Dimension(dimension.width, dimension.height - getTotalHeight(this.searchWidgetsContainerElement)));
 	}
 
@@ -402,24 +404,24 @@ export class NotebookExplorerViewPaneContainer extends ViewPaneContainer {
 	}
 
 	protected override createView(viewDescriptor: IViewDescriptor, options: IViewletViewOptions): ViewPane {
-		let viewletPanel = this.instantiationService.createInstance(viewDescriptor.ctorDescriptor.ctor, options) as ViewPane;
+		// {{SQL CARBON TODO}} - don't cast to never
+		let viewletPanel = this.instantiationService.createInstance(viewDescriptor.ctorDescriptor.ctor, <never>options) as ViewPane;
 		this._register(viewletPanel);
 		return viewletPanel;
 	}
 }
 
-export const notebookIconId = 'book';
-
+export const NotebooksViewIcon = registerIcon('ads-notebooks', Codicon.notebook, localize('ads-notebook', 'Icon represent a notebook.'));
 export const NOTEBOOK_VIEW_CONTAINER = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
 	id: VIEWLET_ID,
 	title: localize('notebookExplorer.name', "Notebooks"),
 	ctorDescriptor: new SyncDescriptor(NotebookExplorerViewPaneContainer),
 	openCommandActionDescriptor: {
 		id: VIEWLET_ID,
-		keybindings: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_B },
+		keybindings: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyB },
 		order: 0
 	},
-	icon: { id: notebookIconId },
+	icon: NotebooksViewIcon,
 	order: 6,
 	storageId: `${VIEWLET_ID}.state`
 }, ViewContainerLocation.Sidebar);

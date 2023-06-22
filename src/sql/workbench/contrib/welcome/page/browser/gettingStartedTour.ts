@@ -22,8 +22,8 @@ import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { Button } from 'sql/base/browser/ui/button/button';
 import { extensionsViewIcon } from 'vs/workbench/contrib/extensions/browser/extensionsIcons';
 import { settingsViewBarIcon } from 'vs/workbench/browser/parts/activitybar/activitybarPart';
-import { notebookIconId } from 'sql/workbench/contrib/notebook/browser/notebookExplorer/notebookExplorerViewlet';
-import { SqlIconId } from 'sql/base/common/codicons';
+import { NotebooksViewIcon } from 'sql/workbench/contrib/notebook/browser/notebookExplorer/notebookExplorerViewlet';
+import { ConnectionsViewIcon } from 'sql/workbench/contrib/dataExplorer/browser/dataExplorerViewlet';
 
 const $ = dom.$;
 interface TourData {
@@ -44,8 +44,8 @@ interface TourData {
 	popupImage: string;
 }
 
-const dataExplorerIconCssSelector = `.action-label.${SqlIconId.dataExplorer}`;
-const notebookIconCssSelector = `.action-label.${notebookIconId}`;
+const dataExplorerIconCssSelector = ThemeIcon.asCSSSelector(ConnectionsViewIcon);
+const notebookIconCssSelector = ThemeIcon.asCSSSelector(NotebooksViewIcon);
 const extensionsIconCssSelector = ThemeIcon.asCSSSelector(extensionsViewIcon);
 const settingsGearIconCssSelector = ThemeIcon.asCSSSelector(settingsViewBarIcon);
 
@@ -161,8 +161,7 @@ export class GuidedTour extends Disposable {
 			exitButton.classList.add('ads-tour-btn-exit');
 			exitButton.innerText = 'x';
 			const img = document.createElement('img');
-			const gif = require.toUrl(popupImage);
-			img.src = require.toUrl(gif);
+			img.src = require.toUrl(popupImage);
 			img.classList.add('ads-tour-img');
 			flexContainer.classList.add(...flexClasses);
 			container.classList.add('ads-tour-popup');

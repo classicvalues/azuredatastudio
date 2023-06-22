@@ -3,7 +3,7 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ILogService, LogLevel, AbstractLogger, DEFAULT_LOG_LEVEL, ILogger } from 'vs/platform/log/common/log';
+import { AbstractLogger, DEFAULT_LOG_LEVEL, ILogger, ILogService, LogLevel } from 'vs/platform/log/common/log';
 
 interface ILog {
 	level: LogLevel;
@@ -32,9 +32,7 @@ export class BufferLogService extends AbstractLogger implements ILogService {
 		super();
 		this.setLevel(logLevel);
 		this._register(this.onDidChangeLogLevel(level => {
-			if (this._logger) {
-				this._logger.setLevel(level);
-			}
+			this._logger?.setLevel(level);
 		}));
 	}
 

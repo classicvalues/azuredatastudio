@@ -20,7 +20,8 @@ const enum SettingIds {
 	ado = 'ado',
 	ala = 'ala',
 	storage = 'storage',
-	kusto = 'kusto'
+	kusto = 'kusto',
+	powerbi = 'powerbi'
 }
 
 const publicAzureSettings: ProviderSettings = {
@@ -38,7 +39,7 @@ const publicAzureSettings: ProviderSettings = {
 			},
 			graphResource: {
 				id: SettingIds.graph,
-				endpoint: 'https://graph.windows.net',
+				endpoint: 'https://graph.windows.net/',
 				azureResourceId: AzureResource.Graph
 			},
 			msGraphResource: {
@@ -48,7 +49,7 @@ const publicAzureSettings: ProviderSettings = {
 			},
 			armResource: {
 				id: SettingIds.arm,
-				endpoint: 'https://management.azure.com',
+				endpoint: 'https://management.azure.com/',
 				azureResourceId: AzureResource.ResourceManagement
 			},
 			sqlResource: {
@@ -58,36 +59,41 @@ const publicAzureSettings: ProviderSettings = {
 			},
 			ossRdbmsResource: {
 				id: SettingIds.ossrdbms,
-				endpoint: 'https://ossrdbms-aad.database.windows.net',
+				endpoint: 'https://ossrdbms-aad.database.windows.net/',
 				azureResourceId: AzureResource.OssRdbms
 			},
 			azureKeyVaultResource: {
 				id: SettingIds.vault,
-				endpoint: 'https://vault.azure.net',
+				endpoint: 'https://vault.azure.net/',
 				azureResourceId: AzureResource.AzureKeyVault
 			},
 			azureDevOpsResource: {
 				id: SettingIds.ado,
-				endpoint: '499b84ac-1321-427f-aa17-267ca6975798',
+				endpoint: '499b84ac-1321-427f-aa17-267ca6975798/',
 				azureResourceId: AzureResource.AzureDevOps,
 			},
 			azureLogAnalyticsResource: {
 				id: SettingIds.ala,
-				endpoint: 'https://api.loganalytics.io',
+				endpoint: 'https://api.loganalytics.io/',
 				azureResourceId: AzureResource.AzureLogAnalytics,
 			},
 			azureStorageResource: {
 				id: SettingIds.storage,
 				endpoint: '',
-				endpointSuffix: '.core.windows.net',
+				endpointSuffix: '.core.windows.net/',
 				azureResourceId: AzureResource.AzureStorage
 			},
 			azureKustoResource: {
 				id: SettingIds.kusto,
-				endpoint: 'https://api.kusto.io',
+				endpoint: 'https://kusto.kusto.windows.net/',
 				azureResourceId: AzureResource.AzureKusto,
 			},
-			redirectUri: 'https://vscode-redirect.azurewebsites.net/',
+			powerBiResource: {
+				id: SettingIds.powerbi,
+				endpoint: 'https://analysis.windows.net/powerbi/api/',
+				azureResourceId: AzureResource.PowerBi
+			},
+			redirectUri: 'http://localhost',
 			scopes: [
 				'openid', 'email', 'profile', 'offline_access',
 				'https://management.azure.com/user_impersonation',
@@ -113,12 +119,17 @@ const usGovAzureSettings: ProviderSettings = {
 			},
 			graphResource: {
 				id: SettingIds.graph,
-				endpoint: 'https://graph.windows.net',
+				endpoint: 'https://graph.windows.net/',
 				azureResourceId: AzureResource.Graph
+			},
+			msGraphResource: {
+				id: SettingIds.msgraph,
+				endpoint: 'https://graph.microsoft.us/',
+				azureResourceId: AzureResource.MsGraph
 			},
 			armResource: {
 				id: SettingIds.arm,
-				endpoint: 'https://management.usgovcloudapi.net',
+				endpoint: 'https://management.usgovcloudapi.net/',
 				azureResourceId: AzureResource.ResourceManagement
 			},
 			sqlResource: {
@@ -128,135 +139,41 @@ const usGovAzureSettings: ProviderSettings = {
 			},
 			ossRdbmsResource: {
 				id: SettingIds.ossrdbms,
-				endpoint: 'https://ossrdbms-aad.database.usgovcloudapi.net',
+				endpoint: 'https://ossrdbms-aad.database.usgovcloudapi.net/',
 				azureResourceId: AzureResource.OssRdbms
 			},
 			azureKeyVaultResource: {
 				id: SettingIds.vault,
-				endpoint: 'https://vault.usgovcloudapi.net',
+				endpoint: 'https://vault.usgovcloudapi.net/',
 				azureResourceId: AzureResource.AzureKeyVault
 			},
 			azureLogAnalyticsResource: {
 				id: SettingIds.ala,
-				endpoint: 'https://api.loganalytics.us',
+				endpoint: 'https://api.loganalytics.us/',
 				azureResourceId: AzureResource.AzureLogAnalytics,
 			},
 			azureStorageResource: {
 				id: SettingIds.storage,
 				endpoint: '',
-				endpointSuffix: '.core.usgovcloudapi.net',
+				endpointSuffix: '.core.usgovcloudapi.net/',
 				azureResourceId: AzureResource.AzureStorage
 			},
-			redirectUri: 'https://vscode-redirect.azurewebsites.net/',
+			azureKustoResource: {
+				id: SettingIds.kusto,
+				endpoint: 'https://kusto.kusto.usgovcloudapi.net',
+				azureResourceId: AzureResource.AzureKusto,
+			},
+			powerBiResource: {
+				id: SettingIds.powerbi,
+				endpoint: 'https://analysis.windows.net/powerbi/api/',
+				azureResourceId: AzureResource.PowerBi
+			},
+			redirectUri: 'http://localhost',
 			scopes: [
 				'openid', 'email', 'profile', 'offline_access',
 				'https://management.usgovcloudapi.net/user_impersonation'
 			],
 			portalEndpoint: 'https://portal.azure.us'
-		}
-	}
-};
-
-const usNatAzureSettings: ProviderSettings = {
-	configKey: 'enableUsNatCloud',
-	metadata: {
-		displayName: localize('usNatCloudDisplayName', "Azure (US National)"),
-		id: 'azure_usNatCloud',
-		settings: {
-			host: 'https://login.microsoftonline.eaglex.ic.gov/',
-			clientId: 'a69788c6-1d43-44ed-9ca3-b83e194da255',
-			microsoftResource: {
-				id: SettingIds.marm,
-				endpoint: 'https://management.azure.eaglex.ic.gov/',
-				azureResourceId: AzureResource.MicrosoftResourceManagement
-			},
-			graphResource: {
-				id: SettingIds.graph,
-				endpoint: 'https://graph.eaglex.ic.gov',
-				azureResourceId: AzureResource.Graph
-			},
-			armResource: {
-				id: SettingIds.arm,
-				endpoint: 'https://management.core.eaglex.ic.gov/',
-				azureResourceId: AzureResource.ResourceManagement
-			},
-			sqlResource: {
-				id: SettingIds.sql,
-				endpoint: 'https://database.cloudapi.eaglex.ic.gov/',
-				azureResourceId: AzureResource.Sql
-			},
-			ossRdbmsResource: {
-				id: SettingIds.ossrdbms,
-				endpoint: 'https://ossrdbms-aad.database.cloudapi.eaglex.ic.gov',
-				azureResourceId: AzureResource.OssRdbms
-			},
-			azureKeyVaultResource: {
-				id: SettingIds.vault,
-				endpoint: 'https://vault.cloudapi.eaglex.ic.gov',
-				azureResourceId: AzureResource.AzureKeyVault
-			},
-			azureLogAnalyticsResource: {
-				id: SettingIds.ala,
-				endpoint: 'https://api.loganalytics.azure.eaglex.ic.gov',
-				azureResourceId: AzureResource.AzureLogAnalytics,
-			},
-			azureStorageResource: {
-				id: SettingIds.storage,
-				endpoint: '',
-				endpointSuffix: '.core.eaglex.ic.gov',
-				azureResourceId: AzureResource.AzureStorage
-			},
-			redirectUri: 'https://vscode-redirect.azurewebsites.net/',
-			scopes: [
-				'openid', 'email', 'profile', 'offline_access',
-				'https://management.core.eaglex.ic.gov/user_impersonation'
-			],
-			portalEndpoint: 'https://portal.azure.eaglex.ic.gov/'
-		}
-	}
-};
-
-
-const germanyAzureSettings: ProviderSettings = {
-	configKey: 'enableGermanyCloud',
-	metadata: {
-		displayName: localize('germanyCloud', "Azure (Germany)"),
-		id: 'azure_germanyCloud',
-		settings: {
-			host: 'https://login.microsoftazure.de/',
-			clientId: 'a69788c6-1d43-44ed-9ca3-b83e194da255',
-			graphResource: {
-				id: SettingIds.graph,
-				endpoint: 'https://graph.cloudapi.de',
-				azureResourceId: AzureResource.Graph
-			},
-			msGraphResource: {
-				id: SettingIds.msgraph,
-				endpoint: 'https://graph.microsoft.de',
-				azureResourceId: AzureResource.MsGraph
-			},
-			armResource: {
-				id: SettingIds.arm,
-				endpoint: 'https://management.microsoftazure.de',
-				azureResourceId: AzureResource.ResourceManagement
-			},
-			azureKeyVaultResource: {
-				id: SettingIds.vault,
-				endpoint: 'https://vault.microsoftazure.de',
-				azureResourceId: AzureResource.AzureKeyVault
-			},
-			azureStorageResource: {
-				id: SettingIds.storage,
-				endpoint: '',
-				endpointSuffix: '.core.cloudapi.de',
-				azureResourceId: AzureResource.AzureStorage
-			},
-			redirectUri: 'https://vscode-redirect.azurewebsites.net/',
-			scopes: [
-				'openid', 'email', 'profile', 'offline_access',
-				'https://management.microsoftazure.de/user_impersonation'
-			],
-			portalEndpoint: 'https://portal.microsoftazure.de/'
 		}
 	}
 };
@@ -310,7 +227,17 @@ const chinaAzureSettings: ProviderSettings = {
 				endpointSuffix: '.core.chinacloudapi.cn',
 				azureResourceId: AzureResource.AzureStorage
 			},
-			redirectUri: 'https://vscode-redirect.azurewebsites.net/',
+			azureKustoResource: {
+				id: SettingIds.kusto,
+				endpoint: 'https://kusto.kusto.chinacloudapi.cn',
+				azureResourceId: AzureResource.AzureKusto,
+			},
+			powerBiResource: {
+				id: SettingIds.powerbi,
+				endpoint: 'https://analysis.windows.net/powerbi/api',
+				azureResourceId: AzureResource.PowerBi
+			},
+			redirectUri: 'http://localhost',
 			scopes: [
 				'openid', 'email', 'profile', 'offline_access',
 				'https://management.chinacloudapi.cn/user_impersonation'
@@ -319,5 +246,5 @@ const chinaAzureSettings: ProviderSettings = {
 		}
 	}
 };
-const allSettings = [publicAzureSettings, usGovAzureSettings, usNatAzureSettings, germanyAzureSettings, chinaAzureSettings];
+const allSettings = [publicAzureSettings, usGovAzureSettings, chinaAzureSettings];
 export default allSettings;

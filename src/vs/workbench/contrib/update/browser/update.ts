@@ -16,8 +16,8 @@ import { IStorageService, StorageScope, StorageTarget } from 'vs/platform/storag
 import { IUpdateService, State as UpdateState, StateType, IUpdate } from 'vs/platform/update/common/update';
 import { INotificationService, Severity } from 'vs/platform/notification/common/notification';
 import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
-import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
-// import { ReleaseNotesManager } from './releaseNotesEditor';
+import { IBrowserWorkbenchEnvironmentService } from 'vs/workbench/services/environment/browser/environmentService';
+// import { ReleaseNotesManager } from './releaseNotesEditor'; // {{SQL CARBON EDIT}}
 import { isWindows } from 'vs/base/common/platform';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { RawContextKey, IContextKey, IContextKeyService, ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
@@ -27,7 +27,7 @@ import { ShowCurrentReleaseNotesActionId, CheckForVSCodeUpdateActionId } from 'v
 import { IHostService } from 'vs/workbench/services/host/browser/host';
 import { IProductService } from 'vs/platform/product/common/productService';
 import product from 'vs/platform/product/common/product';
-import { IUserDataAutoSyncEnablementService, IUserDataSyncService, IUserDataSyncStoreManagementService, SyncStatus, UserDataSyncStoreType } from 'vs/platform/userDataSync/common/userDataSync';
+import { IUserDataSyncEnablementService, IUserDataSyncService, IUserDataSyncStoreManagementService, SyncStatus, UserDataSyncStoreType } from 'vs/platform/userDataSync/common/userDataSync';
 import { IsWebContext } from 'vs/platform/contextkey/common/contextkeys';
 import { Promises } from 'vs/base/common/async';
 import { IUserDataSyncWorkbenchService } from 'vs/workbench/services/userDataSync/common/userDataSync';
@@ -152,7 +152,7 @@ export class ProductContribution implements IWorkbenchContribution {
 		@IStorageService storageService: IStorageService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@INotificationService notificationService: INotificationService,
-		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
+		@IBrowserWorkbenchEnvironmentService environmentService: IBrowserWorkbenchEnvironmentService,
 		@IOpenerService openerService: IOpenerService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IHostService hostService: IHostService,
@@ -163,7 +163,7 @@ export class ProductContribution implements IWorkbenchContribution {
 				return;
 			}
 
-			const lastVersion = parseVersion(storageService.get(ProductContribution.KEY, StorageScope.GLOBAL, ''));
+			const lastVersion = parseVersion(storageService.get(ProductContribution.KEY, StorageScope.APPLICATION, ''));
 			const currentVersion = parseVersion(productService.version);
 			const shouldShowReleaseNotes = configurationService.getValue<boolean>('update.showReleaseNotes');
 			const releaseNotesUrl = productService.releaseNotesUrl;
@@ -187,12 +187,7 @@ export class ProductContribution implements IWorkbenchContribution {
 				/*});*/
 			}
 
-			// should we show the new license?
-			if (productService.licenseUrl && lastVersion && lastVersion.major < 1 && currentVersion && currentVersion.major >= 1) {
-				notificationService.info(nls.localize('licenseChanged', "Our license terms have changed, please click [here]({0}) to go through them.", productService.licenseUrl));
-			}
-
-			storageService.store(ProductContribution.KEY, productService.version, StorageScope.GLOBAL, StorageTarget.MACHINE);
+			storageService.store(ProductContribution.KEY, productService.version, StorageScope.APPLICATION, StorageTarget.MACHINE);
 		});
 	}
 }
@@ -230,12 +225,12 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 		*/
 
 		const currentVersion = this.productService.commit;
-		const lastKnownVersion = this.storageService.get('update/lastKnownVersion', StorageScope.GLOBAL);
+		const lastKnownVersion = this.storageService.get('update/lastKnownVersion', StorageScope.APPLICATION);
 
 		// if current version != stored version, clear both fields
 		if (currentVersion !== lastKnownVersion) {
-			this.storageService.remove('update/lastKnownVersion', StorageScope.GLOBAL);
-			this.storageService.remove('update/updateNotificationTime', StorageScope.GLOBAL);
+			this.storageService.remove('update/lastKnownVersion', StorageScope.APPLICATION);
+			this.storageService.remove('update/updateNotificationTime', StorageScope.APPLICATION);
 		}
 
 		this.registerGlobalActivityActions();
@@ -261,10 +256,6 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 				this.onUpdateDownloaded(state.update);
 				break;
 
-			case StateType.Updating:
-				this.onUpdateUpdating(state.update);
-				break;
-
 			case StateType.Ready:
 				this.onUpdateReady(state.update);
 				break;
@@ -276,8 +267,16 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 
 		if (state.type === StateType.AvailableForDownload || state.type === StateType.Downloaded || state.type === StateType.Ready) {
 			badge = new NumberBadge(1, () => nls.localize('updateIsReady', "New {0} update available.", this.productService.nameLong)); // {{SQL CARBON EDIT}} change to namelong
-		} else if (state.type === StateType.CheckingForUpdates || state.type === StateType.Downloading || state.type === StateType.Updating) {
+		} else if (state.type === StateType.CheckingForUpdates) {
 			badge = new ProgressBadge(() => nls.localize('checkingForUpdates', "Checking for Updates..."));
+			clazz = 'progress-badge';
+			priority = 1;
+		} else if (state.type === StateType.Downloading) {
+			badge = new ProgressBadge(() => nls.localize('downloading', "Downloading..."));
+			clazz = 'progress-badge';
+			priority = 1;
+		} else if (state.type === StateType.Updating) {
+			badge = new ProgressBadge(() => nls.localize('updating', "Updating..."));
 			clazz = 'progress-badge';
 			priority = 1;
 		}
@@ -308,8 +307,7 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 	private onUpdateNotAvailable(): void {
 		this.dialogService.show(
 			severity.Info,
-			nls.localize('noUpdatesAvailable', "There are currently no updates available."),
-			[nls.localize('ok', "OK")]
+			nls.localize('noUpdatesAvailable', "There are currently no updates available.")
 		);
 	}
 
@@ -335,8 +333,7 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 					action.run();
 					action.dispose();
 				}
-			}],
-			{ sticky: true }
+			}]
 		);
 	}
 
@@ -362,25 +359,7 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 					action.run();
 					action.dispose();
 				}
-			}],
-			{ sticky: true }
-		);
-	}
-
-	// windows fast updates
-	private onUpdateUpdating(update: IUpdate): void {
-		if (isWindows && this.productService.target === 'user') {
-			return;
-		}
-
-		// windows fast updates (target === system)
-		this.notificationService.prompt(
-			severity.Info,
-			nls.localize('updateInstalling', "{0} {1} is being installed in the background; we'll let you know when it's done.", this.productService.nameLong, update.productVersion),
-			[],
-			{
-				neverShowAgain: { id: 'neverShowAgain:update/win32-fast-updates', isSecondary: true }
-			}
+			}]
 		);
 	}
 
@@ -422,15 +401,15 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 	private shouldShowNotification(): boolean {
 		const currentVersion = this.productService.commit;
 		const currentMillis = new Date().getTime();
-		const lastKnownVersion = this.storageService.get('update/lastKnownVersion', StorageScope.GLOBAL);
+		const lastKnownVersion = this.storageService.get('update/lastKnownVersion', StorageScope.APPLICATION);
 
 		// if version != stored version, save version and date
 		if (currentVersion !== lastKnownVersion) {
-			this.storageService.store('update/lastKnownVersion', currentVersion!, StorageScope.GLOBAL, StorageTarget.MACHINE);
-			this.storageService.store('update/updateNotificationTime', currentMillis, StorageScope.GLOBAL, StorageTarget.MACHINE);
+			this.storageService.store('update/lastKnownVersion', currentVersion!, StorageScope.APPLICATION, StorageTarget.MACHINE);
+			this.storageService.store('update/updateNotificationTime', currentMillis, StorageScope.APPLICATION, StorageTarget.MACHINE);
 		}
 
-		const updateNotificationMillis = this.storageService.getNumber('update/updateNotificationTime', StorageScope.GLOBAL, currentMillis);
+		const updateNotificationMillis = this.storageService.getNumber('update/updateNotificationTime', StorageScope.APPLICATION, currentMillis);
 		const diffDays = (currentMillis - updateNotificationMillis) / (1000 * 60 * 60 * 24);
 
 		return diffDays > 5;
@@ -516,7 +495,7 @@ export class SwitchProductQualityContribution extends Disposable implements IWor
 
 	constructor(
 		@IProductService private readonly productService: IProductService,
-		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService
+		@IBrowserWorkbenchEnvironmentService private readonly environmentService: IBrowserWorkbenchEnvironmentService
 	) {
 		super();
 
@@ -546,58 +525,63 @@ export class SwitchProductQualityContribution extends Disposable implements IWor
 
 				async run(accessor: ServicesAccessor): Promise<void> {
 					const dialogService = accessor.get(IDialogService);
-					const userDataAutoSyncEnablementService = accessor.get(IUserDataAutoSyncEnablementService);
+					const userDataSyncEnablementService = accessor.get(IUserDataSyncEnablementService);
 					const userDataSyncStoreManagementService = accessor.get(IUserDataSyncStoreManagementService);
 					const storageService = accessor.get(IStorageService);
 					const userDataSyncWorkbenchService = accessor.get(IUserDataSyncWorkbenchService);
 					const userDataSyncService = accessor.get(IUserDataSyncService);
+					const notificationService = accessor.get(INotificationService);
 
-					const selectSettingsSyncServiceDialogShownKey = 'switchQuality.selectSettingsSyncServiceDialogShown';
-					const userDataSyncStore = userDataSyncStoreManagementService.userDataSyncStore;
-					let userDataSyncStoreType: UserDataSyncStoreType | undefined;
-					if (userDataSyncStore && isSwitchingToInsiders && userDataAutoSyncEnablementService.isEnabled()
-						&& !storageService.getBoolean(selectSettingsSyncServiceDialogShownKey, StorageScope.GLOBAL, false)) {
-						userDataSyncStoreType = await this.selectSettingsSyncService(dialogService);
-						if (!userDataSyncStoreType) {
-							return;
-						}
-						storageService.store(selectSettingsSyncServiceDialogShownKey, true, StorageScope.GLOBAL, StorageTarget.USER);
-						if (userDataSyncStoreType === 'stable') {
-							// Update the stable service type in the current window, so that it uses stable service after switched to insiders version (after reload).
-							await userDataSyncStoreManagementService.switch(userDataSyncStoreType);
-						}
-					}
-
-					const res = await dialogService.confirm({
-						type: 'info',
-						message: nls.localize('relaunchMessage', "Changing the version requires a reload to take effect"),
-						detail: newQuality === 'insider' ?
-							nls.localize('relaunchDetailInsiders', "Press the reload button to switch to the nightly pre-production version of VSCode.") :
-							nls.localize('relaunchDetailStable', "Press the reload button to switch to the monthly released stable version of VSCode."),
-						primaryButton: nls.localize('reload', "&&Reload")
-					});
-
-					if (res.confirmed) {
-						const promises: Promise<any>[] = [];
-
-						// If sync is happening wait until it is finished before reload
-						if (userDataSyncService.status === SyncStatus.Syncing) {
-							promises.push(Event.toPromise(Event.filter(userDataSyncService.onDidChangeStatus, status => status !== SyncStatus.Syncing)));
+					try {
+						const selectSettingsSyncServiceDialogShownKey = 'switchQuality.selectSettingsSyncServiceDialogShown';
+						const userDataSyncStore = userDataSyncStoreManagementService.userDataSyncStore;
+						let userDataSyncStoreType: UserDataSyncStoreType | undefined;
+						if (userDataSyncStore && isSwitchingToInsiders && userDataSyncEnablementService.isEnabled()
+							&& !storageService.getBoolean(selectSettingsSyncServiceDialogShownKey, StorageScope.APPLICATION, false)) {
+							userDataSyncStoreType = await this.selectSettingsSyncService(dialogService);
+							if (!userDataSyncStoreType) {
+								return;
+							}
+							storageService.store(selectSettingsSyncServiceDialogShownKey, true, StorageScope.APPLICATION, StorageTarget.USER);
+							if (userDataSyncStoreType === 'stable') {
+								// Update the stable service type in the current window, so that it uses stable service after switched to insiders version (after reload).
+								await userDataSyncStoreManagementService.switch(userDataSyncStoreType);
+							}
 						}
 
-						// Synchronise the store type option in insiders service, so that other clients using insiders service are also updated.
-						if (isSwitchingToInsiders) {
-							promises.push(userDataSyncWorkbenchService.synchroniseUserDataSyncStoreType());
-						}
+						const res = await dialogService.confirm({
+							type: 'info',
+							message: nls.localize('relaunchMessage', "Changing the version requires a reload to take effect"),
+							detail: newQuality === 'insider' ?
+								nls.localize('relaunchDetailInsiders', "Press the reload button to switch to the Insiders version of VS Code.") :
+								nls.localize('relaunchDetailStable', "Press the reload button to switch to the Stable version of VS Code."),
+							primaryButton: nls.localize('reload', "&&Reload")
+						});
 
-						await Promises.settled(promises);
+						if (res.confirmed) {
+							const promises: Promise<any>[] = [];
 
-						productQualityChangeHandler(newQuality);
-					} else {
-						// Reset
-						if (userDataSyncStoreType) {
-							storageService.remove(selectSettingsSyncServiceDialogShownKey, StorageScope.GLOBAL);
+							// If sync is happening wait until it is finished before reload
+							if (userDataSyncService.status === SyncStatus.Syncing) {
+								promises.push(Event.toPromise(Event.filter(userDataSyncService.onDidChangeStatus, status => status !== SyncStatus.Syncing)));
+							}
+
+							// If user chose the sync service then synchronise the store type option in insiders service, so that other clients using insiders service are also updated.
+							if (isSwitchingToInsiders && userDataSyncStoreType) {
+								promises.push(userDataSyncWorkbenchService.synchroniseUserDataSyncStoreType());
+							}
+
+							await Promises.settled(promises);
+
+							productQualityChangeHandler(newQuality);
+						} else {
+							// Reset
+							if (userDataSyncStoreType) {
+								storageService.remove(selectSettingsSyncServiceDialogShownKey, StorageScope.APPLICATION);
+							}
 						}
+					} catch (error) {
+						notificationService.error(error);
 					}
 				}
 

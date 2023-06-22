@@ -1,13 +1,14 @@
 steps:
   - task: NodeTool@0
     inputs:
-      versionSpec: "14.x"
+      versionSpec: "16.x"
 
   - task: AzureKeyVault@1
     displayName: "Azure Key Vault: Get Secrets"
     inputs:
       azureSubscription: "vscode-builds-subscription"
       KeyVaultName: vscode
+      SecretsFilter: "github-distro-mixin-password,ESRP-PKI,esrp-aad-username,esrp-aad-password"
 
   - script: |
       set -e
@@ -23,81 +24,104 @@ steps:
 
   - script: |
       set -e
+      git fetch https://github.com/$(VSCODE_MIXIN_REPO).git $VSCODE_DISTRO_REF
+      echo "##vso[task.setvariable variable=VSCODE_DISTRO_COMMIT;]$(git rev-parse FETCH_HEAD)"
+      git checkout FETCH_HEAD
+    condition: and(succeeded(), ne(variables.VSCODE_DISTRO_REF, ' '))
+    displayName: Checkout override commit
+
+  - script: |
+      set -e
       git pull --no-rebase https://github.com/$(VSCODE_MIXIN_REPO).git $(node -p "require('./package.json').distro")
     displayName: Merge distro
 
   - script: |
-      pushd build \
-      && yarn \
-      && npm install -g typescript \
-      && tsc azure-pipelines/common/createAsset.ts \
-      && popd
-    displayName: Restore modules for just build folder and compile it
+      mkdir -p .build
+      node build/azure-pipelines/common/computeNodeModulesCacheKey.js x64 $ENABLE_TERRAPIN > .build/yarnlockhash
+    displayName: Prepare yarn cache flags
+
+  - task: Cache@2
+    inputs:
+      key: "nodeModules | $(Agent.OS) | .build/yarnlockhash"
+      path: .build/node_modules_cache
+      cacheHitVar: NODE_MODULES_RESTORED
+    displayName: Restore node_modules cache
+
+  - script: |
+      set -e
+      tar -xzf .build/node_modules_cache/cache.tgz
+    displayName: Extract node_modules cache
+    condition: and(succeeded(), eq(variables.NODE_MODULES_RESTORED, 'true'))
+
+  - script: |
+      set -e
+      npm install -g node-gyp@latest
+      node-gyp --version
+    displayName: Update node-gyp
+    condition: and(succeeded(), ne(variables.NODE_MODULES_RESTORED, 'true'))
+
+  - script: |
+      set -e
+      npx https://aka.ms/enablesecurefeed standAlone
+    timeoutInMinutes: 5
+    retryCountOnTaskFailure: 3
+    condition: and(succeeded(), ne(variables.NODE_MODULES_RESTORED, 'true'), eq(variables['ENABLE_TERRAPIN'], 'true'))
+    displayName: Switch to Terrapin packages
+
+  - script: |
+      set -e
+      export npm_config_arch=$(VSCODE_ARCH)
+      export npm_config_node_gyp=$(which node-gyp)
+
+      for i in {1..3}; do # try 3 times, for Terrapin
+        yarn --frozen-lockfile --check-files && break
+        if [ $i -eq 3 ]; then
+          echo "Yarn failed too many times" >&2
+          exit 1
+        fi
+        echo "Yarn failed $i, trying again..."
+      done
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+      GITHUB_TOKEN: "$(github-distro-mixin-password)"
+    displayName: Install dependencies
+    condition: and(succeeded(), ne(variables.NODE_MODULES_RESTORED, 'true'))
+
+  - script: |
+      set -e
+      node build/azure-pipelines/common/listNodeModules.js .build/node_modules_list.txt
+      mkdir -p .build/node_modules_cache
+      tar -czf .build/node_modules_cache/cache.tgz --files-from .build/node_modules_list.txt
+    condition: and(succeeded(), ne(variables.NODE_MODULES_RESTORED, 'true'))
+    displayName: Create node_modules archive
 
   - download: current
-    artifact: vscode-darwin-$(VSCODE_ARCH)
+    artifact: unsigned_vscode_client_darwin_$(VSCODE_ARCH)_archive
     displayName: Download $(VSCODE_ARCH) artifact
 
   - script: |
       set -e
-      unzip $(Pipeline.Workspace)/vscode-darwin-$(VSCODE_ARCH)/VSCode-darwin-$(VSCODE_ARCH).zip -d $(agent.builddirectory)/VSCode-darwin-$(VSCODE_ARCH)
-      mv $(Pipeline.Workspace)/vscode-darwin-$(VSCODE_ARCH)/VSCode-darwin-$(VSCODE_ARCH).zip $(agent.builddirectory)/VSCode-darwin-$(VSCODE_ARCH).zip
+      unzip $(Pipeline.Workspace)/unsigned_vscode_client_darwin_$(VSCODE_ARCH)_archive/VSCode-darwin-$(VSCODE_ARCH).zip -d $(agent.builddirectory)/VSCode-darwin-$(VSCODE_ARCH)
+      mv $(Pipeline.Workspace)/unsigned_vscode_client_darwin_$(VSCODE_ARCH)_archive/VSCode-darwin-$(VSCODE_ARCH).zip $(agent.builddirectory)/VSCode-darwin-$(VSCODE_ARCH).zip
     displayName: Unzip & move
 
-  - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@1
+  - task: UseDotNet@2
     inputs:
-      ConnectedServiceName: "ESRP CodeSign"
-      FolderPath: "$(agent.builddirectory)"
-      Pattern: "VSCode-darwin-$(VSCODE_ARCH).zip"
-      signConfigType: inlineSignParams
-      inlineOperation: |
-        [
-          {
-            "keyCode": "CP-401337-Apple",
-            "operationSetCode": "MacAppDeveloperSign",
-            "parameters": [
-              {
-                "parameterName": "Hardening",
-                "parameterValue": "--options=runtime"
-              }
-            ],
-            "toolName": "sign",
-            "toolVersion": "1.0"
-          }
-        ]
-      SessionTimeout: 60
+      version: 2.x
+
+  - task: EsrpClientTool@1
+    displayName: Download ESRPClient
+
+  - script: |
+      set -e
+      node build/azure-pipelines/common/sign "$(esrpclient.toolpath)/$(esrpclient.toolname)" darwin-sign $(ESRP-PKI) $(esrp-aad-username) $(esrp-aad-password) $(agent.builddirectory) VSCode-darwin-$(VSCODE_ARCH).zip
     displayName: Codesign
 
   - script: |
-      APP_ROOT=$(agent.builddirectory)/VSCode-darwin-$(VSCODE_ARCH)
-      APP_NAME="`ls $APP_ROOT | head -n 1`"
-      BUNDLE_IDENTIFIER=$(node -p "require(\"$APP_ROOT/$APP_NAME/Contents/Resources/app/product.json\").darwinBundleIdentifier")
-      echo "##vso[task.setvariable variable=BundleIdentifier]$BUNDLE_IDENTIFIER"
-    displayName: Export bundle identifier
-
-  - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@1
-    inputs:
-      ConnectedServiceName: "ESRP CodeSign"
-      FolderPath: "$(agent.builddirectory)"
-      Pattern: "VSCode-darwin-$(VSCODE_ARCH).zip"
-      signConfigType: inlineSignParams
-      inlineOperation: |
-        [
-          {
-            "keyCode": "CP-401337-Apple",
-            "operationSetCode": "MacAppNotarize",
-            "parameters": [
-              {
-                "parameterName": "BundleId",
-                "parameterValue": "$(BundleIdentifier)"
-              }
-            ],
-            "toolName": "sign",
-            "toolVersion": "1.0"
-          }
-        ]
-      SessionTimeout: 60
-    displayName: Notarization
+      set -e
+      node build/azure-pipelines/common/sign "$(esrpclient.toolpath)/$(esrpclient.toolname)" darwin-notarize $(ESRP-PKI) $(esrp-aad-username) $(esrp-aad-password) $(agent.builddirectory) VSCode-darwin-$(VSCODE_ARCH).zip
+    displayName: Notarize
 
   - script: |
       set -e
@@ -108,22 +132,18 @@ steps:
     condition: and(succeeded(), ne(variables['VSCODE_ARCH'], 'arm64'))
 
   - script: |
-      set -e
-
       # For legacy purposes, arch for x64 is just 'darwin'
       case $VSCODE_ARCH in
         x64) ASSET_ID="darwin" ;;
         arm64) ASSET_ID="darwin-arm64" ;;
         universal) ASSET_ID="darwin-universal" ;;
       esac
+      echo "##vso[task.setvariable variable=ASSET_ID]$ASSET_ID"
+    displayName: Set asset id variable
 
-      VSCODE_MIXIN_PASSWORD="$(github-distro-mixin-password)" \
-      AZURE_DOCUMENTDB_MASTERKEY="$(builds-docdb-key-readwrite)" \
-      AZURE_STORAGE_ACCESS_KEY="$(ticino-storage-key)" \
-      AZURE_STORAGE_ACCESS_KEY_2="$(vscode-storage-key)" \
-      node build/azure-pipelines/common/createAsset.js \
-        "$ASSET_ID" \
-        archive \
-        "VSCode-$ASSET_ID.zip" \
-        ../VSCode-darwin-$(VSCODE_ARCH).zip
-    displayName: Publish Clients
+  - script: mv $(agent.builddirectory)/VSCode-darwin-x64.zip $(agent.builddirectory)/VSCode-darwin.zip
+    displayName: Rename x64 build to it's legacy name
+    condition: and(succeeded(), eq(variables['VSCODE_ARCH'], 'x64'))
+
+  - publish: $(Agent.BuildDirectory)/VSCode-$(ASSET_ID).zip
+    artifact: vscode_client_darwin_$(VSCODE_ARCH)_archive

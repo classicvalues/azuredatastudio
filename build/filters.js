@@ -12,6 +12,9 @@
  * all ⊃ eol ⊇ indentation ⊃ copyright ⊃ typescript
  */
 
+const { readFileSync } = require('fs');
+const { join } = require('path');
+
 module.exports.all = [
 	'*',
 	'build/**/*',
@@ -22,12 +25,47 @@ module.exports.all = [
 	'!out*/**',
 	'!test/**/out/**',
 	'!**/node_modules/**',
+
+	// {{SQL CARBON EDIT}}
+	'!build/actions/**/*.js',
+	'!build/**/*'
+];
+
+module.exports.unicodeFilter = [
+	'**',
+
+	'!**/ThirdPartyNotices.txt',
+	'!**/LICENSE.{txt,rtf}',
+	'!LICENSES.chromium.html',
+	'!**/LICENSE',
+
+	'!**/*.{dll,exe,png,bmp,jpg,scpt,cur,ttf,woff,eot,template,ico,icns,opus,targets,nupkg}',
+	'!**/test/**',
+	'!**/*.test.ts',
+	'!**/*.{d.ts,json,md}',
+
+	'!build/win32/**',
+	'!extensions/markdown-language-features/notebook-out/*.js',
+	'!extensions/markdown-math/notebook-out/**',
+	'!extensions/notebook-renderers/renderer-out/**',
+	'!extensions/php-language-features/src/features/phpGlobalFunctions.ts',
+	'!extensions/typescript-language-features/test-workspace/**',
+	'!extensions/vscode-api-tests/testWorkspace/**',
+	'!extensions/vscode-api-tests/testWorkspace2/**',
+	'!extensions/**/dist/**',
+	'!extensions/**/out/**',
+	'!extensions/**/snippets/**',
+	'!extensions/**/colorize-fixtures/**',
+
+	'!src/vs/base/browser/dompurify/**',
+	'!src/vs/workbench/services/keybinding/browser/keyboardLayouts/**',
 ];
 
 module.exports.indentationFilter = [
 	'**',
 
 	// except specific files
+	'!**/*.{dll,exe,png,bmp,jpg,scpt,cur,ttf,woff,eot,template,ico,icns,opus,targets,nupkg}',
 	'!**/ThirdPartyNotices.txt',
 	'!**/LICENSE.{txt,rtf}',
 	'!LICENSES.chromium.html',
@@ -37,7 +75,7 @@ module.exports.indentationFilter = [
 	'!src/vs/css.js',
 	'!src/vs/css.build.js',
 	'!src/vs/loader.js',
-	'!src/vs/base/common/insane/insane.js',
+	'!src/vs/base/browser/dompurify/*',
 	'!src/vs/base/common/marked/marked.js',
 	'!src/vs/base/common/semver/semver.js',
 	'!src/vs/base/node/terminateProcess.sh',
@@ -51,10 +89,11 @@ module.exports.indentationFilter = [
 	'!test/monaco/out/**',
 	'!test/smoke/out/**',
 	'!extensions/typescript-language-features/test-workspace/**',
-	'!extensions/notebook-markdown-extensions/notebook-out/**',
+	'!extensions/typescript-language-features/resources/walkthroughs/**',
+	'!extensions/markdown-math/notebook-out/**',
+	'!extensions/ipynb/notebook-out/**',
 	'!extensions/vscode-api-tests/testWorkspace/**',
 	'!extensions/vscode-api-tests/testWorkspace2/**',
-	'!extensions/vscode-custom-editor-tests/test-workspace/**',
 	'!build/monaco/**',
 	'!build/win32/**',
 
@@ -78,8 +117,8 @@ module.exports.indentationFilter = [
 	'!src/vs/*/**/*.d.ts',
 	'!src/typings/**/*.d.ts',
 	'!extensions/**/*.d.ts',
-	'!**/*.{svg,exe,png,bmp,jpg,scpt,bat,cmd,cur,ttf,woff,eot,md,ps1,template,yaml,yml,d.ts.recipe,ico,icns,plist}',
-	'!build/{lib,download,darwin}/**/*.js',
+	'!**/*.{svg,exe,png,bmp,jpg,scpt,bat,cmd,cur,ttf,woff,eot,md,ps1,template,yaml,yml,d.ts.recipe,ico,icns,plist,opus,admx,adml}',
+	'!build/{lib,download,linux,darwin}/**/*.js',
 	'!build/**/*.sh',
 	'!build/azure-pipelines/**/*.js',
 	'!build/azure-pipelines/**/*.config',
@@ -87,10 +126,38 @@ module.exports.indentationFilter = [
 	'!**/Dockerfile.*',
 	'!**/*.Dockerfile',
 	'!**/*.dockerfile',
+
+	// except for built files
 	'!extensions/markdown-language-features/media/*.js',
 	'!extensions/markdown-language-features/notebook-out/*.js',
-	'!extensions/notebook-markdown-extensions/notebook-out/*.js',
+	'!extensions/markdown-math/notebook-out/*.js',
+	'!extensions/notebook-renderers/renderer-out/*.js',
 	'!extensions/simple-browser/media/*.js',
+
+	// {{SQL CARBON EDIT}} Except for our stuff
+	'!**/*.{xlf,lcl,docx,sql,vsix,bacpac,ipynb,jpg,gif}',
+	'!build/**/*',
+	'!extensions/**/coverage/**',
+	'!extensions/admin-tool-ext-win/ssmsmin/**',
+	'!extensions/admin-tool-ext-win/license/**',
+	'!extensions/arc/src/controller/generated/**',
+	'!extensions/azuremonitor/sqltoolsservice/**',
+	'!extensions/datavirtualization/scaleoutdataservice/**',
+	'!extensions/import/flatfileimportservice/**',
+	'!extensions/integration-tests/testData/**',
+	'!extensions/kusto/sqltoolsservice/**',
+	'!extensions/mssql/sqltoolsservice/**',
+	'!extensions/resource-deployment/notebooks/**',
+	'!extensions/markdown-language-features/media/*.js',
+	'!extensions/mssql/notebooks/**',
+	'!extensions/simple-browser/media/*.js',
+	'!extensions/sql-database-projects/BuildDirectory/SystemDacpacs/**',
+	'!extensions/sql-database-projects/resources/templates/*.xml',
+	'!extensions/sql-database-projects/src/test/baselines/*.{xml,json,sqlproj}',
+	'!extensions/sql-migration/migrationService/**',
+	'!resources/linux/snap/electron-launch',
+	'!resources/xlf/LocProject.json',
+	'!test/coverage/**'
 ];
 
 module.exports.copyrightFilter = [
@@ -103,9 +170,11 @@ module.exports.copyrightFilter = [
 	'!**/*.bat',
 	'!**/*.cmd',
 	'!**/*.ico',
+	'!**/*.opus',
 	'!**/*.icns',
 	'!**/*.xml',
 	'!**/*.sh',
+	'!**/*.zsh',
 	'!**/*.txt',
 	'!**/*.xpm',
 	'!**/*.opts',
@@ -113,33 +182,60 @@ module.exports.copyrightFilter = [
 	'!**/*.code-workspace',
 	'!**/*.js.map',
 	'!build/**/*.init',
+	'!build/linux/libcxx-fetcher.*',
 	'!resources/linux/snap/snapcraft.yaml',
 	'!resources/win32/bin/code.js',
-	'!resources/web/code-web.js',
 	'!resources/completions/**',
 	'!extensions/configuration-editing/build/inline-allOf.ts',
 	'!extensions/markdown-language-features/media/highlight.css',
-	'!extensions/notebook-markdown-extensions/notebook-out/**',
+	'!extensions/markdown-math/notebook-out/**',
 	'!extensions/html-language-features/server/src/modes/typescript/*',
 	'!extensions/*/server/bin/*',
 	'!src/vs/editor/test/node/classification/typescript-test.ts',
+
+	// {{SQL CARBON EDIT}} Except for stuff in our code that doesn't use our copyright
+	'!extensions/azuremonitor/src/prompts/**',
+	'!extensions/import/flatfileimportservice/**',
+	'!extensions/kusto/src/prompts/**',
+	'!extensions/mssql/sqltoolsservice/**',
+	'!extensions/mssql/src/prompts/**',
+	'!extensions/notebook/resources/jupyter_config/**',
+	'!extensions/notebook/src/intellisense/text.ts',
+	'!extensions/notebook/src/prompts/**',
+	'!extensions/query-history/images/**',
+	'!extensions/sql/build/update-grammar.js',
+	'!src/sql/workbench/contrib/notebook/browser/outputs/tableRenderers.ts',
+	'!src/sql/workbench/contrib/notebook/common/models/url.ts',
+	'!src/sql/workbench/services/notebook/browser/outputs/renderMimeInterfaces.ts',
+	'!src/sql/workbench/contrib/notebook/browser/models/outputProcessor.ts',
+	'!src/sql/workbench/services/notebook/browser/outputs/mimemodel.ts',
+	'!src/sql/workbench/contrib/notebook/browser/cellViews/media/*.css',
+	'!src/sql/base/browser/ui/table/plugins/rowSelectionModel.plugin.ts',
+	'!src/sql/base/browser/ui/table/plugins/rowDetailView.ts',
+	'!src/sql/base/browser/ui/table/plugins/headerFilter.plugin.ts',
+	'!src/sql/base/browser/ui/table/plugins/checkboxSelectColumn.plugin.ts',
+	'!src/sql/base/browser/ui/table/plugins/cellSelectionModel.plugin.ts',
+	'!src/sql/base/browser/ui/table/plugins/autoSizeColumns.plugin.ts',
+	'!src/sql/base/browser/ui/table/plugins/rowMoveManager.plugin.ts',
+	'!src/sql/workbench/services/notebook/browser/outputs/sanitizer.ts',
+	'!src/sql/workbench/contrib/notebook/browser/outputs/renderers.ts',
+	'!src/sql/workbench/services/notebook/browser/outputs/tableRenderers.ts',
+	'!src/sql/workbench/services/notebook/browser/outputs/registry.ts',
+	'!src/sql/workbench/services/notebook/browser/outputs/factories.ts',
+	'!src/sql/workbench/services/notebook/common/nbformat.ts',
+	'!extensions/markdown-language-features/media/tomorrow.css',
+	'!src/sql/workbench/browser/modelComponents/media/highlight.css',
+	'!src/sql/workbench/contrib/notebook/electron-browser/cellViews/media/highlight.css',
+	'!src/sql/workbench/contrib/notebook/browser/turndownPluginGfm.ts',
+	'!**/*.gif',
+	'!**/*.xlf',
+	'!**/*.dacpac',
+	'!**/*.bacpac',
+	'!**/*.py',
+	'!build/**/*' // {{SQL CARBON EDIT}}
 ];
 
-module.exports.jsHygieneFilter = [
-	'src/**/*.js',
-	'build/gulpfile.*.js',
-	'!src/vs/loader.js',
-	'!src/vs/css.js',
-	'!src/vs/nls.js',
-	'!src/vs/css.build.js',
-	'!src/vs/nls.build.js',
-	'!src/**/insane.js',
-	'!src/**/marked.js',
-	'!src/**/semver.js',
-	'!**/test/**',
-];
-
-module.exports.tsHygieneFilter = [
+module.exports.tsFormattingFilter = [
 	'src/**/*.ts',
 	'test/**/*.ts',
 	'extensions/**/*.ts',
@@ -154,4 +250,19 @@ module.exports.tsHygieneFilter = [
 	'!extensions/vscode-api-tests/testWorkspace2/**',
 	'!extensions/**/*.test.ts',
 	'!extensions/html-language-features/server/lib/jquery.d.ts',
+
+	// {{SQL CARBON EDIT}}
+	'!src/vs/workbench/services/themes/common/textMateScopeMatcher.ts', // skip this because we have no plans on touching this and its not ours
+	'!src/vs/workbench/contrib/extensions/browser/extensionRecommendationsService.ts', // skip this because known issue
+	'!build/**/*'
+];
+
+module.exports.eslintFilter = [
+	'**/*.js',
+	'**/*.ts',
+	...readFileSync(join(__dirname, '../.eslintignore'))
+		.toString().split(/\r\n|\n/)
+		.filter(line => !line.startsWith('#'))
+		.filter(line => !!line)
+		.map(line => `!${line}`)
 ];

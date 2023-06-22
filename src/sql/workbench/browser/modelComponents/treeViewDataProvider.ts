@@ -4,15 +4,16 @@
  *--------------------------------------------------------------------------------------------*/
 
 // eslint-disable-next-line code-import-patterns
-import { ExtHostModelViewTreeViewsShape, SqlExtHostContext } from 'sql/workbench/api/common/sqlExtHost.protocol';
+import { ExtHostModelViewTreeViewsShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
 // eslint-disable-next-line code-import-patterns
-import { IExtHostContext } from 'vs/workbench/api/common/extHost.protocol';
 import { IModelViewTreeViewDataProvider, ITreeComponentItem } from 'sql/workbench/common/views';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 // eslint-disable-next-line code-import-patterns
 import * as vsTreeView from 'vs/workbench/api/browser/mainThreadTreeViews';
 import { ResolvableTreeItem } from 'vs/workbench/common/views';
 import { deepClone } from 'vs/base/common/objects';
+import { IExtHostContext } from 'vs/workbench/services/extensions/common/extHostCustomers';
+import { SqlExtHostContext } from 'vs/workbench/api/common/extHost.protocol';
 
 export class ResolvableTreeComponentItem extends ResolvableTreeItem implements ITreeComponentItem {
 
@@ -63,7 +64,7 @@ export class TreeViewDataProvider extends vsTreeView.TreeViewDataProvider implem
 	 * @override
 	 * @param elements The elements to map
 	 */
-	protected override async postGetChildren(elements: ITreeComponentItem[]): Promise<ResolvableTreeComponentItem[]> {
+	protected override async postGetChildren(elements: ResolvableTreeItem[] | undefined): Promise<ResolvableTreeComponentItem[]> {
 		const result: ResolvableTreeComponentItem[] = [];
 		const hasResolve = await this.hasResolve;
 		if (elements) {

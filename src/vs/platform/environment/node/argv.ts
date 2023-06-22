@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as minimist from 'minimist';
-import { localize } from 'vs/nls';
 import { isWindows } from 'vs/base/common/platform';
+import { localize } from 'vs/nls';
 import { NativeParsedArgs } from 'vs/platform/environment/common/argv';
 
 /**
@@ -20,9 +20,11 @@ const helpCategories = {
 export interface Option<OptionType> {
 	type: OptionType;
 	alias?: string;
-	deprecates?: string; // old deprecated id
+	deprecates?: string[]; // old deprecated ids
 	args?: string | string[];
 	description?: string;
+	deprecationMessage?: string;
+	allowEmptyValue?: boolean;
 	cat?: keyof typeof helpCategories;
 }
 
@@ -39,6 +41,7 @@ type OptionTypeName<T> =
 
 export const OPTIONS: OptionDescriptions<Required<NativeParsedArgs>> = {
 	'diff': { type: 'boolean', cat: 'o', alias: 'd', args: ['file', 'file'], description: localize('diff', "Compare two files with each other.") },
+	'merge': { type: 'boolean', cat: 'o', alias: 'm', args: ['path1', 'path2', 'base', 'result'], description: localize('merge', "Perform a three-way merge by providing paths for two modified versions of a file, the common origin of both modified versions and the output file to save merge results.") },
 	'add': { type: 'boolean', cat: 'o', alias: 'a', args: 'folder', description: localize('add', "Add folder(s) to the last active window.") },
 	'goto': { type: 'boolean', cat: 'o', alias: 'g', args: 'file:line[:character]', description: localize('goto', "Open a file at the path on the specified line and character position.") },
 	'new-window': { type: 'boolean', cat: 'o', alias: 'n', description: localize('newWindow', "Force to open a new window.") },
@@ -49,35 +52,38 @@ export const OPTIONS: OptionDescriptions<Required<NativeParsedArgs>> = {
 	'user-data-dir': { type: 'string', cat: 'o', args: 'dir', description: localize('userDataDir', "Specifies the directory that user data is kept in. Can be used to open multiple distinct instances of Code.") },
 	'help': { type: 'boolean', cat: 'o', alias: 'h', description: localize('help', "Print usage.") },
 
-	'extensions-dir': { type: 'string', deprecates: 'extensionHomePath', cat: 'e', args: 'dir', description: localize('extensionHomePath', "Set the root path for extensions.") },
+	'extensions-dir': { type: 'string', deprecates: ['extensionHomePath'], cat: 'e', args: 'dir', description: localize('extensionHomePath', "Set the root path for extensions.") },
 	'extensions-download-dir': { type: 'string' },
 	'builtin-extensions-dir': { type: 'string' },
 	'list-extensions': { type: 'boolean', cat: 'e', description: localize('listExtensions', "List the installed extensions.") },
 	'show-versions': { type: 'boolean', cat: 'e', description: localize('showVersions', "Show versions of installed extensions, when using --list-extensions.") },
-	'category': { type: 'string', cat: 'e', description: localize('category', "Filters installed extensions by provided category, when using --list-extensions.") },
-	'install-extension': { type: 'string[]', cat: 'e', args: 'extension-id[@version] | path-to-vsix', description: localize('installExtension', "Installs or updates the extension. The identifier of an extension is always `${publisher}.${name}`. Use `--force` argument to update to latest version. To install a specific version provide `@${version}`. For example: 'vscode.csharp@1.2.3'.") },
-	'uninstall-extension': { type: 'string[]', cat: 'e', args: 'extension-id', description: localize('uninstallExtension', "Uninstalls an extension.") },
-	'enable-proposed-api': { type: 'string[]', cat: 'e', args: 'extension-id', description: localize('experimentalApis', "Enables proposed API features for extensions. Can receive one or more extension IDs to enable individually.") },
+	'category': { type: 'string', cat: 'e', description: localize('category', "Filters installed extensions by provided category, when using --list-extensions."), args: 'category' },
+	'install-extension': { type: 'string[]', cat: 'e', args: 'ext-id | path', description: localize('installExtension', "Installs or updates an extension. The argument is either an extension id or a path to a VSIX. The identifier of an extension is '${publisher}.${name}'. Use '--force' argument to update to latest version. To install a specific version provide '@${version}'. For example: 'vscode.csharp@1.2.3'.") },
+	'pre-release': { type: 'boolean', cat: 'e', description: localize('install prerelease', "Installs the pre-release version of the extension, when using --install-extension") },
+	'uninstall-extension': { type: 'string[]', cat: 'e', args: 'ext-id', description: localize('uninstallExtension', "Uninstalls an extension.") },
+	'enable-proposed-api': { type: 'string[]', allowEmptyValue: true, cat: 'e', args: 'ext-id', description: localize('experimentalApis', "Enables proposed API features for extensions. Can receive one or more extension IDs to enable individually.") },
 
 	'version': { type: 'boolean', cat: 't', alias: 'v', description: localize('version', "Print version.") },
 	'verbose': { type: 'boolean', cat: 't', description: localize('verbose', "Print verbose output (implies --wait).") },
 	'log': { type: 'string', cat: 't', args: 'level', description: localize('log', "Log level to use. Default is 'info'. Allowed values are 'critical', 'error', 'warn', 'info', 'debug', 'trace', 'off'.") },
 	'status': { type: 'boolean', alias: 's', cat: 't', description: localize('status', "Print process usage and diagnostics information.") },
-	'prof-startup': { type: 'boolean', cat: 't', description: localize('prof-startup', "Run CPU profiler during startup") },
+	'prof-startup': { type: 'boolean', cat: 't', description: localize('prof-startup', "Run CPU profiler during startup.") },
 	'prof-append-timers': { type: 'string' },
+	'no-cached-data': { type: 'boolean' },
 	'prof-startup-prefix': { type: 'string' },
 	'prof-v8-extensions': { type: 'boolean' },
-	'disable-extensions': { type: 'boolean', deprecates: 'disableExtensions', cat: 't', description: localize('disableExtensions', "Disable all installed extensions.") },
-	'disable-extension': { type: 'string[]', cat: 't', args: 'extension-id', description: localize('disableExtension', "Disable an extension.") },
-	'sync': { type: 'string', cat: 't', description: localize('turn sync', "Turn sync on or off"), args: ['on', 'off'] },
+	'disable-extensions': { type: 'boolean', deprecates: ['disableExtensions'], cat: 't', description: localize('disableExtensions', "Disable all installed extensions.") },
+	'disable-extension': { type: 'string[]', cat: 't', args: 'ext-id', description: localize('disableExtension', "Disable an extension.") },
+	'sync': { type: 'string', cat: 't', description: localize('turn sync', "Turn sync on or off."), args: ['on | off'] },
 
-	'inspect-extensions': { type: 'string', deprecates: 'debugPluginHost', args: 'port', cat: 't', description: localize('inspect-extensions', "Allow debugging and profiling of extensions. Check the developer tools for the connection URI.") },
-	'inspect-brk-extensions': { type: 'string', deprecates: 'debugBrkPluginHost', args: 'port', cat: 't', description: localize('inspect-brk-extensions', "Allow debugging and profiling of extensions with the extension host being paused after start. Check the developer tools for the connection URI.") },
+	'inspect-extensions': { type: 'string', allowEmptyValue: true, deprecates: ['debugPluginHost'], args: 'port', cat: 't', description: localize('inspect-extensions', "Allow debugging and profiling of extensions. Check the developer tools for the connection URI.") },
+	'inspect-brk-extensions': { type: 'string', allowEmptyValue: true, deprecates: ['debugBrkPluginHost'], args: 'port', cat: 't', description: localize('inspect-brk-extensions', "Allow debugging and profiling of extensions with the extension host being paused after start. Check the developer tools for the connection URI.") },
 	'disable-gpu': { type: 'boolean', cat: 't', description: localize('disableGPU', "Disable GPU hardware acceleration.") },
-	'max-memory': { type: 'string', cat: 't', description: localize('maxMemory', "Max memory size for a window (in Mbytes).") },
+	'ms-enable-electron-run-as-node': { type: 'boolean' },
+	'max-memory': { type: 'string', cat: 't', description: localize('maxMemory', "Max memory size for a window (in Mbytes)."), args: 'memory' },
 	'telemetry': { type: 'boolean', cat: 't', description: localize('telemetry', "Shows all telemetry events which VS code collects.") },
 
-	'remote': { type: 'string' },
+	'remote': { type: 'string', allowEmptyValue: true },
 	'folder-uri': { type: 'string[]', cat: 'o', args: 'uri' },
 	'file-uri': { type: 'string[]', cat: 'o', args: 'uri' },
 
@@ -85,18 +91,23 @@ export const OPTIONS: OptionDescriptions<Required<NativeParsedArgs>> = {
 	'extensionDevelopmentPath': { type: 'string[]' },
 	'extensionDevelopmentKind': { type: 'string[]' },
 	'extensionTestsPath': { type: 'string' },
+	'extensionEnvironment': { type: 'string' },
 	'debugId': { type: 'string' },
 	'debugRenderer': { type: 'boolean' },
-	'inspect-search': { type: 'string', deprecates: 'debugSearch' },
-	'inspect-brk-search': { type: 'string', deprecates: 'debugBrkSearch' },
+	'inspect-ptyhost': { type: 'string', allowEmptyValue: true },
+	'inspect-brk-ptyhost': { type: 'string', allowEmptyValue: true },
+	'inspect-search': { type: 'string', deprecates: ['debugSearch'], allowEmptyValue: true },
+	'inspect-brk-search': { type: 'string', deprecates: ['debugBrkSearch'], allowEmptyValue: true },
 	'export-default-configuration': { type: 'string' },
 	'install-source': { type: 'string' },
-	'driver': { type: 'string' },
+	'enable-smoke-test-driver': { type: 'boolean' },
 	'logExtensionHostCommunication': { type: 'boolean' },
 	'skip-release-notes': { type: 'boolean' },
+	'skip-welcome': { type: 'boolean' },
 	'disable-telemetry': { type: 'boolean' },
 	'disable-updates': { type: 'boolean' },
 	'disable-keytar': { type: 'boolean' },
+	'disable-workspace-trust': { type: 'boolean' },
 	'disable-crash-reporter': { type: 'boolean' },
 	'crash-reporter-directory': { type: 'string' },
 	'crash-reporter-id': { type: 'string' },
@@ -105,7 +116,6 @@ export const OPTIONS: OptionDescriptions<Required<NativeParsedArgs>> = {
 	'open-url': { type: 'boolean' },
 	'file-write': { type: 'boolean' },
 	'file-chmod': { type: 'boolean' },
-	'driver-verbose': { type: 'boolean' },
 	'install-builtin-extension': { type: 'string[]' },
 	'force': { type: 'boolean' },
 	'do-not-sync': { type: 'boolean' },
@@ -115,26 +125,39 @@ export const OPTIONS: OptionDescriptions<Required<NativeParsedArgs>> = {
 	'force-user-env': { type: 'boolean' },
 	'force-disable-user-env': { type: 'boolean' },
 	'open-devtools': { type: 'boolean' },
-	'__sandbox': { type: 'boolean' },
 	'logsPath': { type: 'string' },
+	'__enable-file-policy': { type: 'boolean' },
+	'editSessionId': { type: 'string' },
+	'locate-shell-integration-path': { type: 'string', args: ['bash', 'pwsh', 'zsh'] },
 
 	// {{SQL CARBON EDIT}} Start
-	'command': { type: 'string', alias: 'c', cat: 'o', args: 'command-name', description: localize('commandParameter', 'Name of command to run') },
-	'database': { type: 'string', alias: 'D', cat: 'o', args: 'database', description: localize('databaseParameter', 'Database name') },
-	'server': { type: 'string', alias: 'S', cat: 'o', args: 'server', description: localize('serverParameter', 'Server name') },
-	'user': { type: 'string', alias: 'U', cat: 'o', args: 'user-name', description: localize('userParameter', 'User name for server connection') },
-	'aad': { type: 'boolean', cat: 'o', description: localize('aadParameter', 'Use Azure Active Directory authentication for server connection') },
-	'integrated': { type: 'boolean', alias: 'E', cat: 'o', description: localize('integratedAuthParameter', 'Use Integrated authentication for server connection') },
+	'aad': { type: 'boolean', cat: 'o', description: localize('aadParameter', 'Use Azure Active Directory authentication, this option is depcrecated - use \'authenticationType\' instead.') },
+	'applicationName': { type: 'string', alias: 'A', cat: 'o', allowEmptyValue: true, description: localize('applicationNameParameter', 'Supports providing applicationName that will be used for connection profile app name.') },
+	'authenticationType': { type: 'string', alias: 'T', cat: 'o', allowEmptyValue: true, deprecates: ['aad', 'integrated'], description: localize('authenticationTypeParameter', 'Provide authentication mode to be used. Accepted values: AzureMFA, SqlLogin, Integrated, etc.') },
+	'command': { type: 'string', alias: 'c', cat: 'o', args: 'command-name', allowEmptyValue: true, description: localize('commandParameter', 'Name of command to run, accepted values: connect, openConnectionDialog') },
+	'connectionProperties': { type: 'string', alias: 'Z', cat: 'o', allowEmptyValue: true, description: localize('connectionPropsParameter', `Supports providing advanced connection properties that providers support. Value must be a json object containing key-value pairs in format: '{"key1":"value1"}'`) },
+	'database': { type: 'string', alias: 'D', cat: 'o', args: 'database', allowEmptyValue: true, description: localize('databaseParameter', 'Name of database') },
+	'integrated': { type: 'boolean', alias: 'E', cat: 'o', description: localize('integratedAuthParameter', 'Use Integrated authentication, this option is depcrecated - use \'authenticationType\' instead.') },
+	'provider': { type: 'string', alias: 'P', cat: 'o', allowEmptyValue: true, description: localize('providerParameter', 'Connection provider to use, e.g. MSSQL, PGSQL, etc. ') },
+	'server': { type: 'string', alias: 'S', cat: 'o', args: 'server', allowEmptyValue: true, description: localize('serverParameter', 'Name of target server or host name.') },
+	'showDashboard': { type: 'boolean', cat: 'o', description: localize('showDashboardParameter', 'Whether or not to show dashboard on connection, false by default.') },
+	'user': { type: 'string', alias: 'U', cat: 'o', args: 'user-name', allowEmptyValue: true, description: localize('userParameter', 'User name/email address') },
 	// {{SQL CARBON EDIT}} - End
 
 	// chromium flags
 	'no-proxy-server': { type: 'boolean' },
+	// Minimist incorrectly parses keys that start with `--no`
+	// https://github.com/substack/minimist/blob/aeb3e27dae0412de5c0494e9563a5f10c82cc7a9/index.js#L118-L121
+	// If --no-sandbox is passed via cli wrapper it will be treated as --sandbox which is incorrect, we use
+	// the alias here to make sure --no-sandbox is always respected.
+	// For https://github.com/microsoft/vscode/issues/128279
+	'no-sandbox': { type: 'boolean', alias: 'sandbox' },
 	'proxy-server': { type: 'string' },
 	'proxy-bypass-list': { type: 'string' },
 	'proxy-pac-url': { type: 'string' },
 	'js-flags': { type: 'string' }, // chrome js flags
-	'inspect': { type: 'string' },
-	'inspect-brk': { type: 'string' },
+	'inspect': { type: 'string', allowEmptyValue: true },
+	'inspect-brk': { type: 'string', allowEmptyValue: true },
 	'nolazy': { type: 'boolean' }, // node inspect
 	'force-device-scale-factor': { type: 'string' },
 	'force-renderer-accessibility': { type: 'boolean' },
@@ -143,6 +166,7 @@ export const OPTIONS: OptionDescriptions<Required<NativeParsedArgs>> = {
 	'log-net-log': { type: 'string' },
 	'vmodule': { type: 'string' },
 	'_urls': { type: 'string[]' },
+	'disable-dev-shm-usage': { type: 'boolean' },
 
 	_: { type: 'string[]' } // main arguments
 };
@@ -150,18 +174,22 @@ export const OPTIONS: OptionDescriptions<Required<NativeParsedArgs>> = {
 export interface ErrorReporter {
 	onUnknownOption(id: string): void;
 	onMultipleValues(id: string, usedValue: string): void;
+	onEmptyValue(id: string): void;
+	onDeprecatedOption(deprecatedId: string, message: string): void;
 }
 
 const ignoringReporter: ErrorReporter = {
 	onUnknownOption: () => { },
-	onMultipleValues: () => { }
+	onMultipleValues: () => { },
+	onEmptyValue: () => { },
+	onDeprecatedOption: () => { }
 };
 
 export function parseArgs<T>(args: string[], options: OptionDescriptions<T>, errorReporter: ErrorReporter = ignoringReporter): T {
 	const alias: { [key: string]: string } = {};
-	const string: string[] = [];
+	const string: string[] = ['_'];
 	const boolean: string[] = [];
-	for (let optionId in options) {
+	for (const optionId in options) {
 		const o = options[optionId];
 		if (o.alias) {
 			alias[optionId] = o.alias;
@@ -170,12 +198,12 @@ export function parseArgs<T>(args: string[], options: OptionDescriptions<T>, err
 		if (o.type === 'string' || o.type === 'string[]') {
 			string.push(optionId);
 			if (o.deprecates) {
-				string.push(o.deprecates);
+				string.push(...o.deprecates);
 			}
 		} else if (o.type === 'boolean') {
 			boolean.push(optionId);
 			if (o.deprecates) {
-				boolean.push(o.deprecates);
+				boolean.push(...o.deprecates);
 			}
 		}
 	}
@@ -190,37 +218,58 @@ export function parseArgs<T>(args: string[], options: OptionDescriptions<T>, err
 
 	delete remainingArgs._;
 
-	for (let optionId in options) {
+	for (const optionId in options) {
 		const o = options[optionId];
 		if (o.alias) {
 			delete remainingArgs[o.alias];
 		}
 
 		let val = remainingArgs[optionId];
-		if (o.deprecates && remainingArgs.hasOwnProperty(o.deprecates)) {
-			if (!val) {
-				val = remainingArgs[o.deprecates];
+		if (o.deprecates) {
+			for (const deprecatedId of o.deprecates) {
+				if (remainingArgs.hasOwnProperty(deprecatedId)) {
+					if (!val) {
+						val = remainingArgs[deprecatedId];
+						if (val) {
+							errorReporter.onDeprecatedOption(deprecatedId, o.deprecationMessage || localize('deprecated.useInstead', 'Use {0} instead.', optionId));
+						}
+					}
+					delete remainingArgs[deprecatedId];
+				}
 			}
-			delete remainingArgs[o.deprecates];
 		}
 
 		if (typeof val !== 'undefined') {
 			if (o.type === 'string[]') {
-				if (val && !Array.isArray(val)) {
+				if (!Array.isArray(val)) {
 					val = [val];
+				}
+				if (!o.allowEmptyValue) {
+					const sanitized = val.filter((v: string) => v.length > 0);
+					if (sanitized.length !== val.length) {
+						errorReporter.onEmptyValue(optionId);
+						val = sanitized.length > 0 ? sanitized : undefined;
+					}
 				}
 			} else if (o.type === 'string') {
 				if (Array.isArray(val)) {
 					val = val.pop(); // take the last
 					errorReporter.onMultipleValues(optionId, val);
+				} else if (!val && !o.allowEmptyValue) {
+					errorReporter.onEmptyValue(optionId);
+					val = undefined;
 				}
 			}
 			cleanedArgs[optionId] = val;
+
+			if (o.deprecationMessage) {
+				errorReporter.onDeprecatedOption(optionId, o.deprecationMessage);
+			}
 		}
 		delete remainingArgs[optionId];
 	}
 
-	for (let key in remainingArgs) {
+	for (const key in remainingArgs) {
 		errorReporter.onUnknownOption(key);
 	}
 
@@ -245,24 +294,24 @@ function formatUsage(optionId: string, option: Option<any>) {
 // exported only for testing
 export function formatOptions(options: OptionDescriptions<any>, columns: number): string[] {
 	let maxLength = 0;
-	let usageTexts: [string, string][] = [];
+	const usageTexts: [string, string][] = [];
 	for (const optionId in options) {
 		const o = options[optionId];
 		const usageText = formatUsage(optionId, o);
 		maxLength = Math.max(maxLength, usageText.length);
 		usageTexts.push([usageText, o.description!]);
 	}
-	let argLength = maxLength + 2/*left padding*/ + 1/*right padding*/;
+	const argLength = maxLength + 2/*left padding*/ + 1/*right padding*/;
 	if (columns - argLength < 25) {
 		// Use a condensed version on narrow terminals
 		return usageTexts.reduce<string[]>((r, ut) => r.concat([`  ${ut[0]}`, `      ${ut[1]}`]), []);
 	}
-	let descriptionColumns = columns - argLength - 1;
-	let result: string[] = [];
+	const descriptionColumns = columns - argLength - 1;
+	const result: string[] = [];
 	for (const ut of usageTexts) {
-		let usage = ut[0];
-		let wrappedDescription = wrapText(ut[1], descriptionColumns);
-		let keyPadding = indent(argLength - usage.length - 2/*left padding*/);
+		const usage = ut[0];
+		const wrappedDescription = wrapText(ut[1], descriptionColumns);
+		const keyPadding = indent(argLength - usage.length - 2/*left padding*/);
 		result.push('  ' + usage + keyPadding + wrappedDescription[0]);
 		for (let i = 1; i < wrappedDescription.length; i++) {
 			result.push(indent(argLength) + wrappedDescription[i]);
@@ -276,24 +325,25 @@ function indent(count: number): string {
 }
 
 function wrapText(text: string, columns: number): string[] {
-	let lines: string[] = [];
+	const lines: string[] = [];
 	while (text.length) {
-		let index = text.length < columns ? text.length : text.lastIndexOf(' ', columns);
-		let line = text.slice(0, index).trim();
+		const index = text.length < columns ? text.length : text.lastIndexOf(' ', columns);
+		const line = text.slice(0, index).trim();
 		text = text.slice(index);
 		lines.push(line);
 	}
 	return lines;
 }
 
-export function buildHelpMessage(productName: string, executableName: string, version: string, options: OptionDescriptions<any>, isPipeSupported = true): string {
+export function buildHelpMessage(productName: string, executableName: string, version: string, options: OptionDescriptions<any>, capabilities?: { noPipe?: boolean; noInputFiles: boolean }): string {
 	const columns = (process.stdout).isTTY && (process.stdout).columns || 80;
+	const inputFiles = capabilities?.noInputFiles !== true ? `[${localize('paths', 'paths')}...]` : '';
 
-	let help = [`${productName} ${version}`];
+	const help = [`${productName} ${version}`];
 	help.push('');
-	help.push(`${localize('usage', "Usage")}: ${executableName} [${localize('options', "options")}][${localize('paths', 'paths')}...]`);
+	help.push(`${localize('usage', "Usage")}: ${executableName} [${localize('options', "options")}]${inputFiles}`);
 	help.push('');
-	if (isPipeSupported) {
+	if (capabilities?.noPipe !== true) {
 		if (isWindows) {
 			help.push(localize('stdinWindows', "To read output from another program, append '-' (e.g. 'echo Hello World | {0} -')", executableName));
 		} else {
@@ -313,10 +363,10 @@ export function buildHelpMessage(productName: string, executableName: string, ve
 		}
 	}
 
-	for (let helpCategoryKey in optionsByCategory) {
+	for (const helpCategoryKey in optionsByCategory) {
 		const key = <keyof typeof helpCategories>helpCategoryKey;
 
-		let categoryOptions = optionsByCategory[key];
+		const categoryOptions = optionsByCategory[key];
 		if (categoryOptions) {
 			help.push(helpCategories[key]);
 			help.push(...formatOptions(categoryOptions, columns));

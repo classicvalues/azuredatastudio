@@ -4,26 +4,32 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
+import { AbstractTreeViewState } from 'vs/base/browser/ui/tree/abstractTree';
+import { Emitter } from 'vs/base/common/event';
 import { HierarchicalByLocationProjection } from 'vs/workbench/contrib/testing/browser/explorerProjections/hierarchalByLocation';
-import { testStubs } from 'vs/workbench/contrib/testing/common/testStubs';
-import { makeTestWorkspaceFolder, TestTreeTestHarness } from 'vs/workbench/contrib/testing/test/browser/testObjectTree';
+import { TestDiffOpType, TestItemExpandState, TestResultItem, TestResultState } from 'vs/workbench/contrib/testing/common/testTypes';
+import { TestId } from 'vs/workbench/contrib/testing/common/testId';
+import { TestResultItemChange, TestResultItemChangeReason } from 'vs/workbench/contrib/testing/common/testResult';
+import { TestTreeTestHarness } from 'vs/workbench/contrib/testing/test/browser/testObjectTree';
+import { TestTestItem } from 'vs/workbench/contrib/testing/test/common/testStubs';
 
 class TestHierarchicalByLocationProjection extends HierarchicalByLocationProjection {
-	public get folderNodes() {
-		return [...this.folders.values()];
-	}
 }
 
 suite('Workbench - Testing Explorer Hierarchal by Location Projection', () => {
 	let harness: TestTreeTestHarness<TestHierarchicalByLocationProjection>;
-	const folder1 = makeTestWorkspaceFolder('f1');
-	const folder2 = makeTestWorkspaceFolder('f2');
+	let onTestChanged: Emitter<TestResultItemChange>;
+	let resultsService: any;
+
 	setup(() => {
-		harness = new TestTreeTestHarness([folder1, folder2], l => new TestHierarchicalByLocationProjection(l, {
+		onTestChanged = new Emitter();
+		resultsService = {
 			onResultsChanged: () => undefined,
-			onTestChanged: () => undefined,
+			onTestChanged: onTestChanged.event,
 			getStateById: () => ({ state: { state: 0 }, computedState: 0 }),
-		} as any));
+		};
+
+		harness = new TestTreeTestHarness(l => new TestHierarchicalByLocationProjection(AbstractTreeViewState.empty(), l, resultsService as any));
 	});
 
 	teardown(() => {
@@ -31,90 +37,122 @@ suite('Workbench - Testing Explorer Hierarchal by Location Projection', () => {
 	});
 
 	test('renders initial tree', async () => {
-		harness.c.addRoot(testStubs.nested(), 'a');
-		harness.flush(folder1);
+		harness.flush();
 		assert.deepStrictEqual(harness.tree.getRendered(), [
 			{ e: 'a' }, { e: 'b' }
 		]);
 	});
 
 	test('expands children', async () => {
-		harness.c.addRoot(testStubs.nested(), 'a');
-		harness.flush(folder1);
-		harness.tree.expand(harness.projection.getElementByTestId('id-a')!);
-		assert.deepStrictEqual(harness.flush(folder1), [
+		harness.flush();
+		harness.tree.expand(harness.projection.getElementByTestId(new TestId(['ctrlId', 'id-a']).toString())!);
+		assert.deepStrictEqual(harness.flush(), [
 			{ e: 'a', children: [{ e: 'aa' }, { e: 'ab' }] }, { e: 'b' }
 		]);
 	});
 
-	test('updates render if a second folder is added', async () => {
-		harness.c.addRoot(testStubs.nested('id1-'), 'a');
-		harness.flush(folder1);
-		harness.c.addRoot(testStubs.nested('id2-'), 'a');
-		harness.flush(folder2);
-		assert.deepStrictEqual(harness.tree.getRendered(), [
-			{ e: 'f1', children: [{ e: 'a' }, { e: 'b' }] },
-			{ e: 'f2', children: [{ e: 'a' }, { e: 'b' }] },
-		]);
-
-		harness.tree.expand(harness.projection.getElementByTestId('id1-a')!);
-		assert.deepStrictEqual(harness.flush(folder1), [
-			{ e: 'f1', children: [{ e: 'a', children: [{ e: 'aa' }, { e: 'ab' }] }, { e: 'b' }] },
-			{ e: 'f2', children: [{ e: 'a' }, { e: 'b' }] },
-		]);
-	});
-
-	test('updates render if second folder is removed', async () => {
-		harness.c.addRoot(testStubs.nested('id1-'), 'a');
-		harness.flush(folder1);
-		harness.c.addRoot(testStubs.nested('id2-'), 'a');
-		harness.flush(folder2);
-		harness.onFolderChange.fire({ added: [], changed: [], removed: [folder1] });
-		assert.deepStrictEqual(harness.flush(folder1), [
-			{ e: 'a' }, { e: 'b' },
-		]);
-	});
-
 	test('updates render if second test provider appears', async () => {
-		harness.c.addRoot(testStubs.nested(), 'a');
-		harness.flush(folder1);
-		harness.c.addRoot(testStubs.test('root2', undefined, [testStubs.test('c')]), 'b');
-		assert.deepStrictEqual(harness.flush(folder1), [
-			{ e: 'root', children: [{ e: 'a' }, { e: 'b' }] },
-			{ e: 'root2', children: [{ e: 'c' }] },
+		harness.flush();
+		harness.pushDiff({
+			op: TestDiffOpType.Add,
+			item: { controllerId: 'ctrl2', parent: null, expand: TestItemExpandState.Expanded, item: new TestTestItem('ctrl2', 'c', 'c').toTestItem() },
+		}, {
+			op: TestDiffOpType.Add,
+			item: { controllerId: 'ctrl2', parent: new TestId(['ctrl2', 'c']).toString(), expand: TestItemExpandState.NotExpandable, item: new TestTestItem('ctrl2', 'c-a', 'ca').toTestItem() },
+		});
+
+		assert.deepStrictEqual(harness.flush(), [
+			{ e: 'c', children: [{ e: 'ca' }] },
+			{ e: 'root', children: [{ e: 'a' }, { e: 'b' }] }
 		]);
 	});
 
 	test('updates nodes if they add children', async () => {
-		const tests = testStubs.nested();
-		harness.c.addRoot(tests, 'a');
-		harness.flush(folder1);
-		harness.tree.expand(harness.projection.getElementByTestId('id-a')!);
+		harness.flush();
+		harness.tree.expand(harness.projection.getElementByTestId(new TestId(['ctrlId', 'id-a']).toString())!);
 
-		assert.deepStrictEqual(harness.flush(folder1), [
+		assert.deepStrictEqual(harness.flush(), [
 			{ e: 'a', children: [{ e: 'aa' }, { e: 'ab' }] },
 			{ e: 'b' }
 		]);
 
-		tests.children.get('id-a')!.addChild(testStubs.test('ac'));
+		harness.c.root.children.get('id-a')!.children.add(new TestTestItem('ctrlId', 'ac', 'ac'));
 
-		assert.deepStrictEqual(harness.flush(folder1), [
+		assert.deepStrictEqual(harness.flush(), [
 			{ e: 'a', children: [{ e: 'aa' }, { e: 'ab' }, { e: 'ac' }] },
 			{ e: 'b' }
 		]);
 	});
 
 	test('updates nodes if they remove children', async () => {
-		const tests = testStubs.nested();
-		harness.c.addRoot(tests, 'a');
-		harness.flush(folder1);
-		harness.tree.expand(harness.projection.getElementByTestId('id-a')!);
+		harness.flush();
+		harness.tree.expand(harness.projection.getElementByTestId(new TestId(['ctrlId', 'id-a']).toString())!);
 
-		tests.children.get('id-a')!.children.get('id-ab')!.dispose();
+		assert.deepStrictEqual(harness.flush(), [
+			{ e: 'a', children: [{ e: 'aa' }, { e: 'ab' }] },
+			{ e: 'b' }
+		]);
 
-		assert.deepStrictEqual(harness.flush(folder1), [
+		harness.c.root.children.get('id-a')!.children.delete('id-ab');
+
+		assert.deepStrictEqual(harness.flush(), [
 			{ e: 'a', children: [{ e: 'aa' }] },
 			{ e: 'b' }
+		]);
+	});
+
+	test('applies state changes', async () => {
+		harness.flush();
+		resultsService.getStateById = () => [undefined, resultInState(TestResultState.Failed)];
+
+		const resultInState = (state: TestResultState): TestResultItem => ({
+			item: {
+				extId: new TestId(['ctrlId', 'id-a']).toString(),
+				busy: false,
+				description: null,
+				error: null,
+				label: 'a',
+				range: null,
+				sortText: null,
+				tags: [],
+				uri: undefined,
+			},
+			parent: 'id-root',
+			tasks: [],
+			ownComputedState: state,
+			computedState: state,
+			expand: 0,
+			controllerId: 'ctrl',
+		});
+
+		// Applies the change:
+		onTestChanged.fire({
+			reason: TestResultItemChangeReason.OwnStateChange,
+			result: null as any,
+			previousState: TestResultState.Unset,
+			item: resultInState(TestResultState.Queued),
+			previousOwnDuration: undefined,
+		});
+		harness.projection.applyTo(harness.tree);
+
+		assert.deepStrictEqual(harness.tree.getRendered('state'), [
+			{ e: 'a', data: String(TestResultState.Queued) },
+			{ e: 'b', data: String(TestResultState.Unset) }
+		]);
+
+		// Falls back if moved into unset state:
+		onTestChanged.fire({
+			reason: TestResultItemChangeReason.OwnStateChange,
+			result: null as any,
+			previousState: TestResultState.Queued,
+			item: resultInState(TestResultState.Unset),
+			previousOwnDuration: undefined,
+		});
+		harness.projection.applyTo(harness.tree);
+
+		assert.deepStrictEqual(harness.tree.getRendered('state'), [
+			{ e: 'a', data: String(TestResultState.Failed) },
+			{ e: 'b', data: String(TestResultState.Unset) }
 		]);
 	});
 });

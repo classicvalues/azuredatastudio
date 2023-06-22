@@ -242,6 +242,8 @@ export default class DeclarativeTableComponent extends ContainerBase<any, azdata
 			} else {
 				return localize('blankValue', "blank");
 			}
+		} else if (cellData?.ariaLabel) {
+			return cellData.ariaLabel;
 		}
 
 		return '';
@@ -268,9 +270,10 @@ export default class DeclarativeTableComponent extends ContainerBase<any, azdata
 	}
 
 	private static ACCEPTABLE_VALUES = new Set<string>(['number', 'string', 'boolean']);
-	public override setProperties(properties: azdata.DeclarativeTableProperties): void {
-		const basicData: any[][] = properties.data ?? [];
-		const complexData: azdata.DeclarativeTableCellValue[][] = properties.dataValues ?? [];
+	public override setProperties(properties: { [key: string]: any; }): void {
+		let castProperties = properties as azdata.DeclarativeTableProperties;
+		const basicData: any[][] = castProperties.data ?? [];
+		const complexData: azdata.DeclarativeTableCellValue[][] = castProperties.dataValues ?? [];
 		let finalData: azdata.DeclarativeTableCellValue[][];
 
 		finalData = basicData.map(row => {
@@ -291,7 +294,7 @@ export default class DeclarativeTableComponent extends ContainerBase<any, azdata
 			finalData = complexData;
 		}
 
-		this.columns = properties.columns ?? [];
+		this.columns = castProperties.columns ?? [];
 
 		// check whether the data property is changed before actually setting the properties.
 		const isDataPropertyChanged = !arrayEquals(this.data, finalData ?? [], (a, b) => {
@@ -402,7 +405,7 @@ export default class DeclarativeTableComponent extends ContainerBase<any, azdata
 
 	private createMenuItem(commandId: string): MenuItemAction {
 		const command = MenuRegistry.getCommand(commandId);
-		return this.instantiationService.createInstance(MenuItemAction, command, undefined, { shouldForwardArgs: true });
+		return this.instantiationService.createInstance(MenuItemAction, command, undefined, { shouldForwardArgs: true }, undefined);
 	}
 
 	public onKey(e: KeyboardEvent, row: number) {

@@ -6,20 +6,22 @@
 import { localize } from 'vs/nls';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { INotificationService } from 'vs/platform/notification/common/notification';
-import { Action, IAction, Separator } from 'vs/base/common/actions';
-import { ActionBar, ActionsOrientation } from 'vs/base/browser/ui/actionbar/actionbar';
+import { Action, IAction, IActionRunner, Separator } from 'vs/base/common/actions';
 import { CellActionBase, CellContext } from 'sql/workbench/contrib/notebook/browser/cellViews/codeActions';
 import { CellModel } from 'sql/workbench/services/notebook/browser/models/cell';
 import { CellTypes, CellType } from 'sql/workbench/services/notebook/common/contracts';
-import { ToggleableAction } from 'sql/workbench/contrib/notebook/browser/notebookActions';
+import { AddCodeCellAction, AddTextCellAction, ToggleableAction } from 'sql/workbench/contrib/notebook/browser/notebookActions';
 import { getErrorMessage } from 'vs/base/common/errors';
 import Severity from 'vs/base/common/severity';
 import { INotebookService } from 'sql/workbench/services/notebook/browser/notebookService';
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
-import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
-import { MoveDirection } from 'sql/workbench/services/notebook/browser/models/modelInterfaces';
+import { CellEditModes, MoveDirection } from 'sql/workbench/services/notebook/browser/models/modelInterfaces';
+import * as TelemetryKeys from 'sql/platform/telemetry/common/telemetryKeys';
+import { DropdownMenuActionViewItem } from 'vs/base/browser/ui/dropdown/dropdownActionViewItem';
+import { AnchorAlignment } from 'vs/base/browser/ui/contextview/contextview';
+import { moreActionsLabel } from 'sql/workbench/contrib/notebook/common/notebookLoc';
 
-const moreActionsLabel = localize('moreActionsLabel', "More");
+const addCellLabel = localize('addCellLabel', "Add cell");
 
 export class EditCellAction extends ToggleableAction {
 	// Constants
@@ -58,6 +60,37 @@ export class EditCellAction extends ToggleableAction {
 	}
 }
 
+export class SplitCellAction extends CellActionBase {
+	public cellType: CellType;
+
+	constructor(
+		id: string,
+		label: string,
+		cssClass: string,
+		@INotificationService notificationService: INotificationService,
+		@INotebookService private notebookService: INotebookService,
+	) {
+		super(id, label, cssClass, notificationService);
+		this._cssClass = cssClass;
+		this._tooltip = label;
+		this._label = '';
+	}
+	doRun(context: CellContext): Promise<void> {
+		let model = context.model;
+		let index = model.cells.findIndex((cell) => cell.id === context.cell.id);
+		context.model?.splitCell(context.cell.cellType, this.notebookService, index, context.cell.metadata?.language);
+		return Promise.resolve();
+	}
+	public setListener(context: CellContext) {
+		this._register(context.cell.onCurrentEditModeChanged(currentMode => {
+			this.enabled = currentMode === CellEditModes.WYSIWYG ? false : true;
+		}));
+		this._register(context.cell.notebookModel.onCellTypeChanged(_ => {
+			this.enabled = context.cell.currentMode === CellEditModes.WYSIWYG ? false : true;
+		}));
+	}
+}
+
 export class MoveCellAction extends CellActionBase {
 	constructor(
 		id: string,
@@ -75,6 +108,7 @@ export class MoveCellAction extends CellActionBase {
 		let moveDirection = this._cssClass.includes('move-down') ? MoveDirection.Down : MoveDirection.Up;
 		try {
 			context.model.moveCell(context.cell, moveDirection);
+			context.model.sendNotebookTelemetryActionEvent(TelemetryKeys.NbTelemetryAction.MoveCell, { moveDirection: moveDirection });
 		} catch (error) {
 			let message = getErrorMessage(error);
 
@@ -112,49 +146,6 @@ export class DeleteCellAction extends CellActionBase {
 			});
 		}
 		return Promise.resolve();
-	}
-}
-
-export class CellToggleMoreActions {
-	private _actions: (Action | CellActionBase)[] = [];
-	private _moreActions: ActionBar;
-	private _moreActionsElement: HTMLElement;
-	constructor(
-		@IInstantiationService private instantiationService: IInstantiationService
-	) {
-		this._actions.push(
-			instantiationService.createInstance(ConvertCellAction, 'convertCell', localize('convertCell', "Convert Cell")),
-			new Separator(),
-			instantiationService.createInstance(RunCellsAction, 'runAllAbove', localize('runAllAbove', "Run Cells Above"), false),
-			instantiationService.createInstance(RunCellsAction, 'runAllBelow', localize('runAllBelow', "Run Cells Below"), true),
-			new Separator(),
-			instantiationService.createInstance(AddCellFromContextAction, 'codeAbove', localize('codeAbove', "Insert Code Above"), CellTypes.Code, false),
-			instantiationService.createInstance(AddCellFromContextAction, 'codeBelow', localize('codeBelow', "Insert Code Below"), CellTypes.Code, true),
-			new Separator(),
-			instantiationService.createInstance(AddCellFromContextAction, 'markdownAbove', localize('markdownAbove', "Insert Text Above"), CellTypes.Markdown, false),
-			instantiationService.createInstance(AddCellFromContextAction, 'markdownBelow', localize('markdownBelow', "Insert Text Below"), CellTypes.Markdown, true),
-			new Separator(),
-			instantiationService.createInstance(CollapseCellAction, 'collapseCell', localize('collapseCell', "Collapse Cell"), true),
-			instantiationService.createInstance(CollapseCellAction, 'expandCell', localize('expandCell', "Expand Cell"), false),
-			new Separator(),
-			instantiationService.createInstance(ParametersCellAction, 'makeParameterCell', localize('makeParameterCell', "Make parameter cell"), true),
-			instantiationService.createInstance(ParametersCellAction, 'removeParameterCell', localize('RemoveParameterCell', "Remove parameter cell"), false),
-			new Separator(),
-			instantiationService.createInstance(ClearCellOutputAction, 'clear', localize('clear', "Clear Result")),
-		);
-	}
-
-	public onInit(elementRef: HTMLElement, context: CellContext) {
-		this._moreActionsElement = elementRef;
-		this._moreActionsElement.setAttribute('aria-haspopup', 'menu');
-		if (this._moreActionsElement.childNodes.length > 0) {
-			this._moreActionsElement.removeChild(this._moreActionsElement.childNodes[0]);
-		}
-		this._moreActions = new ActionBar(this._moreActionsElement, { orientation: ActionsOrientation.VERTICAL, ariaLabel: moreActionsLabel });
-		this._moreActions.context = { target: this._moreActionsElement };
-		let validActions = this._actions.filter(a => a instanceof Separator || a instanceof CellActionBase && a.canRun(context));
-		removeDuplicatedAndStartingSeparators(validActions);
-		this._moreActions.push(this.instantiationService.createInstance(ToggleMoreActions, validActions, context), { icon: true, label: false });
 	}
 }
 
@@ -216,7 +207,7 @@ export class AddCellFromContextAction extends CellActionBase {
 			if (index !== undefined && this.isAfter) {
 				index += 1;
 			}
-			model.addCell(this.cellType, index);
+			model.addCell(this.cellType, index, context.cell.metadata?.language);
 		} catch (error) {
 			let message = getErrorMessage(error);
 
@@ -336,26 +327,104 @@ export class CollapseCellAction extends CellActionBase {
 	}
 }
 
-export class ToggleMoreActions extends Action {
+export class ToggleAddCellDropdownAction extends Action {
 
-	private static readonly ID = 'toggleMore';
-	private static readonly LABEL = moreActionsLabel;
-	private static readonly ICON = 'masked-icon more';
+	public static readonly ID = 'notebook.toggleAddCell';
+	public static readonly LABEL = addCellLabel;
+	public static readonly ICON = 'codicon masked-icon new';
 
 	constructor(
-		private readonly _actions: Array<IAction>,
-		private readonly _context: CellContext,
-		@IContextMenuService private readonly _contextMenuService: IContextMenuService
+
 	) {
-		super(ToggleMoreActions.ID, ToggleMoreActions.LABEL, ToggleMoreActions.ICON);
+		super(ToggleAddCellDropdownAction.ID);
+		this.tooltip = ToggleAddCellDropdownAction.LABEL;
+	}
+}
+
+export class ToggleAddCellActionViewItem extends DropdownMenuActionViewItem {
+	constructor(
+		action: IAction,
+		actionRunner: IActionRunner,
+		cellContext: CellContext,
+		@IContextMenuService contextMenuService: IContextMenuService,
+		@IInstantiationService instantiationService: IInstantiationService
+	) {
+		super(action,
+			[
+				instantiationService.createInstance(AddCodeCellAction),
+				instantiationService.createInstance(AddTextCellAction)
+			],
+			contextMenuService,
+			{
+				actionRunner,
+				classNames: ToggleAddCellDropdownAction.ICON,
+				anchorAlignmentProvider: () => AnchorAlignment.RIGHT
+			});
+		this.setActionContext(cellContext);
+	}
+}
+
+export class CellToggleMoreAction extends Action {
+	public static readonly ID = 'notebook.toggleMore';
+	public static readonly LABEL = moreActionsLabel;
+	public static readonly ICON = 'codicon masked-icon more';
+
+	constructor() {
+		super(CellToggleMoreAction.ID);
+		this.tooltip = CellToggleMoreAction.LABEL;
+	}
+}
+
+export class CellToggleMoreActionViewItem extends DropdownMenuActionViewItem {
+	private _actions: (Action | CellActionBase)[];
+	constructor(
+		action: IAction,
+		actionRunner: IActionRunner,
+		private _cellContext: CellContext,
+		@IContextMenuService contextMenuService: IContextMenuService,
+		@IInstantiationService instantiationService: IInstantiationService
+	) {
+		super(action,
+			{
+				getActions: () => { return this.getValidActions(); }
+			},
+			contextMenuService,
+			{
+				actionRunner,
+				classNames: CellToggleMoreAction.ICON,
+				anchorAlignmentProvider: () => AnchorAlignment.RIGHT
+			});
+		this.setActionContext(this._cellContext);
+		this._actions = [
+			instantiationService.createInstance(ConvertCellAction, 'convertCell', localize('convertCell', "Convert Cell")),
+			new Separator(),
+			instantiationService.createInstance(RunCellsAction, 'runAllAbove', localize('runAllAbove', "Run Cells Above"), false),
+			instantiationService.createInstance(RunCellsAction, 'runAllBelow', localize('runAllBelow', "Run Cells Below"), true),
+			new Separator(),
+			instantiationService.createInstance(AddCellFromContextAction, 'codeAbove', localize('codeAbove', "Insert Code Above"), CellTypes.Code, false),
+			instantiationService.createInstance(AddCellFromContextAction, 'codeBelow', localize('codeBelow', "Insert Code Below"), CellTypes.Code, true),
+			new Separator(),
+			instantiationService.createInstance(AddCellFromContextAction, 'markdownAbove', localize('markdownAbove', "Insert Text Above"), CellTypes.Markdown, false),
+			instantiationService.createInstance(AddCellFromContextAction, 'markdownBelow', localize('markdownBelow', "Insert Text Below"), CellTypes.Markdown, true),
+			new Separator(),
+			instantiationService.createInstance(CollapseCellAction, 'collapseCell', localize('collapseCell', "Collapse Cell"), true),
+			instantiationService.createInstance(CollapseCellAction, 'expandCell', localize('expandCell', "Expand Cell"), false),
+			new Separator(),
+			instantiationService.createInstance(ParametersCellAction, 'makeParameterCell', localize('makeParameterCell', "Make parameter cell"), true),
+			instantiationService.createInstance(ParametersCellAction, 'removeParameterCell', localize('RemoveParameterCell', "Remove parameter cell"), false),
+			new Separator(),
+			instantiationService.createInstance(ClearCellOutputAction, 'clear', localize('clear', "Clear Result")),
+		];
 	}
 
-	override async run(context: StandardKeyboardEvent): Promise<void> {
-		this._contextMenuService.showContextMenu({
-			getAnchor: () => context.target,
-			getActions: () => this._actions,
-			getActionsContext: () => this._context
-		});
+	/**
+	 * Gets the actions that are valid for the current cell context
+	 * @returns The list of valid actions
+	 */
+	public getValidActions(): readonly IAction[] {
+		const validActions = this._actions.filter(a => a instanceof Separator || a instanceof CellActionBase && a.canRun(this._cellContext));
+		removeDuplicatedAndStartingSeparators(validActions);
+		return validActions;
 	}
 }
 

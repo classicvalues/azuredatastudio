@@ -7,7 +7,7 @@ import { localize } from 'vs/nls';
 import { IDisposable, Disposable } from 'vs/base/common/lifecycle';
 import { Emitter } from 'vs/base/common/event';
 import { URI } from 'vs/base/common/uri';
-import { EditorInput, GroupIdentifier, IRevertOptions, ISaveOptions, IEditorInput } from 'vs/workbench/common/editor';
+import { GroupIdentifier, IRevertOptions, ISaveOptions, EditorInputCapabilities, IUntypedEditorInput } from 'vs/workbench/common/editor';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 
 import { IConnectionManagementService, IConnectableInput, INewConnectionParams, RunQueryOnConnectionMode } from 'sql/platform/connection/common/connectionManagement';
@@ -15,10 +15,11 @@ import { QueryResultsInput } from 'sql/workbench/common/editor/query/queryResult
 import { IQueryModelService } from 'sql/workbench/services/query/common/queryModel';
 
 import { ExecutionPlanOptions } from 'azdata';
-import { startsWith } from 'vs/base/common/strings';
 import { IRange } from 'vs/editor/common/core/range';
 import { AbstractTextResourceEditorInput } from 'vs/workbench/common/editor/textResourceEditorInput';
 import { IQueryEditorConfiguration } from 'sql/platform/query/common/query';
+import { EditorInput } from 'vs/workbench/common/editor/editorInput';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 
 const MAX_SIZE = 13;
 
@@ -40,6 +41,7 @@ export interface IQueryEditorStateChange {
 	executingChange?: boolean;
 	connectingChange?: boolean;
 	sqlCmdModeChanged?: boolean;
+	actualExecutionPlanModeChanged?: boolean;
 }
 
 export class QueryEditorState extends Disposable {
@@ -48,6 +50,7 @@ export class QueryEditorState extends Disposable {
 	private _resultsVisible = false;
 	private _executing = false;
 	private _connecting = false;
+	private _isActualExecutionPlanMode = false;
 
 	private _onChange = this._register(new Emitter<IQueryEditorStateChange>());
 	public onChange = this._onChange.event;
@@ -106,6 +109,26 @@ export class QueryEditorState extends Disposable {
 	public get isSqlCmdMode(): boolean {
 		return this._isSqlCmdMode;
 	}
+
+	public set isActualExecutionPlanMode(val: boolean) {
+		if (val !== this._isActualExecutionPlanMode) {
+			this._isActualExecutionPlanMode = val;
+			this._onChange.fire({ actualExecutionPlanModeChanged: true });
+		}
+	}
+
+	public get isActualExecutionPlanMode() {
+		return this._isActualExecutionPlanMode;
+	}
+
+	public setState(newState: QueryEditorState): void {
+		this.connected = newState.connected;
+		this.connecting = newState.connecting;
+		this.resultsVisible = newState.resultsVisible;
+		this.executing = newState.executing;
+		this.isSqlCmdMode = newState.isSqlCmdMode;
+		this.isActualExecutionPlanMode = newState.isActualExecutionPlanMode;
+	}
 }
 
 /**
@@ -123,9 +146,10 @@ export abstract class QueryEditorInput extends EditorInput implements IConnectab
 		private _description: string | undefined,
 		protected _text: AbstractTextResourceEditorInput,
 		protected _results: QueryResultsInput,
-		@IConnectionManagementService private readonly connectionManagementService: IConnectionManagementService,
+		@IConnectionManagementService protected readonly connectionManagementService: IConnectionManagementService,
 		@IQueryModelService private readonly queryModelService: IQueryModelService,
-		@IConfigurationService private readonly configurationService: IConfigurationService
+		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IInstantiationService protected readonly instantiationService: IInstantiationService
 	) {
 		super();
 
@@ -183,8 +207,8 @@ export abstract class QueryEditorInput extends EditorInput implements IConnectab
 		return this._text.revert(group, options);
 	}
 
-	public override isReadonly(): boolean {
-		return false;
+	public override get capabilities(): EditorInputCapabilities {
+		return EditorInputCapabilities.None;
 	}
 
 	public override matches(otherInput: any): boolean {
@@ -193,6 +217,17 @@ export abstract class QueryEditorInput extends EditorInput implements IConnectab
 			return this._text.matches(otherInput._text);
 		} else {
 			return this._text.matches(otherInput);
+		}
+	}
+
+	protected async changeConnectionUri(newUri: string): Promise<void> {
+		this.connectionManagementService.changeConnectionUri(newUri, this.uri);
+		try {
+			await this.queryModelService.changeConnectionUri(newUri, this.uri);
+		}
+		catch (error) {
+			this.connectionManagementService.changeConnectionUri(this.uri, newUri);
+			throw error;
 		}
 	}
 
@@ -208,10 +243,16 @@ export abstract class QueryEditorInput extends EditorInput implements IConnectab
 				title = this._description + ' ';
 			}
 			if (profile) {
-				if (profile.userName) {
-					title += `${profile.serverName}.${profile.databaseName} (${profile.userName})`;
-				} else {
-					title += `${profile.serverName}.${profile.databaseName} (${profile.authenticationType})`;
+				let distinguishedTitle = this.connectionManagementService.getEditorConnectionProfileTitle(profile);
+				if (distinguishedTitle !== '') {
+					title += distinguishedTitle;
+				}
+				else {
+					title += `${profile.serverName}`;
+					if (profile.databaseName) {
+						title += `.${profile.databaseName}`;
+					}
+					title += ` (${profile.userName || profile.authenticationType})`;
 				}
 			} else {
 				title += localize('disconnected', "disconnected");
@@ -222,12 +263,8 @@ export abstract class QueryEditorInput extends EditorInput implements IConnectab
 		}
 	}
 
-	override save(group: GroupIdentifier, options?: ISaveOptions): Promise<IEditorInput | undefined> {
+	override save(group: GroupIdentifier, options?: ISaveOptions): Promise<IUntypedEditorInput | undefined> {
 		return this.text.save(group, options);
-	}
-
-	override saveAs(group: GroupIdentifier, options?: ISaveOptions): Promise<IEditorInput | undefined> {
-		return this.text.saveAs(group, options);
 	}
 
 	// Called to get the tooltip of the tab
@@ -320,6 +357,6 @@ export abstract class QueryEditorInput extends EditorInput implements IConnectab
 	}
 
 	public get isSharedSession(): boolean {
-		return !!(this.uri && startsWith(this.uri, 'vsls:'));
+		return !!(this.uri && this.uri.startsWith('vsls:'));
 	}
 }

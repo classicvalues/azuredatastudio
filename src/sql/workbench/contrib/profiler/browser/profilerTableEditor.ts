@@ -19,7 +19,6 @@ import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { IEditorAction } from 'vs/editor/common/editorCommon';
 import { IOverlayWidget } from 'vs/editor/browser/editorBrowser';
-import { FindReplaceState, FindReplaceStateChangedEvent } from 'vs/editor/contrib/find/findState';
 import { EditorPane } from 'vs/workbench/browser/parts/editor/editorPane';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { Event, Emitter } from 'vs/base/common/event';
@@ -27,12 +26,16 @@ import { IInstantiationService } from 'vs/platform/instantiation/common/instanti
 import { Dimension } from 'vs/base/browser/dom';
 import { textFormatter, slickGridDataItemColumnValueExtractor } from 'sql/base/browser/ui/table/formatters';
 import { IStorageService } from 'vs/platform/storage/common/storage';
-import { IStatusbarService, StatusbarAlignment } from 'vs/workbench/services/statusbar/common/statusbar';
+import { IStatusbarService, StatusbarAlignment } from 'vs/workbench/services/statusbar/browser/statusbar';
 import { localize } from 'vs/nls';
 import { CopyKeybind } from 'sql/base/browser/ui/table/plugins/copyKeybind.plugin';
 import { IClipboardService } from 'sql/platform/clipboard/common/clipboardService';
 import { handleCopyRequest } from 'sql/workbench/contrib/profiler/browser/profilerCopyHandler';
-import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfigurationService';
+import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfiguration';
+import { FindReplaceState, FindReplaceStateChangedEvent } from 'vs/editor/contrib/find/browser/findState';
+import { IAccessibilityService } from 'vs/platform/accessibility/common/accessibility';
+import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
+import { IComponentContextService } from 'sql/workbench/services/componentContext/browser/componentContextService';
 
 export interface ProfilerTableViewState {
 	scrollTop: number;
@@ -68,7 +71,10 @@ export class ProfilerTableEditor extends EditorPane implements IProfilerControll
 		@IStorageService storageService: IStorageService,
 		@IStatusbarService private _statusbarService: IStatusbarService,
 		@IClipboardService private _clipboardService: IClipboardService,
-		@ITextResourcePropertiesService private readonly textResourcePropertiesService: ITextResourcePropertiesService
+		@ITextResourcePropertiesService private readonly textResourcePropertiesService: ITextResourcePropertiesService,
+		@IAccessibilityService private readonly _accessibilityService: IAccessibilityService,
+		@IQuickInputService private readonly _quickInputService: IQuickInputService,
+		@IComponentContextService private readonly _componentContextService: IComponentContextService
 	) {
 		super(ProfilerTableEditor.ID, telemetryService, _themeService, storageService);
 		this._actionMap[ACTION_IDS.FIND_NEXT] = this._instantiationService.createInstance(ProfilerFindNext, this);
@@ -84,7 +90,7 @@ export class ProfilerTableEditor extends EditorPane implements IProfilerControll
 		this._overlay.style.zIndex = '4';
 		parent.appendChild(this._overlay);
 
-		this._profilerTable = new Table(parent, {
+		this._profilerTable = new Table(parent, this._accessibilityService, this._quickInputService, {
 			sorter: (args) => {
 				let input = this.input as ProfilerInput;
 				if (input && input.data) {
@@ -92,7 +98,11 @@ export class ProfilerTableEditor extends EditorPane implements IProfilerControll
 				}
 			}
 		}, {
-			dataItemColumnValueExtractor: slickGridDataItemColumnValueExtractor
+			dataItemColumnValueExtractor: slickGridDataItemColumnValueExtractor,
+			// The details component in profiler UI is refreshed based on the selected row in this table.
+			// If in grid tab navigation is enabled, keyboard-only users will never be able to reach the details component
+			// when a particular row is selected.
+			enableInGridTabNavigation: false
 		});
 		this._profilerTable.setSelectionModel(new RowSelectionModel());
 		const copyKeybind = new CopyKeybind();
@@ -107,6 +117,7 @@ export class ProfilerTableEditor extends EditorPane implements IProfilerControll
 		});
 		this._profilerTable.registerPlugin(copyKeybind);
 		attachTableStyler(this._profilerTable, this._themeService);
+		this._register(this._componentContextService.registerTable(this._profilerTable));
 
 		this._findState = new FindReplaceState();
 		this._findState.onFindReplaceStateChange(e => this._onFindStateChange(e));
@@ -247,12 +258,13 @@ export class ProfilerTableEditor extends EditorPane implements IProfilerControll
 	}
 
 	private _onFindStateChange(e: FindReplaceStateChangedEvent): void {
+		const node = this._finder.getDomNode();
 		if (e.isRevealed) {
 			if (this._findState.isRevealed) {
-				this._finder.getDomNode().style.top = '0px';
+				node.style.top = '0px';
 				this._updateFinderMatchState();
 			} else {
-				this._finder.getDomNode().style.top = '';
+				node.style.top = '';
 			}
 		}
 
@@ -288,7 +300,7 @@ export class ProfilerTableEditor extends EditorPane implements IProfilerControll
 				: localize('ProfilerTableEditor.eventCount', "Events: {0}", this._input.data.getLength());
 
 			this._disposeStatusbarItem();
-			this._statusbarItem = this._statusbarService.addEntry({ text: message, ariaLabel: message }, 'status.eventCount', localize('status.eventCount', "Event Count"), StatusbarAlignment.RIGHT);
+			this._statusbarItem = this._statusbarService.addEntry({ name: localize('status.eventCount', "Event Count"), text: message, ariaLabel: message }, 'status.eventCount', StatusbarAlignment.RIGHT);
 		}
 	}
 

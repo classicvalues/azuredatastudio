@@ -5,45 +5,103 @@
 
 import type { Event } from 'vs/base/common/event';
 import type { IDisposable } from 'vs/base/common/lifecycle';
-import { RenderOutputType } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
-import { FromWebviewMessage, IBlurOutputMessage, ICellDropMessage, ICellDragMessage, ICellDragStartMessage, IClickedDataUrlMessage, ICustomRendererMessage, IDimensionMessage, IClickMarkdownPreviewMessage, IMouseEnterMarkdownPreviewMessage, IMouseEnterMessage, IMouseLeaveMarkdownPreviewMessage, IMouseLeaveMessage, IToggleMarkdownPreviewMessage, IWheelMessage, ToWebviewMessage, ICellDragEndMessage, IOutputFocusMessage, IOutputBlurMessage, DimensionUpdate, IContextMenuMarkdownPreviewMessage, ITelemetryFoundRenderedMarkdownMath, ITelemetryFoundUnrenderedMarkdownMath } from 'vs/workbench/contrib/notebook/browser/view/renderers/backLayerWebView';
+import type * as webviewMessages from 'vs/workbench/contrib/notebook/browser/view/renderers/webviewMessages';
+import { NotebookCellMetadata } from 'vs/workbench/contrib/notebook/common/notebookCommon';
+import type * as rendererApi from 'vscode-notebook-renderer';
+
+// !! IMPORTANT !! ----------------------------------------------------------------------------------
+// import { RenderOutputType } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
+// We can ONLY IMPORT as type in this module. This also applies to const enums that would evaporate
+// in normal compiles but remain a dependency in transpile-only compiles
+// !! IMPORTANT !! ----------------------------------------------------------------------------------
 
 // !! IMPORTANT !! everything must be in-line within the webviewPreloads
-// function. Imports are not allowed. This is stringifies and injected into
+// function. Imports are not allowed. This is stringified and injected into
 // the webview.
 
 declare module globalThis {
 	const acquireVsCodeApi: () => ({
-		getState(): { [key: string]: unknown; };
-		setState(data: { [key: string]: unknown; }): void;
+		getState(): { [key: string]: unknown };
+		setState(data: { [key: string]: unknown }): void;
 		postMessage: (msg: unknown) => void;
 	});
 }
 
 declare class ResizeObserver {
-	constructor(onChange: (entries: { target: HTMLElement, contentRect?: ClientRect; }[]) => void);
+	constructor(onChange: (entries: { target: HTMLElement; contentRect?: ClientRect }[]) => void);
 	observe(element: Element): void;
 	disconnect(): void;
 }
 
-declare const __outputNodePadding__: number;
-declare const __outputNodeLeftPadding__: number;
+declare class Highlight {
+	constructor();
+	add(range: AbstractRange): void;
+	clear(): void;
+	priority: number;
+}
 
-type Listener<T> = { fn: (evt: T) => void; thisArg: unknown; };
+interface CSSHighlights {
+	set(rule: string, highlight: Highlight): void;
+}
+declare namespace CSS {
+	let highlights: CSSHighlights | undefined;
+}
+
+
+type Listener<T> = { fn: (evt: T) => void; thisArg: unknown };
 
 interface EmitterLike<T> {
 	fire(data: T): void;
 	event: Event<T>;
 }
 
-async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
+interface PreloadStyles {
+	readonly outputNodePadding: number;
+	readonly outputNodeLeftPadding: number;
+}
+
+export interface PreloadOptions {
+	dragAndDropEnabled: boolean;
+}
+
+interface PreloadContext {
+	readonly nonce: string;
+	readonly style: PreloadStyles;
+	readonly options: PreloadOptions;
+	readonly rendererData: readonly RendererMetadata[];
+	readonly isWorkspaceTrusted: boolean;
+	readonly lineLimit: number;
+}
+
+declare function __import(path: string): Promise<any>;
+
+async function webviewPreloads(ctx: PreloadContext) {
+	const textEncoder = new TextEncoder();
+	const textDecoder = new TextDecoder();
+
+	let currentOptions = ctx.options;
+	let isWorkspaceTrusted = ctx.isWorkspaceTrusted;
+	const lineLimit = ctx.lineLimit;
+
 	const acquireVsCodeApi = globalThis.acquireVsCodeApi;
 	const vscode = acquireVsCodeApi();
 	delete (globalThis as any).acquireVsCodeApi;
 
+	const tokenizationStyleElement = document.querySelector('style#vscode-tokenization-styles');
+
 	const handleInnerClick = (event: MouseEvent) => {
 		if (!event || !event.view || !event.view.document) {
 			return;
+		}
+
+		for (const node of event.composedPath()) {
+			if (node instanceof HTMLElement && node.classList.contains('output')) {
+				// output
+				postNotebookMessage<webviewMessages.IOutputFocusMessage>('outputFocus', {
+					id: node.id,
+				});
+				break;
+			}
 		}
 
 		for (const node of event.composedPath()) {
@@ -52,15 +110,44 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 					handleBlobUrlClick(node.href, node.download);
 				} else if (node.href.startsWith('data:')) {
 					handleDataUrl(node.href, node.download);
+				} else if (node.hash && node.getAttribute('href') === node.hash) {
+					// Scrolling to location within current doc
+					const targetId = node.hash.substring(1);
+
+					// Check outer document first
+					let scrollTarget: Element | null | undefined = event.view.document.getElementById(targetId);
+
+					if (!scrollTarget) {
+						// Fallback to checking preview shadow doms
+						for (const preview of event.view.document.querySelectorAll('.preview')) {
+							scrollTarget = preview.shadowRoot?.getElementById(targetId);
+							if (scrollTarget) {
+								break;
+							}
+						}
+					}
+
+					if (scrollTarget) {
+						const scrollTop = scrollTarget.getBoundingClientRect().top + event.view.scrollY;
+						postNotebookMessage<webviewMessages.IScrollToRevealMessage>('scroll-to-reveal', { scrollTop });
+						return;
+					}
+				} else {
+					const href = node.getAttribute('href');
+					if (href) {
+						postNotebookMessage<webviewMessages.IClickedLinkMessage>('clicked-link', { href });
+					}
 				}
+
 				event.preventDefault();
+				event.stopPropagation();
 				return;
 			}
 		}
 	};
 
 	const handleDataUrl = async (data: string | ArrayBuffer | null, downloadName: string) => {
-		postNotebookMessage<IClickedDataUrlMessage>('clicked-data-url', {
+		postNotebookMessage<webviewMessages.IClickedDataUrlMessage>('clicked-data-url', {
 			data,
 			downloadName
 		});
@@ -82,70 +169,95 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 
 	document.body.addEventListener('click', handleInnerClick);
 
-	const preservedScriptAttributes: (keyof HTMLScriptElement)[] = [
-		'type', 'src', 'nonce', 'noModule', 'async',
-	];
-
-	// derived from https://github.com/jquery/jquery/blob/d0ce00cdfa680f1f0c38460bc51ea14079ae8b07/src/core/DOMEval.js
-	const domEval = (container: Element) => {
-		const arr = Array.from(container.getElementsByTagName('script'));
-		for (let n = 0; n < arr.length; n++) {
-			const node = arr[n];
-			const scriptTag = document.createElement('script');
-			const trustedScript = ttPolicy?.createScript(node.innerText) ?? node.innerText;
-			scriptTag.text = trustedScript as string;
-			for (const key of preservedScriptAttributes) {
-				const val = node[key] || node.getAttribute && node.getAttribute(key);
-				if (val) {
-					scriptTag.setAttribute(key, val as any);
-				}
-			}
-
-			// TODO@connor4312: should script with src not be removed?
-			container.appendChild(scriptTag).parentNode!.removeChild(scriptTag);
+	async function loadScriptSource(url: string, originalUri = url): Promise<string> {
+		const res = await fetch(url);
+		const text = await res.text();
+		if (!res.ok) {
+			throw new Error(`Unexpected ${res.status} requesting ${originalUri}: ${text || res.statusText}`);
 		}
+
+		return text;
+	}
+
+	interface RendererContext {
+		getState<T>(): T | undefined;
+		setState<T>(newState: T): void;
+		getRenderer(id: string): Promise<any | undefined>;
+		postMessage?(message: unknown): void;
+		onDidReceiveMessage?: Event<unknown>;
+		readonly workspace: { readonly isTrusted: boolean };
+		readonly settings: { readonly lineLimit: number };
+	}
+
+	interface RendererModule {
+		readonly activate: rendererApi.ActivationFunction;
+	}
+
+	interface KernelPreloadContext {
+		readonly onDidReceiveKernelMessage: Event<unknown>;
+		postKernelMessage(data: unknown): void;
+	}
+
+	interface KernelPreloadModule {
+		activate(ctx: KernelPreloadContext): Promise<void> | void;
+	}
+
+	function createKernelContext(): KernelPreloadContext {
+		return {
+			onDidReceiveKernelMessage: onDidReceiveKernelMessage.event,
+			postKernelMessage: (data: unknown) => postNotebookMessage('customKernelMessage', { message: data }),
+		};
+	}
+
+	const invokeSourceWithGlobals = (functionSrc: string, globals: { [name: string]: unknown }) => {
+		const args = Object.entries(globals);
+		return new Function(...args.map(([k]) => k), functionSrc)(...args.map(([, v]) => v));
 	};
 
-	const runScript = async (url: string, originalUri: string, globals: { [name: string]: unknown } = {}): Promise<() => (PreloadResult)> => {
-		let text: string;
+	const runKernelPreload = async (url: string, originalUri: string): Promise<void> => {
+		const text = await loadScriptSource(url, originalUri);
+		const isModule = /\bexport\b.*\bactivate\b/.test(text);
 		try {
-			const res = await fetch(url);
-			text = await res.text();
-			if (!res.ok) {
-				throw new Error(`Unexpected ${res.status} requesting ${originalUri}: ${text || res.statusText}`);
+			if (isModule) {
+				const module: KernelPreloadModule = await __import(url);
+				if (!module.activate) {
+					console.error(`Notebook preload (${url}) looks like a module but does not export an activate function`);
+					return;
+				}
+				return module.activate(createKernelContext());
+			} else {
+				return invokeSourceWithGlobals(text, { ...kernelPreloadGlobals, scriptUrl: url });
 			}
-
-			globals.scriptUrl = url;
 		} catch (e) {
-			return () => ({ state: PreloadState.Error, error: e.message });
+			console.error(e);
+			throw e;
 		}
-
-		const args = Object.entries(globals);
-		return () => {
-			try {
-				new Function(...args.map(([k]) => k), text)(...args.map(([, v]) => v));
-				return { state: PreloadState.Ok };
-			} catch (e) {
-				console.error(e);
-				return { state: PreloadState.Error, error: e.message };
-			}
-		};
 	};
 
 	const dimensionUpdater = new class {
-		private readonly pending = new Map<string, DimensionUpdate>();
+		private readonly pending = new Map<string, webviewMessages.DimensionUpdate>();
 
-		update(id: string, height: number, options: { init?: boolean; isOutput?: boolean }) {
+		updateHeight(id: string, height: number, options: { init?: boolean; isOutput?: boolean }) {
 			if (!this.pending.size) {
 				setTimeout(() => {
 					this.updateImmediately();
 				}, 0);
 			}
-			this.pending.set(id, {
-				id,
-				height,
-				...options,
-			});
+			const update = this.pending.get(id);
+			if (update && update.isOutput) {
+				this.pending.set(id, {
+					id,
+					height,
+					init: update.init,
+					isOutput: update.isOutput,
+				});
+			} else {
+				this.pending.set(id, {
+					id,
+					height,
+					...options,
+				});
+			}
 		}
 
 		updateImmediately() {
@@ -153,7 +265,7 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 				return;
 			}
 
-			postNotebookMessage<IDimensionMessage>('dimension', {
+			postNotebookMessage<webviewMessages.IDimensionMessage>('dimension', {
 				updates: Array.from(this.pending.values())
 			});
 			this.pending.clear();
@@ -164,7 +276,8 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 
 		private readonly _observer: ResizeObserver;
 
-		private readonly _observedElements = new WeakMap<Element, { id: string, output: boolean }>();
+		private readonly _observedElements = new WeakMap<Element, { id: string; output: boolean; lastKnownHeight: number; cellId: string }>();
+		private _outputResizeTimer: any;
 
 		constructor() {
 			this._observer = new ResizeObserver(entries => {
@@ -178,21 +291,22 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 						continue;
 					}
 
+					this.postResizeMessage(observedElementInfo.cellId);
+
 					if (entry.target.id === observedElementInfo.id && entry.contentRect) {
 						if (observedElementInfo.output) {
-							let height = 0;
 							if (entry.contentRect.height !== 0) {
-								entry.target.style.padding = `${__outputNodePadding__}px ${__outputNodePadding__}px ${__outputNodePadding__}px ${__outputNodeLeftPadding__}px`;
-								height = entry.contentRect.height + __outputNodePadding__ * 2;
+								entry.target.style.padding = `${ctx.style.outputNodePadding}px ${ctx.style.outputNodePadding}px ${ctx.style.outputNodePadding}px ${ctx.style.outputNodeLeftPadding}px`;
 							} else {
 								entry.target.style.padding = `0px`;
 							}
-							dimensionUpdater.update(observedElementInfo.id, height, {
-								isOutput: true
-							});
-						} else {
-							dimensionUpdater.update(observedElementInfo.id, entry.target.clientHeight, {
-								isOutput: false
+						}
+
+						const offsetHeight = entry.target.offsetHeight;
+						if (observedElementInfo.lastKnownHeight !== offsetHeight) {
+							observedElementInfo.lastKnownHeight = offsetHeight;
+							dimensionUpdater.updateHeight(observedElementInfo.id, offsetHeight, {
+								isOutput: observedElementInfo.output
 							});
 						}
 					}
@@ -200,19 +314,31 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 			});
 		}
 
-		public observe(container: Element, id: string, output: boolean) {
+		public observe(container: Element, id: string, output: boolean, cellId: string) {
 			if (this._observedElements.has(container)) {
 				return;
 			}
 
-			this._observedElements.set(container, { id, output });
+			this._observedElements.set(container, { id, output, lastKnownHeight: -1, cellId });
 			this._observer.observe(container);
+		}
+
+		private postResizeMessage(cellId: string) {
+			// Debounce this callback to only happen after
+			// 250 ms. Don't need resize events that often.
+			clearTimeout(this._outputResizeTimer);
+			this._outputResizeTimer = setTimeout(() => {
+				postNotebookMessage('outputResized', {
+					cellId
+				});
+			}, 250);
+
 		}
 	};
 
 	function scrollWillGoToParent(event: WheelEvent) {
 		for (let node = event.target as Node | null; node; node = node.parentNode) {
-			if (!(node instanceof Element) || node.id === 'container' || node.classList.contains('cell_container') || node.classList.contains('output_container')) {
+			if (!(node instanceof Element) || node.id === 'container' || node.classList.contains('cell_container') || node.classList.contains('markup') || node.classList.contains('output_container')) {
 				return false;
 			}
 
@@ -228,17 +354,21 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 		return false;
 	}
 
-	const handleWheel = (event: WheelEvent) => {
+	const handleWheel = (event: WheelEvent & { wheelDeltaX?: number; wheelDeltaY?: number; wheelDelta?: number }) => {
 		if (event.defaultPrevented || scrollWillGoToParent(event)) {
 			return;
 		}
-		postNotebookMessage<IWheelMessage>('did-scroll-wheel', {
+		postNotebookMessage<webviewMessages.IWheelMessage>('did-scroll-wheel', {
 			payload: {
 				deltaMode: event.deltaMode,
 				deltaX: event.deltaX,
 				deltaY: event.deltaY,
 				deltaZ: event.deltaZ,
+				wheelDelta: event.wheelDelta,
+				wheelDeltaX: event.wheelDeltaX,
+				wheelDeltaY: event.wheelDeltaY,
 				detail: event.detail,
+				shiftKey: event.shiftKey,
 				type: event.type
 			}
 		});
@@ -247,17 +377,22 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 	function focusFirstFocusableInCell(cellId: string) {
 		const cellOutputContainer = document.getElementById(cellId);
 		if (cellOutputContainer) {
+			if (cellOutputContainer.contains(document.activeElement)) {
+				return;
+			}
+
 			const focusableElement = cellOutputContainer.querySelector('[tabindex="0"], [href], button, input, option, select, textarea') as HTMLElement | null;
 			focusableElement?.focus();
 		}
 	}
 
-	function createFocusSink(cellId: string, outputId: string, focusNext?: boolean) {
+	function createFocusSink(cellId: string, focusNext?: boolean) {
 		const element = document.createElement('div');
+		element.id = `focus-sink-${cellId}`;
 		element.tabIndex = 0;
 		element.addEventListener('focus', () => {
-			postNotebookMessage<IBlurOutputMessage>('focus-editor', {
-				id: outputId,
+			postNotebookMessage<webviewMessages.IBlurOutputMessage>('focus-editor', {
+				cellId: cellId,
 				focusNext
 			});
 		});
@@ -267,87 +402,239 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 
 	function addMouseoverListeners(element: HTMLElement, outputId: string): void {
 		element.addEventListener('mouseenter', () => {
-			postNotebookMessage<IMouseEnterMessage>('mouseenter', {
+			postNotebookMessage<webviewMessages.IMouseEnterMessage>('mouseenter', {
 				id: outputId,
 			});
 		});
 		element.addEventListener('mouseleave', () => {
-			postNotebookMessage<IMouseLeaveMessage>('mouseleave', {
+			postNotebookMessage<webviewMessages.IMouseLeaveMessage>('mouseleave', {
 				id: outputId,
 			});
 		});
 	}
 
-	function isAncestor(testChild: Node | null, testAncestor: Node | null): boolean {
-		while (testChild) {
-			if (testChild === testAncestor) {
-				return true;
+	function _internalHighlightRange(range: Range, tagName = 'mark', attributes = {}) {
+		// derived from https://github.com/Treora/dom-highlight-range/blob/master/highlight-range.js
+
+		// Return an array of the text nodes in the range. Split the start and end nodes if required.
+		function _textNodesInRange(range: Range): Text[] {
+			if (!range.startContainer.ownerDocument) {
+				return [];
 			}
-			testChild = testChild.parentNode;
+
+			// If the start or end node is a text node and only partly in the range, split it.
+			if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0) {
+				const startContainer = range.startContainer as Text;
+				const endOffset = range.endOffset; // (this may get lost when the splitting the node)
+				const createdNode = startContainer.splitText(range.startOffset);
+				if (range.endContainer === startContainer) {
+					// If the end was in the same container, it will now be in the newly created node.
+					range.setEnd(createdNode, endOffset - range.startOffset);
+				}
+
+				range.setStart(createdNode, 0);
+			}
+
+			if (
+				range.endContainer.nodeType === Node.TEXT_NODE
+				&& range.endOffset < (range.endContainer as Text).length
+			) {
+				(range.endContainer as Text).splitText(range.endOffset);
+			}
+
+			// Collect the text nodes.
+			const walker = range.startContainer.ownerDocument.createTreeWalker(
+				range.commonAncestorContainer,
+				NodeFilter.SHOW_TEXT,
+				node => range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+			);
+
+			walker.currentNode = range.startContainer;
+
+			// // Optimise by skipping nodes that are explicitly outside the range.
+			// const NodeTypesWithCharacterOffset = [
+			//  Node.TEXT_NODE,
+			//  Node.PROCESSING_INSTRUCTION_NODE,
+			//  Node.COMMENT_NODE,
+			// ];
+			// if (!NodeTypesWithCharacterOffset.includes(range.startContainer.nodeType)) {
+			//   if (range.startOffset < range.startContainer.childNodes.length) {
+			//     walker.currentNode = range.startContainer.childNodes[range.startOffset];
+			//   } else {
+			//     walker.nextSibling(); // TODO verify this is correct.
+			//   }
+			// }
+
+			const nodes: Text[] = [];
+			if (walker.currentNode.nodeType === Node.TEXT_NODE) {
+				nodes.push(walker.currentNode as Text);
+			}
+
+			while (walker.nextNode() && range.comparePoint(walker.currentNode, 0) !== 1) {
+				if (walker.currentNode.nodeType === Node.TEXT_NODE) {
+					nodes.push(walker.currentNode as Text);
+				}
+			}
+
+			return nodes;
 		}
 
-		return false;
+		// Replace [node] with <tagName ...attributes>[node]</tagName>
+		function wrapNodeInHighlight(node: Text, tagName: string, attributes: any) {
+			const highlightElement = node.ownerDocument.createElement(tagName);
+			Object.keys(attributes).forEach(key => {
+				highlightElement.setAttribute(key, attributes[key]);
+			});
+			const tempRange = node.ownerDocument.createRange();
+			tempRange.selectNode(node);
+			tempRange.surroundContents(highlightElement);
+			return highlightElement;
+		}
+
+		if (range.collapsed) {
+			return {
+				remove: () => { },
+				update: () => { }
+			};
+		}
+
+		// First put all nodes in an array (splits start and end nodes if needed)
+		const nodes = _textNodesInRange(range);
+
+		// Highlight each node
+		const highlightElements: Element[] = [];
+		for (const nodeIdx in nodes) {
+			const highlightElement = wrapNodeInHighlight(nodes[nodeIdx], tagName, attributes);
+			highlightElements.push(highlightElement);
+		}
+
+		// Remove a highlight element created with wrapNodeInHighlight.
+		function _removeHighlight(highlightElement: Element) {
+			if (highlightElement.childNodes.length === 1) {
+				highlightElement.parentNode?.replaceChild(highlightElement.firstChild!, highlightElement);
+			} else {
+				// If the highlight somehow contains multiple nodes now, move them all.
+				while (highlightElement.firstChild) {
+					highlightElement.parentNode?.insertBefore(highlightElement.firstChild, highlightElement);
+				}
+				highlightElement.remove();
+			}
+		}
+
+		// Return a function that cleans up the highlightElements.
+		function _removeHighlights() {
+			// Remove each of the created highlightElements.
+			for (const highlightIdx in highlightElements) {
+				_removeHighlight(highlightElements[highlightIdx]);
+			}
+		}
+
+		function _updateHighlight(highlightElement: Element, attributes: any = {}) {
+			Object.keys(attributes).forEach(key => {
+				highlightElement.setAttribute(key, attributes[key]);
+			});
+		}
+
+		function updateHighlights(attributes: any) {
+			for (const highlightIdx in highlightElements) {
+				_updateHighlight(highlightElements[highlightIdx], attributes);
+			}
+		}
+
+		return {
+			remove: _removeHighlights,
+			update: updateHighlights
+		};
 	}
 
-	class FocusTracker {
-		private _outputId: string;
-		private _hasFocus: boolean = false;
-		private _loosingFocus: boolean = false;
-		private _element: HTMLElement | Window;
-		constructor(element: HTMLElement | Window, outputId: string) {
-			this._element = element;
-			this._outputId = outputId;
-			this._hasFocus = isAncestor(document.activeElement, <HTMLElement>element);
-			this._loosingFocus = false;
+	interface ICommonRange {
+		collapsed: boolean;
+		commonAncestorContainer: Node;
+		endContainer: Node;
+		endOffset: number;
+		startContainer: Node;
+		startOffset: number;
 
-			element.addEventListener('focus', this._onFocus.bind(this), true);
-			element.addEventListener('blur', this._onBlur.bind(this), true);
-		}
+	}
 
-		private _onFocus() {
-			this._loosingFocus = false;
-			if (!this._hasFocus) {
-				this._hasFocus = true;
-				postNotebookMessage<IOutputFocusMessage>('outputFocus', {
-					id: this._outputId,
-				});
+	interface IHighlightResult {
+		range: ICommonRange;
+		dispose: () => void;
+		update: (color: string | undefined, className: string | undefined) => void;
+	}
+
+	function selectRange(_range: ICommonRange) {
+		const sel = window.getSelection();
+		if (sel) {
+			try {
+				sel.removeAllRanges();
+				const r = document.createRange();
+				r.setStart(_range.startContainer, _range.startOffset);
+				r.setEnd(_range.endContainer, _range.endOffset);
+				sel.addRange(r);
+			} catch (e) {
+				console.log(e);
 			}
 		}
+	}
 
-		private _onBlur() {
-			if (this._hasFocus) {
-				this._loosingFocus = true;
-				window.setTimeout(() => {
-					if (this._loosingFocus) {
-						this._loosingFocus = false;
-						this._hasFocus = false;
-						postNotebookMessage<IOutputBlurMessage>('outputBlur', {
-							id: this._outputId,
+	function highlightRange(range: Range, useCustom: boolean, tagName = 'mark', attributes = {}): IHighlightResult {
+		if (useCustom) {
+			const ret = _internalHighlightRange(range, tagName, attributes);
+			return {
+				range: range,
+				dispose: ret.remove,
+				update: (color: string | undefined, className: string | undefined) => {
+					if (className === undefined) {
+						ret.update({
+							'style': `background-color: ${color}`
+						});
+					} else {
+						ret.update({
+							'class': className
 						});
 					}
-				}, 0);
-			}
-		}
-
-		dispose() {
-			if (this._element) {
-				this._element.removeEventListener('focus', this._onFocus, true);
-				this._element.removeEventListener('blur', this._onBlur, true);
-			}
+				}
+			};
+		} else {
+			window.document.execCommand('hiliteColor', false, matchColor);
+			const cloneRange = window.getSelection()!.getRangeAt(0).cloneRange();
+			const _range = {
+				collapsed: cloneRange.collapsed,
+				commonAncestorContainer: cloneRange.commonAncestorContainer,
+				endContainer: cloneRange.endContainer,
+				endOffset: cloneRange.endOffset,
+				startContainer: cloneRange.startContainer,
+				startOffset: cloneRange.startOffset
+			};
+			return {
+				range: _range,
+				dispose: () => {
+					selectRange(_range);
+					try {
+						document.designMode = 'On';
+						document.execCommand('removeFormat', false, undefined);
+						document.designMode = 'Off';
+						window.getSelection()?.removeAllRanges();
+					} catch (e) {
+						console.log(e);
+					}
+				},
+				update: (color: string | undefined, className: string | undefined) => {
+					selectRange(_range);
+					try {
+						document.designMode = 'On';
+						document.execCommand('removeFormat', false, undefined);
+						window.document.execCommand('hiliteColor', false, color);
+						document.designMode = 'Off';
+						window.getSelection()?.removeAllRanges();
+					} catch (e) {
+						console.log(e);
+					}
+				}
+			};
 		}
 	}
-
-	const focusTrackers = new Map<string, FocusTracker>();
-
-	function addFocusTracker(element: HTMLElement, outputId: string): void {
-		if (focusTrackers.has(outputId)) {
-			focusTrackers.get(outputId)?.dispose();
-		}
-
-		focusTrackers.set(outputId, new FocusTracker(element, outputId));
-	}
-
-	const dontEmit = Symbol('dontEmit');
 
 	function createEmitter<T>(listenerChange: (listeners: Set<Listener<T>>) => void = () => undefined): EmitterLike<T> {
 		const listeners = new Set<Listener<T>>();
@@ -380,507 +667,1274 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 		};
 	}
 
-	// Maps the events in the given emitter, invoking mapFn on each one. mapFn can return
-	// the dontEmit symbol to skip emission.
-	function mapEmitter<T, R>(emitter: EmitterLike<T>, mapFn: (data: T) => R | typeof dontEmit) {
-		let listener: IDisposable;
-		const mapped = createEmitter(listeners => {
-			if (listeners.size && !listener) {
-				listener = emitter.event(data => {
-					const v = mapFn(data);
-					if (v !== dontEmit) {
-						mapped.fire(v);
-					}
-				});
-			} else if (listener && !listeners.size) {
-				listener.dispose();
+	function showPreloadErrors(outputNode: HTMLElement, ...errors: readonly Error[]) {
+		outputNode.innerText = `Error loading preloads:`;
+		const errList = document.createElement('ul');
+		for (const result of errors) {
+			console.error(result);
+			const item = document.createElement('li');
+			item.innerText = result.message;
+			errList.appendChild(item);
+		}
+		outputNode.appendChild(errList);
+	}
+
+	function createOutputItem(
+		id: string,
+		mime: string,
+		metadata: unknown,
+		valueBytes: Uint8Array
+	): rendererApi.OutputItem {
+		return Object.freeze<rendererApi.OutputItem>({
+			id,
+			mime,
+			metadata,
+
+			data(): Uint8Array {
+				return valueBytes;
+			},
+
+			text(): string {
+				return textDecoder.decode(valueBytes);
+			},
+
+			json() {
+				return JSON.parse(this.text());
+			},
+
+			blob(): Blob {
+				return new Blob([valueBytes], { type: this.mime });
 			}
 		});
-
-		return mapped.event;
 	}
 
-	interface ICreateCellInfo {
-		element: HTMLElement;
-		outputId: string;
+	const onDidReceiveKernelMessage = createEmitter<unknown>();
 
-		mime: string;
-		value: unknown;
-		metadata: unknown;
-	}
-
-	interface IDestroyCellInfo {
-		outputId: string;
-	}
-
-	const onWillDestroyOutput = createEmitter<[string | undefined /* namespace */, IDestroyCellInfo | undefined /* cell uri */]>();
-	const onDidCreateOutput = createEmitter<[string | undefined /* namespace */, ICreateCellInfo]>();
-	const onDidReceiveMessage = createEmitter<[string, unknown]>();
-
-	const matchesNs = (namespace: string, query: string | undefined) => namespace === '*' || query === namespace || query === 'undefined';
-
-	(window as any).acquireNotebookRendererApi = <T>(namespace: string) => {
-		if (!namespace || typeof namespace !== 'string') {
-			throw new Error(`acquireNotebookRendererApi should be called your renderer type as a string, got: ${namespace}.`);
-		}
-
-		return {
-			postMessage(message: unknown) {
-				postNotebookMessage<ICustomRendererMessage>('customRendererMessage', {
-					rendererId: namespace,
-					message,
-				});
-			},
-			setState(newState: T) {
-				vscode.setState({ ...vscode.getState(), [namespace]: newState });
-			},
-			getState(): T | undefined {
-				const state = vscode.getState();
-				return typeof state === 'object' && state ? state[namespace] as T : undefined;
-			},
-			onDidReceiveMessage: mapEmitter(onDidReceiveMessage, ([ns, data]) => ns === namespace ? data : dontEmit),
-			onWillDestroyOutput: mapEmitter(onWillDestroyOutput, ([ns, data]) => matchesNs(namespace, ns) ? data : dontEmit),
-			onDidCreateOutput: mapEmitter(onDidCreateOutput, ([ns, data]) => matchesNs(namespace, ns) ? data : dontEmit),
-		};
+	const kernelPreloadGlobals = {
+		acquireVsCodeApi,
+		onDidReceiveKernelMessage: onDidReceiveKernelMessage.event,
+		postKernelMessage: (data: unknown) => postNotebookMessage('customKernelMessage', { message: data }),
 	};
 
-	const enum PreloadState {
-		Ok,
-		Error
-	}
-
-	type PreloadResult = { state: PreloadState.Ok } | { state: PreloadState.Error, error: string };
-
-	/**
-	 * Map of preload resource URIs to promises that resolve one the resource
-	 * loads or errors.
-	 */
-	const preloadPromises = new Map<string, Promise<PreloadResult>>();
-	const queuedOuputActions = new Map<string, Promise<void>>();
-
-	/**
-	 * Enqueues an action that affects a output. This blocks behind renderer load
-	 * requests that affect the same output. This should be called whenever you
-	 * do something that affects output to ensure it runs in
-	 * the correct order.
-	 */
-	const enqueueOutputAction = <T extends { outputId: string; }>(event: T, fn: (event: T) => Promise<void> | void) => {
-		const queued = queuedOuputActions.get(event.outputId);
-		const maybePromise = queued ? queued.then(() => fn(event)) : fn(event);
-		if (typeof maybePromise === 'undefined') {
-			return; // a synchonrously-called function, we're done
-		}
-
-		const promise = maybePromise.then(() => {
-			if (queuedOuputActions.get(event.outputId) === promise) {
-				queuedOuputActions.delete(event.outputId);
-			}
-		});
-
-		queuedOuputActions.set(event.outputId, promise);
-	};
-
-	const ttPolicy = window.trustedTypes?.createPolicy('notebookOutputRenderer', {
+	const ttPolicy = window.trustedTypes?.createPolicy('notebookRenderer', {
 		createHTML: value => value,
 		createScript: value => value,
 	});
 
 	window.addEventListener('wheel', handleWheel);
 
-	window.addEventListener('message', rawEvent => {
-		const event = rawEvent as ({ data: ToWebviewMessage; });
+	interface IFindMatch {
+		type: 'preview' | 'output';
+		id: string;
+		cellId: string;
+		container: Node;
+		originalRange: Range;
+		isShadow: boolean;
+		highlightResult?: IHighlightResult;
+	}
 
-		switch (event.data.type) {
-			case 'initializeMarkdownPreview':
-				for (const cell of event.data.cells) {
-					createMarkdownPreview(cell.cellId, cell.content, cell.offset);
+	interface IHighlighter {
+		highlightCurrentMatch(index: number): void;
+		unHighlightCurrentMatch(index: number): void;
+		dispose(): void;
+	}
 
-					const cellContainer = document.getElementById(cell.cellId);
-					if (cellContainer) {
-						cellContainer.style.visibility = 'hidden';
-					}
+	let _highlighter: IHighlighter | null = null;
+	const matchColor = window.getComputedStyle(document.getElementById('_defaultColorPalatte')!).color;
+	const currentMatchColor = window.getComputedStyle(document.getElementById('_defaultColorPalatte')!).backgroundColor;
+
+	class JSHighlighter implements IHighlighter {
+		private _findMatchIndex = -1;
+
+		constructor(
+			readonly matches: IFindMatch[],
+		) {
+			for (let i = matches.length - 1; i >= 0; i--) {
+				const match = matches[i];
+				const ret = highlightRange(match.originalRange, true, 'mark', match.isShadow ? {
+					'style': 'background-color: ' + matchColor + ';',
+				} : {
+					'class': 'find-match'
+				});
+				match.highlightResult = ret;
+			}
+		}
+
+		highlightCurrentMatch(index: number) {
+			const oldMatch = this.matches[this._findMatchIndex];
+			oldMatch?.highlightResult?.update(matchColor, oldMatch.isShadow ? undefined : 'find-match');
+
+			const match = this.matches[index];
+			this._findMatchIndex = index;
+			const sel = window.getSelection();
+			if (!!match && !!sel && match.highlightResult) {
+				let offset = 0;
+				try {
+					const outputOffset = document.getElementById(match.id)!.getBoundingClientRect().top;
+					const tempRange = document.createRange();
+					tempRange.selectNode(match.highlightResult.range.startContainer);
+					const rangeOffset = tempRange.getBoundingClientRect().top;
+					tempRange.detach();
+					offset = rangeOffset - outputOffset;
+				} catch (e) {
 				}
 
-				dimensionUpdater.updateImmediately();
-				postNotebookMessage('initializedMarkdownPreview', {});
-				break;
-			case 'createMarkdownPreview':
-				createMarkdownPreview(event.data.id, event.data.content, event.data.top);
-				break;
-			case 'showMarkdownPreview':
-				{
-					const data = event.data;
+				match.highlightResult?.update(currentMatchColor, match.isShadow ? undefined : 'current-find-match');
 
-					const cellContainer = document.getElementById(data.id);
-					if (cellContainer) {
-						cellContainer.style.visibility = 'visible';
-						cellContainer.style.top = `${data.top}px`;
+				document.getSelection()?.removeAllRanges();
+				postNotebookMessage('didFindHighlight', {
+					offset
+				});
+			}
+		}
+
+		unHighlightCurrentMatch(index: number) {
+			const oldMatch = this.matches[index];
+			if (oldMatch && oldMatch.highlightResult) {
+				oldMatch.highlightResult.update(matchColor, oldMatch.isShadow ? undefined : 'find-match');
+			}
+		}
+
+		dispose() {
+			document.getSelection()?.removeAllRanges();
+
+			this.matches.forEach(match => {
+				match.highlightResult?.dispose();
+			});
+		}
+	}
+
+	class CSSHighlighter implements IHighlighter {
+		private _matchesHighlight: Highlight;
+		private _currentMatchesHighlight: Highlight;
+		private _findMatchIndex = -1;
+
+		constructor(
+			readonly matches: IFindMatch[],
+		) {
+			this._matchesHighlight = new Highlight();
+			this._matchesHighlight.priority = 1;
+			this._currentMatchesHighlight = new Highlight();
+			this._currentMatchesHighlight.priority = 2;
+
+			for (let i = 0; i < matches.length; i++) {
+				this._matchesHighlight.add(matches[i].originalRange);
+			}
+			CSS.highlights?.set('find-highlight', this._matchesHighlight);
+			CSS.highlights?.set('current-find-highlight', this._currentMatchesHighlight);
+		}
+
+		highlightCurrentMatch(index: number): void {
+			this._findMatchIndex = index;
+			const match = this.matches[this._findMatchIndex];
+			const range = match.originalRange;
+
+			if (match) {
+				let offset = 0;
+				try {
+					const outputOffset = document.getElementById(match.id)!.getBoundingClientRect().top;
+					const rangeOffset = match.originalRange.getBoundingClientRect().top;
+					offset = rangeOffset - outputOffset;
+					postNotebookMessage('didFindHighlight', {
+						offset
+					});
+				} catch (e) {
+				}
+			}
+
+			this._currentMatchesHighlight.clear();
+			this._currentMatchesHighlight.add(range);
+		}
+
+		unHighlightCurrentMatch(index: number): void {
+			this._currentMatchesHighlight.clear();
+		}
+
+		dispose(): void {
+			document.getSelection()?.removeAllRanges();
+			this._currentMatchesHighlight.clear();
+			this._matchesHighlight.clear();
+		}
+	}
+
+	const find = (query: string, options: { wholeWord?: boolean; caseSensitive?: boolean; includeMarkup: boolean; includeOutput: boolean }) => {
+		let find = true;
+		const matches: IFindMatch[] = [];
+
+		const range = document.createRange();
+		range.selectNodeContents(document.getElementById('findStart')!);
+		const sel = window.getSelection();
+		sel?.removeAllRanges();
+		sel?.addRange(range);
+
+		viewModel.toggleDragDropEnabled(false);
+
+		try {
+			document.designMode = 'On';
+
+			while (find && matches.length < 500) {
+				find = (window as any).find(query, /* caseSensitive*/ !!options.caseSensitive,
+				/* backwards*/ false,
+				/* wrapAround*/ false,
+				/* wholeWord */ !!options.wholeWord,
+				/* searchInFrames*/ true,
+					false);
+
+				if (find) {
+					const selection = window.getSelection();
+					if (!selection) {
+						console.log('no selection');
+						break;
 					}
 
-					updateMarkdownPreview(data.id, data.content);
-				}
-				break;
-			case 'hideMarkdownPreviews':
-				{
-					for (const id of event.data.ids) {
-						const cellContainer = document.getElementById(id);
-						if (cellContainer) {
-							cellContainer.style.visibility = 'hidden';
+					if (options.includeMarkup && selection.rangeCount > 0 && selection.getRangeAt(0).startContainer.nodeType === 1
+						&& (selection.getRangeAt(0).startContainer as Element).classList.contains('markup')) {
+						// markdown preview container
+						const preview = (selection.anchorNode?.firstChild as Element);
+						const root = preview.shadowRoot as ShadowRoot & { getSelection: () => Selection };
+						const shadowSelection = root?.getSelection ? root?.getSelection() : null;
+						if (shadowSelection && shadowSelection.anchorNode) {
+							matches.push({
+								type: 'preview',
+								id: preview.id,
+								cellId: preview.id,
+								container: preview,
+								isShadow: true,
+								originalRange: shadowSelection.getRangeAt(0)
+							});
 						}
 					}
-				}
-				break;
-			case 'unhideMarkdownPreviews':
-				{
-					for (const id of event.data.ids) {
-						const cellContainer = document.getElementById(id);
-						if (cellContainer) {
-							cellContainer.style.visibility = 'visible';
-						}
-						updateMarkdownPreview(id, undefined);
-					}
-				}
-				break;
-			case 'deleteMarkdownPreview':
-				{
-					for (const id of event.data.ids) {
-						const cellContainer = document.getElementById(id);
-						cellContainer?.remove();
-					}
-				}
-				break;
-			case 'updateSelectedMarkdownPreviews':
-				{
-					const selectedCellIds = new Set<string>(event.data.selectedCellIds);
 
-					for (const oldSelected of document.querySelectorAll('.preview.selected')) {
-						const id = oldSelected.id;
-						if (!selectedCellIds.has(id)) {
-							oldSelected.classList.remove('selected');
+					if (options.includeOutput && selection.rangeCount > 0 && selection.getRangeAt(0).startContainer.nodeType === 1
+						&& (selection.getRangeAt(0).startContainer as Element).classList.contains('output_container')) {
+						// output container
+						const cellId = selection.getRangeAt(0).startContainer.parentElement!.id;
+						const outputNode = (selection.anchorNode?.firstChild as Element);
+						const root = outputNode.shadowRoot as ShadowRoot & { getSelection: () => Selection };
+						const shadowSelection = root?.getSelection ? root?.getSelection() : null;
+						if (shadowSelection && shadowSelection.anchorNode) {
+							matches.push({
+								type: 'output',
+								id: outputNode.id,
+								cellId: cellId,
+								container: outputNode,
+								isShadow: true,
+								originalRange: shadowSelection.getRangeAt(0)
+							});
 						}
 					}
 
-					for (const newSelected of selectedCellIds) {
-						const previewContainer = document.getElementById(newSelected);
-						if (previewContainer) {
-							previewContainer.classList.add('selected');
-						}
-					}
-				}
-				break;
-			case 'html':
-				enqueueOutputAction(event.data, async data => {
-					const preloadResults = await Promise.all(data.requiredPreloads.map(p => preloadPromises.get(p.uri)));
-					if (!queuedOuputActions.has(data.outputId)) { // output was cleared while loading
-						return;
-					}
+					const anchorNode = selection?.anchorNode?.parentElement;
 
-					let cellOutputContainer = document.getElementById(data.cellId);
-					const outputId = data.outputId;
-					if (!cellOutputContainer) {
-						const container = document.getElementById('container')!;
+					if (anchorNode) {
+						const lastEl: any = matches.length ? matches[matches.length - 1] : null;
 
-						const upperWrapperElement = createFocusSink(data.cellId, outputId);
-						container.appendChild(upperWrapperElement);
+						if (lastEl && lastEl.container.contains(anchorNode) && options.includeOutput) {
+							matches.push({
+								type: lastEl.type,
+								id: lastEl.id,
+								cellId: lastEl.cellId,
+								container: lastEl.container,
+								isShadow: false,
+								originalRange: window.getSelection()!.getRangeAt(0)
+							});
 
-						const newElement = document.createElement('div');
+						} else {
+							for (let node = anchorNode as Element | null; node; node = node.parentElement) {
+								if (!(node instanceof Element)) {
+									break;
+								}
 
-						newElement.id = data.cellId;
-						newElement.classList.add('cell_container');
+								if (node.classList.contains('output') && options.includeOutput) {
+									// inside output
+									const cellId = node.parentElement?.parentElement?.id;
+									if (cellId) {
+										matches.push({
+											type: 'output',
+											id: node.id,
+											cellId: cellId,
+											container: node,
+											isShadow: false,
+											originalRange: window.getSelection()!.getRangeAt(0)
+										});
+									}
+									break;
+								}
 
-						container.appendChild(newElement);
-						cellOutputContainer = newElement;
-
-						const lowerWrapperElement = createFocusSink(data.cellId, outputId, true);
-						container.appendChild(lowerWrapperElement);
-					}
-
-					cellOutputContainer.style.position = 'absolute';
-					cellOutputContainer.style.top = data.cellTop + 'px';
-
-					const outputContainer = document.createElement('div');
-					outputContainer.classList.add('output_container');
-					outputContainer.style.position = 'absolute';
-					outputContainer.style.overflow = 'hidden';
-					outputContainer.style.maxHeight = '0px';
-					outputContainer.style.top = `${data.outputOffset}px`;
-
-					const outputNode = document.createElement('div');
-					outputNode.classList.add('output');
-					outputNode.style.position = 'absolute';
-					outputNode.style.top = `0px`;
-					outputNode.style.left = data.left + 'px';
-					// outputNode.style.width = 'calc(100% - ' + data.left + 'px)';
-					// outputNode.style.minHeight = '32px';
-					outputNode.style.padding = '0px';
-					outputNode.id = outputId;
-
-					addMouseoverListeners(outputNode, outputId);
-					addFocusTracker(outputNode, outputId);
-					const content = data.content;
-					if (content.type === RenderOutputType.Html) {
-						const trustedHtml = ttPolicy?.createHTML(content.htmlContent) ?? content.htmlContent;
-						outputNode.innerHTML = trustedHtml as string;
-						cellOutputContainer.appendChild(outputContainer);
-						outputContainer.appendChild(outputNode);
-						domEval(outputNode);
-					} else if (preloadResults.some(e => e?.state === PreloadState.Error)) {
-						outputNode.innerText = `Error loading preloads:`;
-						const errList = document.createElement('ul');
-						for (const result of preloadResults) {
-							if (result?.state === PreloadState.Error) {
-								const item = document.createElement('li');
-								item.innerText = result.error;
-								errList.appendChild(item);
+								if (node.id === 'container' || node === document.body) {
+									break;
+								}
 							}
 						}
-						outputNode.appendChild(errList);
-						cellOutputContainer.appendChild(outputContainer);
-						outputContainer.appendChild(outputNode);
+
 					} else {
-						const { metadata, mimeType, value } = content;
-						onDidCreateOutput.fire([data.apiNamespace, {
-							element: outputNode,
-							outputId,
-							mime: content.mimeType,
-							value: content.value,
-							metadata: content.metadata,
-
-							get mimeType() {
-								console.warn(`event.mimeType is deprecated, use 'mime' instead`);
-								return mimeType;
-							},
-
-							get output() {
-								console.warn(`event.output is deprecated, use properties directly instead`);
-								return {
-									metadata: { [mimeType]: metadata },
-									data: { [mimeType]: value },
-									outputId,
-								};
-							},
-						} as ICreateCellInfo]);
-						cellOutputContainer.appendChild(outputContainer);
-						outputContainer.appendChild(outputNode);
+						break;
 					}
+				}
+			}
+		} catch (e) {
+			console.log(e);
+		}
 
-					resizeObserver.observe(outputNode, outputId, true);
+		if (matches.length && CSS.highlights) {
+			_highlighter = new CSSHighlighter(matches);
+		} else {
+			_highlighter = new JSHighlighter(matches);
+		}
 
-					const clientHeight = outputNode.clientHeight;
-					const cps = document.defaultView!.getComputedStyle(outputNode);
-					if (clientHeight !== 0 && cps.padding === '0px') {
-						// we set padding to zero if the output height is zero (then we can have a zero-height output DOM node)
-						// thus we need to ensure the padding is accounted when updating the init height of the output
-						dimensionUpdater.update(outputId, clientHeight + __outputNodePadding__ * 2, {
-							isOutput: true,
-							init: true,
-						});
+		document.getSelection()?.removeAllRanges();
 
-						outputNode.style.padding = `${__outputNodePadding__}px ${__outputNodePadding__}px ${__outputNodePadding__}px ${__outputNodeLeftPadding__}px`;
-					} else {
-						dimensionUpdater.update(outputId, outputNode.clientHeight, {
-							isOutput: true,
-							init: true,
-						});
-					}
+		viewModel.toggleDragDropEnabled(currentOptions.dragAndDropEnabled);
 
-					// don't hide until after this step so that the height is right
-					cellOutputContainer.style.visibility = data.initiallyHidden ? 'hidden' : 'visible';
+		postNotebookMessage('didFind', {
+			matches: matches.map((match, index) => ({
+				type: match.type,
+				id: match.id,
+				cellId: match.cellId,
+				index
+			}))
+		});
+	};
+
+	window.addEventListener('message', async rawEvent => {
+		const event = rawEvent as ({ data: webviewMessages.ToWebviewMessage });
+
+		switch (event.data.type) {
+			case 'initializeMarkup':
+				await Promise.all(event.data.cells.map(info => viewModel.ensureMarkupCell(info)));
+				dimensionUpdater.updateImmediately();
+				postNotebookMessage('initializedMarkup', {});
+				break;
+
+			case 'createMarkupCell':
+				viewModel.ensureMarkupCell(event.data.cell);
+				break;
+
+			case 'showMarkupCell':
+				viewModel.showMarkupCell(event.data.id, event.data.top, event.data.content);
+				break;
+
+			case 'hideMarkupCells':
+				for (const id of event.data.ids) {
+					viewModel.hideMarkupCell(id);
+				}
+				break;
+
+			case 'unhideMarkupCells':
+				for (const id of event.data.ids) {
+					viewModel.unhideMarkupCell(id);
+				}
+				break;
+
+			case 'deleteMarkupCell':
+				for (const id of event.data.ids) {
+					viewModel.deleteMarkupCell(id);
+				}
+				break;
+
+			case 'updateSelectedMarkupCells':
+				viewModel.updateSelectedCells(event.data.selectedCellIds);
+				break;
+
+			case 'html': {
+				const data = event.data;
+				outputRunner.enqueue(data.outputId, (state) => {
+					return viewModel.renderOutputCell(data, state);
 				});
 				break;
+			}
 			case 'view-scroll':
 				{
 					// const date = new Date();
 					// console.log('----- will scroll ----  ', date.getMinutes() + ':' + date.getSeconds() + ':' + date.getMilliseconds());
 
-					for (const request of event.data.widgets) {
-						const widget = document.getElementById(request.outputId);
-						if (widget) {
-							widget.parentElement!.parentElement!.style.top = `${request.cellTop}px`;
-							widget.parentElement!.style.top = `${request.outputOffset}px`;
-							if (request.forceDisplay) {
-								widget.parentElement!.parentElement!.style.visibility = 'visible';
-							}
-						}
-					}
-
-					for (const cell of event.data.markdownPreviews) {
-						const container = document.getElementById(cell.id);
-						if (container) {
-							container.style.top = `${cell.top}px`;
-						}
-					}
-
+					event.data.widgets.forEach(widget => {
+						outputRunner.enqueue(widget.outputId, () => {
+							viewModel.updateOutputsScroll([widget]);
+						});
+					});
+					viewModel.updateMarkupScrolls(event.data.markupCells);
 					break;
 				}
 			case 'clear':
-				queuedOuputActions.clear(); // stop all loading outputs
-				onWillDestroyOutput.fire([undefined, undefined]);
+				renderers.clearAll();
+				viewModel.clearAll();
 				document.getElementById('container')!.innerText = '';
-
-				focusTrackers.forEach(ft => {
-					ft.dispose();
-				});
-				focusTrackers.clear();
 				break;
-			case 'clearOutput':
-				const output = document.getElementById(event.data.outputId);
-				queuedOuputActions.delete(event.data.outputId); // stop any in-progress rendering
-				if (output && output.parentNode) {
-					onWillDestroyOutput.fire([event.data.apiNamespace, { outputId: event.data.outputId }]);
-					output.parentNode.removeChild(output);
+
+			case 'clearOutput': {
+				const { cellId, rendererId, outputId } = event.data;
+				outputRunner.cancelOutput(outputId);
+				viewModel.clearOutput(cellId, outputId, rendererId);
+				break;
+			}
+			case 'hideOutput': {
+				const { cellId, outputId } = event.data;
+				outputRunner.enqueue(outputId, () => {
+					viewModel.hideOutput(cellId);
+				});
+				break;
+			}
+			case 'showOutput': {
+				const { outputId, cellTop, cellId, content } = event.data;
+				outputRunner.enqueue(outputId, () => {
+					viewModel.showOutput(cellId, outputId, cellTop);
+					if (content) {
+						viewModel.updateAndRerender(cellId, outputId, content);
+					}
+				});
+				break;
+			}
+			case 'ack-dimension': {
+				for (const { cellId, outputId, height } of event.data.updates) {
+					viewModel.updateOutputHeight(cellId, outputId, height);
 				}
 				break;
-			case 'hideOutput':
-				enqueueOutputAction(event.data, ({ outputId }) => {
-					const container = document.getElementById(outputId)?.parentElement?.parentElement;
-					if (container) {
-						container.style.visibility = 'hidden';
-					}
-				});
-				break;
-			case 'showOutput':
-				enqueueOutputAction(event.data, ({ outputId, cellTop: top, }) => {
-					const output = document.getElementById(outputId);
-					if (output) {
-						output.parentElement!.parentElement!.style.visibility = 'visible';
-						output.parentElement!.parentElement!.style.top = top + 'px';
-
-						dimensionUpdater.update(outputId, output.clientHeight, {
-							isOutput: true,
-						});
-					}
-				});
-				break;
-			case 'ack-dimension':
-				{
-					const { outputId, height } = event.data;
-					const output = document.getElementById(outputId);
-					if (output) {
-						output.parentElement!.style.maxHeight = `${height}px`;
-						output.parentElement!.style.height = `${height}px`;
-					}
-					break;
-				}
-			case 'preload':
+			}
+			case 'preload': {
 				const resources = event.data.resources;
-				const globals = event.data.type === 'preload' ? { acquireVsCodeApi } : {};
-				let queue: Promise<PreloadResult> = Promise.resolve({ state: PreloadState.Ok });
 				for (const { uri, originalUri } of resources) {
-					// create the promise so that the scripts download in parallel, but
-					// only invoke them in series within the queue
-					const promise = runScript(uri, originalUri, globals);
-					queue = queue.then(() => promise.then(fn => {
-						const result = fn();
-						if (result.state === PreloadState.Error) {
-							console.error(result.error);
-						}
-
-						return result;
-					}));
-					preloadPromises.set(uri, queue);
+					kernelPreloads.load(uri, originalUri);
 				}
 				break;
+			}
 			case 'focus-output':
 				focusFirstFocusableInCell(event.data.cellId);
 				break;
-			case 'decorations':
-				{
-					const outputContainer = document.getElementById(event.data.cellId);
-					outputContainer?.classList.add(...event.data.addedClassNames);
-					outputContainer?.classList.remove(...event.data.removedClassNames);
+			case 'decorations': {
+				let outputContainer = document.getElementById(event.data.cellId);
+				if (!outputContainer) {
+					viewModel.ensureOutputCell(event.data.cellId, -100000, true);
+					outputContainer = document.getElementById(event.data.cellId);
 				}
-
+				outputContainer?.classList.add(...event.data.addedClassNames);
+				outputContainer?.classList.remove(...event.data.removedClassNames);
+				break;
+			}
+			case 'customKernelMessage':
+				onDidReceiveKernelMessage.fire(event.data.message);
 				break;
 			case 'customRendererMessage':
-				onDidReceiveMessage.fire([event.data.rendererId, event.data.message]);
+				renderers.getRenderer(event.data.rendererId)?.receiveMessage(event.data.message);
 				break;
+			case 'notebookStyles': {
+				const documentStyle = document.documentElement.style;
+
+				for (let i = documentStyle.length - 1; i >= 0; i--) {
+					const property = documentStyle[i];
+
+					// Don't remove properties that the webview might have added separately
+					if (property && property.startsWith('--notebook-')) {
+						documentStyle.removeProperty(property);
+					}
+				}
+
+				// Re-add new properties
+				for (const [name, value] of Object.entries(event.data.styles)) {
+					documentStyle.setProperty(`--${name}`, value);
+				}
+				break;
+			}
+			case 'notebookOptions':
+				currentOptions = event.data.options;
+				viewModel.toggleDragDropEnabled(currentOptions.dragAndDropEnabled);
+				break;
+			case 'updateWorkspaceTrust': {
+				isWorkspaceTrusted = event.data.isTrusted;
+				viewModel.rerender();
+				break;
+			}
+			case 'tokenizedCodeBlock': {
+				const { codeBlockId, html } = event.data;
+				MarkdownCodeBlock.highlightCodeBlock(codeBlockId, html);
+				break;
+			}
+			case 'tokenizedStylesChanged': {
+				if (tokenizationStyleElement) {
+					tokenizationStyleElement.textContent = event.data.css;
+				}
+				break;
+			}
+			case 'find': {
+				_highlighter?.dispose();
+				find(event.data.query, event.data.options);
+				break;
+			}
+			case 'findHighlight': {
+				_highlighter?.highlightCurrentMatch(event.data.index);
+				break;
+			}
+			case 'findUnHighlight': {
+				_highlighter?.unHighlightCurrentMatch(event.data.index);
+				break;
+			}
+			case 'findStop': {
+				_highlighter?.dispose();
+				break;
+			}
 		}
 	});
 
-	const markdownRenderer: {
-		renderMarkup: (context: { element: HTMLElement, content: string }) => void,
-	} = await markdownRendererModule.activate(markdownDeps);
+	class Renderer {
+		constructor(
+			public readonly data: RendererMetadata,
+			private readonly loadExtension: (id: string) => Promise<void>,
+		) { }
+
+		private _onMessageEvent = createEmitter();
+		private _loadPromise?: Promise<rendererApi.RendererApi | undefined>;
+		private _api: rendererApi.RendererApi | undefined;
+
+		public get api() { return this._api; }
+
+		public load(): Promise<rendererApi.RendererApi | undefined> {
+			if (!this._loadPromise) {
+				this._loadPromise = this._load();
+			}
+
+			return this._loadPromise;
+		}
+
+		public receiveMessage(message: unknown) {
+			this._onMessageEvent.fire(message);
+		}
+
+		private createRendererContext(): RendererContext {
+			const { id, messaging } = this.data;
+			const context: RendererContext = {
+				setState: newState => vscode.setState({ ...vscode.getState(), [id]: newState }),
+				getState: <T>() => {
+					const state = vscode.getState();
+					return typeof state === 'object' && state ? state[id] as T : undefined;
+				},
+				// TODO: This is async so that we can return a promise to the API in the future.
+				// Currently the API is always resolved before we call `createRendererContext`.
+				getRenderer: async (id: string) => renderers.getRenderer(id)?.api,
+				workspace: {
+					get isTrusted() { return isWorkspaceTrusted; }
+				},
+				settings: {
+					get lineLimit() { return lineLimit; },
+				}
+			};
+
+			if (messaging) {
+				context.onDidReceiveMessage = this._onMessageEvent.event;
+				context.postMessage = message => postNotebookMessage('customRendererMessage', { rendererId: id, message });
+			}
+
+			return context;
+		}
+
+		/** Inner function cached in the _loadPromise(). */
+		private async _load(): Promise<rendererApi.RendererApi | undefined> {
+			const module: RendererModule = await __import(this.data.entrypoint);
+			if (!module) {
+				return undefined; // {{SQL CARBON EDIT}} strict-nulls
+			}
+
+			const api = await module.activate(this.createRendererContext());
+			this._api = api;
+
+			// Squash any errors extends errors. They won't prevent the renderer
+			// itself from working, so just log them.
+			await Promise.all(ctx.rendererData
+				.filter(d => d.extends === this.data.id)
+				.map(d => this.loadExtension(d.id).catch(console.error)),
+			);
+
+			return api;
+		}
+	}
+
+	const kernelPreloads = new class {
+		private readonly preloads = new Map<string /* uri */, Promise<unknown>>();
+
+		/**
+		 * Returns a promise that resolves when the given preload is activated.
+		 */
+		public waitFor(uri: string) {
+			return this.preloads.get(uri) || Promise.resolve(new Error(`Preload not ready: ${uri}`));
+		}
+
+		/**
+		 * Loads a preload.
+		 * @param uri URI to load from
+		 * @param originalUri URI to show in an error message if the preload is invalid.
+		 */
+		public load(uri: string, originalUri: string) {
+			const promise = Promise.all([
+				runKernelPreload(uri, originalUri),
+				this.waitForAllCurrent(),
+			]);
+
+			this.preloads.set(uri, promise);
+			return promise;
+		}
+
+		/**
+		 * Returns a promise that waits for all currently-registered preloads to
+		 * activate before resolving.
+		 */
+		private waitForAllCurrent() {
+			return Promise.all([...this.preloads.values()].map(p => p.catch(err => err)));
+		}
+	};
+
+	const outputRunner = new class {
+		private readonly outputs = new Map<string, { cancelled: boolean; queue: Promise<unknown> }>();
+
+		/**
+		 * Pushes the action onto the list of actions for the given output ID,
+		 * ensuring that it's run in-order.
+		 */
+		public enqueue(outputId: string, action: (record: { cancelled: boolean }) => unknown) {
+			const record = this.outputs.get(outputId);
+			if (!record) {
+				this.outputs.set(outputId, { cancelled: false, queue: new Promise(r => r(action({ cancelled: false }))) });
+			} else {
+				record.queue = record.queue.then(r => !record.cancelled && action(record));
+			}
+		}
+
+		/**
+		 * Cancels the rendering of all outputs.
+		 */
+		public cancelAll() {
+			for (const record of this.outputs.values()) {
+				record.cancelled = true;
+			}
+			this.outputs.clear();
+		}
+
+		/**
+		 * Cancels any ongoing rendering out an output.
+		 */
+		public cancelOutput(outputId: string) {
+			const output = this.outputs.get(outputId);
+			if (output) {
+				output.cancelled = true;
+				this.outputs.delete(outputId);
+			}
+		}
+	};
+
+	const renderers = new class {
+		private readonly _renderers = new Map</* id */ string, Renderer>();
+
+		constructor() {
+			for (const renderer of ctx.rendererData) {
+				this._renderers.set(renderer.id, new Renderer(renderer, async (extensionId) => {
+					const ext = this._renderers.get(extensionId);
+					if (!ext) {
+						throw new Error(`Could not find extending renderer: ${extensionId}`);
+					}
+					await ext.load();
+				}));
+			}
+		}
+
+		public getRenderer(id: string) {
+			return this._renderers.get(id);
+		}
+
+		public async load(id: string) {
+			const renderer = this._renderers.get(id);
+			if (!renderer) {
+				throw new Error('Could not find renderer');
+			}
+
+			return renderer.load();
+		}
+
+		public clearAll() {
+			outputRunner.cancelAll();
+			for (const renderer of this._renderers.values()) {
+				renderer.api?.disposeOutputItem?.();
+			}
+		}
+
+		public clearOutput(rendererId: string, outputId: string) {
+			outputRunner.cancelOutput(outputId);
+			this._renderers.get(rendererId)?.api?.disposeOutputItem?.(outputId);
+		}
+
+		public async render(info: rendererApi.OutputItem, element: HTMLElement) {
+			const renderers = Array.from(this._renderers.values())
+				.filter(renderer => renderer.data.mimeTypes.includes(info.mime) && !renderer.data.extends);
+
+			if (!renderers.length) {
+				const errorContainer = document.createElement('div');
+
+				const error = document.createElement('div');
+				error.className = 'no-renderer-error';
+				const errorText = (document.documentElement.style.getPropertyValue('--notebook-cell-renderer-not-found-error') || '').replace('$0', info.mime);
+				error.innerText = errorText;
+
+				const cellText = document.createElement('div');
+				cellText.innerText = info.text();
+
+				errorContainer.appendChild(error);
+				errorContainer.appendChild(cellText);
+
+				element.innerText = '';
+				element.appendChild(errorContainer);
+
+				return;
+			}
+
+			// De-prioritize built-in renderers
+			renderers.sort((a, b) => +a.data.isBuiltin - +b.data.isBuiltin);
+
+			(await renderers[0].load())?.renderOutputItem(info, element);
+		}
+	}();
+
+	const viewModel = new class ViewModel {
+
+		private readonly _markupCells = new Map<string, MarkupCell>();
+		private readonly _outputCells = new Map<string, OutputCell>();
+
+		public clearAll() {
+			this._markupCells.clear();
+			this._outputCells.clear();
+		}
+
+		public rerender() {
+			this.rerenderMarkupCells();
+			this.renderOutputCells();
+		}
+
+		private async createMarkupCell(init: webviewMessages.IMarkupCellInitialization, top: number, visible: boolean): Promise<MarkupCell> {
+			const existing = this._markupCells.get(init.cellId);
+			if (existing) {
+				console.error(`Trying to create markup that already exists: ${init.cellId}`);
+				return existing;
+			}
+
+			const cell = new MarkupCell(init.cellId, init.mime, init.content, top, init.metadata);
+			cell.element.style.visibility = visible ? 'visible' : 'hidden';
+			this._markupCells.set(init.cellId, cell);
+
+			await cell.ready;
+			return cell;
+		}
+
+		public async ensureMarkupCell(info: webviewMessages.IMarkupCellInitialization): Promise<void> {
+			let cell = this._markupCells.get(info.cellId);
+			if (cell) {
+				cell.element.style.visibility = info.visible ? 'visible' : 'hidden';
+				await cell.updateContentAndRender(info.content);
+			} else {
+				cell = await this.createMarkupCell(info, info.offset, info.visible);
+			}
+		}
+
+		public deleteMarkupCell(id: string) {
+			const cell = this.getExpectedMarkupCell(id);
+			if (cell) {
+				cell.remove();
+				this._markupCells.delete(id);
+			}
+		}
+
+		public async updateMarkupContent(id: string, newContent: string): Promise<void> {
+			const cell = this.getExpectedMarkupCell(id);
+			await cell?.updateContentAndRender(newContent);
+		}
+
+		public showMarkupCell(id: string, top: number, newContent: string | undefined): void {
+			const cell = this.getExpectedMarkupCell(id);
+			cell?.show(top, newContent);
+		}
+
+		public hideMarkupCell(id: string): void {
+			const cell = this.getExpectedMarkupCell(id);
+			cell?.hide();
+		}
+
+		public unhideMarkupCell(id: string): void {
+			const cell = this.getExpectedMarkupCell(id);
+			cell?.unhide();
+		}
+
+		private rerenderMarkupCells() {
+			for (const cell of this._markupCells.values()) {
+				cell.rerender();
+			}
+		}
+
+		private getExpectedMarkupCell(id: string): MarkupCell | undefined {
+			const cell = this._markupCells.get(id);
+			if (!cell) {
+				console.log(`Could not find markup cell '${id}'`);
+				return undefined;
+			}
+			return cell;
+		}
+
+		public updateSelectedCells(selectedCellIds: readonly string[]) {
+			const selectedCellSet = new Set<string>(selectedCellIds);
+			for (const cell of this._markupCells.values()) {
+				cell.setSelected(selectedCellSet.has(cell.id));
+			}
+		}
+
+		public toggleDragDropEnabled(dragAndDropEnabled: boolean) {
+			for (const cell of this._markupCells.values()) {
+				cell.toggleDragDropEnabled(dragAndDropEnabled);
+			}
+		}
+
+		public updateMarkupScrolls(markupCells: readonly webviewMessages.IMarkupCellScrollTops[]) {
+			for (const { id, top } of markupCells) {
+				const cell = this._markupCells.get(id);
+				if (cell) {
+					cell.element.style.top = `${top}px`;
+				}
+			}
+		}
+
+		private renderOutputCells() {
+			for (const outputCell of this._outputCells.values()) {
+				outputCell.rerender();
+			}
+		}
+
+		public async renderOutputCell(data: webviewMessages.ICreationRequestMessage, state: { cancelled: boolean }): Promise<void> {
+			const preloadsAndErrors = await Promise.all<unknown>([
+				data.rendererId ? renderers.load(data.rendererId) : undefined,
+				...data.requiredPreloads.map(p => kernelPreloads.waitFor(p.uri)),
+			].map(p => p?.catch(err => err)));
+
+			if (state.cancelled) {
+				return;
+			}
+
+			const cellOutput = this.ensureOutputCell(data.cellId, data.cellTop, false);
+			const outputNode = cellOutput.createOutputElement(data.outputId, data.outputOffset, data.left, data.cellId);
+			outputNode.render(data.content, preloadsAndErrors);
+
+			// don't hide until after this step so that the height is right
+			cellOutput.element.style.visibility = data.initiallyHidden ? 'hidden' : 'visible';
+		}
+
+		public ensureOutputCell(cellId: string, cellTop: number, skipCellTopUpdateIfExist: boolean): OutputCell {
+			let cell = this._outputCells.get(cellId);
+			const existed = !!cell;
+			if (!cell) {
+				cell = new OutputCell(cellId);
+				this._outputCells.set(cellId, cell);
+			}
+
+			if (existed && skipCellTopUpdateIfExist) {
+				return cell;
+			}
+
+			cell.element.style.top = cellTop + 'px';
+			return cell;
+		}
+
+		public clearOutput(cellId: string, outputId: string, rendererId: string | undefined) {
+			const cell = this._outputCells.get(cellId);
+			cell?.clearOutput(outputId, rendererId);
+		}
+
+		public showOutput(cellId: string, outputId: string, top: number) {
+			const cell = this._outputCells.get(cellId);
+			cell?.show(outputId, top);
+		}
+
+		public updateAndRerender(cellId: string, outputId: string, content: webviewMessages.ICreationContent) {
+			const cell = this._outputCells.get(cellId);
+			cell?.updateContentAndRerender(outputId, content);
+		}
+
+		public hideOutput(cellId: string) {
+			const cell = this._outputCells.get(cellId);
+			cell?.hide();
+		}
+
+		public updateOutputHeight(cellId: string, outputId: string, height: number) {
+			const cell = this._outputCells.get(cellId);
+			cell?.updateOutputHeight(outputId, height);
+		}
+
+		public updateOutputsScroll(updates: webviewMessages.IContentWidgetTopRequest[]) {
+			for (const request of updates) {
+				const cell = this._outputCells.get(request.cellId);
+				cell?.updateScroll(request);
+			}
+		}
+	}();
+
+	class MarkdownCodeBlock {
+		private static pendingCodeBlocksToHighlight = new Map<string, HTMLElement>();
+
+		public static highlightCodeBlock(id: string, html: string) {
+			const el = MarkdownCodeBlock.pendingCodeBlocksToHighlight.get(id);
+			if (!el) {
+				return;
+			}
+			const trustedHtml = ttPolicy?.createHTML(html) ?? html;
+			el.innerHTML = trustedHtml as string;
+			if (tokenizationStyleElement) {
+				el.insertAdjacentElement('beforebegin', tokenizationStyleElement.cloneNode(true) as HTMLElement);
+			}
+		}
+
+		public static requestHighlightCodeBlock(root: HTMLElement | ShadowRoot) {
+			const codeBlocks: Array<{ value: string; lang: string; id: string }> = [];
+			let i = 0;
+			for (const el of root.querySelectorAll('.vscode-code-block')) {
+				const lang = el.getAttribute('data-vscode-code-block-lang');
+				if (el.textContent && lang) {
+					const id = `${Date.now()}-${i++}`;
+					codeBlocks.push({ value: el.textContent, lang: lang, id });
+					MarkdownCodeBlock.pendingCodeBlocksToHighlight.set(id, el as HTMLElement);
+				}
+			}
+
+			return codeBlocks;
+		}
+	}
+
+	class MarkupCell {
+
+		public readonly ready: Promise<void>;
+
+		public readonly id: string;
+		public readonly element: HTMLElement;
+
+		private readonly outputItem: rendererApi.OutputItem;
+
+		/// Internal field that holds text content
+		private _content: { readonly value: string; readonly version: number };
+
+		constructor(id: string, mime: string, content: string, top: number, metadata: NotebookCellMetadata) {
+			this.id = id;
+			this._content = { value: content, version: 0 };
+
+			let resolveReady: () => void;
+			this.ready = new Promise<void>(r => resolveReady = r);
+
+			let cachedData: { readonly version: number; readonly value: Uint8Array } | undefined;
+			this.outputItem = Object.freeze(<rendererApi.OutputItem>{
+				id,
+				mime,
+				metadata,
+
+				text: (): string => {
+					return this._content.value;
+				},
+
+				json: () => {
+					return undefined;
+				},
+
+				data: (): Uint8Array => {
+					if (cachedData?.version === this._content.version) {
+						return cachedData.value;
+					}
+
+					const data = textEncoder.encode(this._content.value);
+					cachedData = { version: this._content.version, value: data };
+					return data;
+				},
+
+				blob(): Blob {
+					return new Blob([this.data()], { type: this.mime });
+				}
+			});
+
+			const root = document.getElementById('container')!;
+			const markupCell = document.createElement('div');
+			markupCell.className = 'markup';
+			markupCell.style.position = 'absolute';
+			markupCell.style.width = '100%';
+
+			this.element = document.createElement('div');
+			this.element.id = this.id;
+			this.element.classList.add('preview');
+			this.element.style.position = 'absolute';
+			this.element.style.top = top + 'px';
+			this.toggleDragDropEnabled(currentOptions.dragAndDropEnabled);
+			markupCell.appendChild(this.element);
+			root.appendChild(markupCell);
+
+			this.addEventListeners();
+
+			this.updateContentAndRender(this._content.value).then(() => {
+				resizeObserver.observe(this.element, this.id, false, this.id);
+				resolveReady();
+			});
+		}
+
+		private addEventListeners() {
+			this.element.addEventListener('dblclick', () => {
+				postNotebookMessage<webviewMessages.IToggleMarkupPreviewMessage>('toggleMarkupPreview', { cellId: this.id });
+			});
+
+			this.element.addEventListener('click', e => {
+				postNotebookMessage<webviewMessages.IClickMarkupCellMessage>('clickMarkupCell', {
+					cellId: this.id,
+					altKey: e.altKey,
+					ctrlKey: e.ctrlKey,
+					metaKey: e.metaKey,
+					shiftKey: e.shiftKey,
+				});
+			});
+
+			this.element.addEventListener('contextmenu', e => {
+				postNotebookMessage<webviewMessages.IContextMenuMarkupCellMessage>('contextMenuMarkupCell', {
+					cellId: this.id,
+					clientX: e.clientX,
+					clientY: e.clientY,
+				});
+			});
+
+			this.element.addEventListener('mouseenter', () => {
+				postNotebookMessage<webviewMessages.IMouseEnterMarkupCellMessage>('mouseEnterMarkupCell', { cellId: this.id });
+			});
+
+			this.element.addEventListener('mouseleave', () => {
+				postNotebookMessage<webviewMessages.IMouseLeaveMarkupCellMessage>('mouseLeaveMarkupCell', { cellId: this.id });
+			});
+
+			this.element.addEventListener('dragstart', e => {
+				markupCellDragManager.startDrag(e, this.id);
+			});
+
+			this.element.addEventListener('drag', e => {
+				markupCellDragManager.updateDrag(e, this.id);
+			});
+
+			this.element.addEventListener('dragend', e => {
+				markupCellDragManager.endDrag(e, this.id);
+			});
+		}
+
+		public async updateContentAndRender(newContent: string): Promise<void> {
+			this._content = { value: newContent, version: this._content.version + 1 };
+
+			await renderers.render(this.outputItem, this.element);
+
+			const root = (this.element.shadowRoot ?? this.element);
+			const html = [];
+			for (const child of root.children) {
+				switch (child.tagName) {
+					case 'LINK':
+					case 'SCRIPT':
+					case 'STYLE':
+						// not worth sending over since it will be stripped before rendering
+						break;
+
+					default:
+						html.push(child.outerHTML);
+						break;
+				}
+			}
+
+			const codeBlocks: Array<{ value: string; lang: string; id: string }> = MarkdownCodeBlock.requestHighlightCodeBlock(root);
+
+			postNotebookMessage<webviewMessages.IRenderedMarkupMessage>('renderedMarkup', {
+				cellId: this.id,
+				html: html.join(''),
+				codeBlocks
+			});
+
+			dimensionUpdater.updateHeight(this.id, this.element.offsetHeight, {
+				isOutput: false
+			});
+		}
+
+		public show(top: number, newContent: string | undefined): void {
+			this.element.style.visibility = 'visible';
+			this.element.style.top = `${top}px`;
+			if (typeof newContent === 'string') {
+				this.updateContentAndRender(newContent);
+			} else {
+				this.updateMarkupDimensions();
+			}
+		}
+
+		public hide() {
+			this.element.style.visibility = 'hidden';
+		}
+
+		public unhide() {
+			this.element.style.visibility = 'visible';
+			this.updateMarkupDimensions();
+		}
+
+		public rerender() {
+			this.updateContentAndRender(this._content.value);
+		}
+
+		public remove() {
+			this.element.remove();
+		}
+
+		private async updateMarkupDimensions() {
+			dimensionUpdater.updateHeight(this.id, this.element.offsetHeight, {
+				isOutput: false
+			});
+		}
+
+		public setSelected(selected: boolean) {
+			this.element.classList.toggle('selected', selected);
+		}
+
+		public toggleDragDropEnabled(enabled: boolean) {
+			if (enabled) {
+				this.element.classList.add('draggable');
+				this.element.setAttribute('draggable', 'true');
+			} else {
+				this.element.classList.remove('draggable');
+				this.element.removeAttribute('draggable');
+			}
+		}
+	}
+
+	class OutputCell {
+
+		public readonly element: HTMLElement;
+		private readonly outputElements = new Map</*outputId*/ string, OutputContainer>();
+
+		constructor(cellId: string) {
+			const container = document.getElementById('container')!;
+
+			const upperWrapperElement = createFocusSink(cellId);
+			container.appendChild(upperWrapperElement);
+
+			this.element = document.createElement('div');
+			this.element.style.position = 'absolute';
+
+			this.element.id = cellId;
+			this.element.classList.add('cell_container');
+
+			container.appendChild(this.element);
+			this.element = this.element;
+
+			const lowerWrapperElement = createFocusSink(cellId, true);
+			container.appendChild(lowerWrapperElement);
+		}
+
+		public createOutputElement(outputId: string, outputOffset: number, left: number, cellId: string): OutputElement {
+			let outputContainer = this.outputElements.get(outputId);
+			if (!outputContainer) {
+				outputContainer = new OutputContainer(outputId);
+				this.element.appendChild(outputContainer.element);
+				this.outputElements.set(outputId, outputContainer);
+			}
+
+			return outputContainer.createOutputElement(outputId, outputOffset, left, cellId);
+		}
+
+		public clearOutput(outputId: string, rendererId: string | undefined) {
+			this.outputElements.get(outputId)?.clear(rendererId);
+			this.outputElements.delete(outputId);
+		}
+
+		public show(outputId: string, top: number) {
+			const outputContainer = this.outputElements.get(outputId);
+			if (!outputContainer) {
+				return;
+			}
+
+			this.element.style.visibility = 'visible';
+			this.element.style.top = `${top}px`;
+
+			dimensionUpdater.updateHeight(outputId, outputContainer.element.offsetHeight, {
+				isOutput: true,
+			});
+		}
+
+		public hide() {
+			this.element.style.visibility = 'hidden';
+		}
+
+		public updateContentAndRerender(outputId: string, content: webviewMessages.ICreationContent) {
+			this.outputElements.get(outputId)?.updateContentAndRender(content);
+		}
+
+		public rerender() {
+			for (const outputElement of this.outputElements.values()) {
+				outputElement.rerender();
+			}
+		}
+
+		public updateOutputHeight(outputId: string, height: number) {
+			this.outputElements.get(outputId)?.updateHeight(height);
+		}
+
+		public updateScroll(request: webviewMessages.IContentWidgetTopRequest) {
+			this.element.style.top = `${request.cellTop}px`;
+
+			this.outputElements.get(request.outputId)?.updateScroll(request.outputOffset);
+
+			if (request.forceDisplay) {
+				this.element.style.visibility = 'visible';
+			}
+		}
+	}
+
+	class OutputContainer {
+
+		public readonly element: HTMLElement;
+
+		private _outputNode?: OutputElement;
+
+		constructor(
+			private readonly outputId: string,
+		) {
+			this.element = document.createElement('div');
+			this.element.classList.add('output_container');
+			this.element.style.position = 'absolute';
+			this.element.style.overflow = 'hidden';
+		}
+
+		public clear(rendererId: string | undefined) {
+			if (rendererId) {
+				renderers.clearOutput(rendererId, this.outputId);
+			}
+			this.element.remove();
+		}
+
+		public updateHeight(height: number) {
+			this.element.style.maxHeight = `${height}px`;
+			this.element.style.height = `${height}px`;
+		}
+
+		public updateScroll(outputOffset: number) {
+			this.element.style.top = `${outputOffset}px`;
+		}
+
+		public createOutputElement(outputId: string, outputOffset: number, left: number, cellId: string): OutputElement {
+			this.element.innerText = '';
+			this.element.style.maxHeight = '0px';
+			this.element.style.top = `${outputOffset}px`;
+
+			this._outputNode = new OutputElement(outputId, left, cellId);
+			this.element.appendChild(this._outputNode.element);
+			return this._outputNode;
+		}
+
+		public rerender() {
+			this._outputNode?.rerender();
+		}
+
+		public updateContentAndRender(content: webviewMessages.ICreationContent) {
+			this._outputNode?.updateAndRerender(content);
+		}
+	}
 
 	vscode.postMessage({
 		__vscode_notebook_message: true,
 		type: 'initialized'
 	});
 
-	function createMarkdownPreview(cellId: string, content: string, top: number) {
-		const container = document.getElementById('container')!;
-		const cellContainer = document.createElement('div');
-		cellContainer.id = cellId;
-		cellContainer.classList.add('preview');
-
-		cellContainer.style.position = 'absolute';
-		cellContainer.style.top = top + 'px';
-		container.appendChild(cellContainer);
-
-		cellContainer.addEventListener('dblclick', () => {
-			postNotebookMessage<IToggleMarkdownPreviewMessage>('toggleMarkdownPreview', { cellId });
-		});
-
-		cellContainer.addEventListener('click', e => {
-			postNotebookMessage<IClickMarkdownPreviewMessage>('clickMarkdownPreview', {
-				cellId,
-				altKey: e.altKey,
-				ctrlKey: e.ctrlKey,
-				metaKey: e.metaKey,
-				shiftKey: e.shiftKey,
-			});
-		});
-
-		cellContainer.addEventListener('contextmenu', e => {
-			postNotebookMessage<IContextMenuMarkdownPreviewMessage>('contextMenuMarkdownPreview', {
-				cellId,
-				clientX: e.clientX,
-				clientY: e.clientY,
-			});
-		});
-
-		cellContainer.addEventListener('mouseenter', () => {
-			postNotebookMessage<IMouseEnterMarkdownPreviewMessage>('mouseEnterMarkdownPreview', { cellId });
-		});
-
-		cellContainer.addEventListener('mouseleave', () => {
-			postNotebookMessage<IMouseLeaveMarkdownPreviewMessage>('mouseLeaveMarkdownPreview', { cellId });
-		});
-
-		cellContainer.setAttribute('draggable', 'true');
-
-		cellContainer.addEventListener('dragstart', e => {
-			markdownPreviewDragManager.startDrag(e, cellId);
-		});
-
-		cellContainer.addEventListener('drag', e => {
-			markdownPreviewDragManager.updateDrag(e, cellId);
-		});
-
-		cellContainer.addEventListener('dragend', e => {
-			markdownPreviewDragManager.endDrag(e, cellId);
-		});
-
-		const previewRoot = cellContainer.attachShadow({ mode: 'open' });
-
-		// Add default webview style
-		const defaultStyles = document.getElementById('_defaultStyles') as HTMLStyleElement;
-		previewRoot.appendChild(defaultStyles.cloneNode(true));
-
-		// Add default preview style
-		const previewStyles = document.getElementById('preview-styles') as HTMLTemplateElement;
-		previewRoot.appendChild(previewStyles.content.cloneNode(true));
-
-		const previewNode = document.createElement('div');
-		previewNode.id = 'preview';
-		previewRoot.appendChild(previewNode);
-
-		updateMarkdownPreview(cellId, content);
-
-		resizeObserver.observe(cellContainer, cellId, false);
-	}
-
-	function postNotebookMessage<T extends FromWebviewMessage>(
+	function postNotebookMessage<T extends webviewMessages.FromWebviewMessage>(
 		type: T['type'],
 		properties: Omit<T, '__vscode_notebook_message' | 'type'>
 	) {
@@ -891,59 +1945,103 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 		});
 	}
 
-	let hasPostedRenderedMathTelemetry = false;
-	const unsupportedKatexTermsRegex = /(\\(?:abovewithdelims|array|Arrowvert|arrowvert|atopwithdelims|bbox|bracevert|buildrel|cancelto|cases|class|cssId|ddddot|dddot|DeclareMathOperator|definecolor|displaylines|enclose|eqalign|eqalignno|eqref|hfil|hfill|idotsint|iiiint|label|leftarrowtail|leftroot|leqalignno|lower|mathtip|matrix|mbox|mit|mmlToken|moveleft|moveright|mspace|newenvironment|Newextarrow|notag|oldstyle|overparen|overwithdelims|pmatrix|raise|ref|renewenvironment|require|root|Rule|scr|shoveleft|shoveright|sideset|skew|Space|strut|style|texttip|Tiny|toggle|underparen|unicode|uproot)\b)/g;
+	class OutputElement {
+		public readonly element: HTMLElement;
+		private _content?: { content: webviewMessages.ICreationContent; preloadsAndErrors: unknown[] };
+		private hasResizeObserver = false;
 
-	function updateMarkdownPreview(cellId: string, content: string | undefined) {
-		const previewContainerNode = document.getElementById(cellId);
-		if (!previewContainerNode) {
-			return;
+		constructor(
+			private readonly outputId: string,
+			left: number,
+			public readonly cellId: string
+		) {
+			this.element = document.createElement('div');
+			this.element.id = outputId;
+			this.element.classList.add('output');
+			this.element.style.position = 'absolute';
+			this.element.style.top = `0px`;
+			this.element.style.left = left + 'px';
+			this.element.style.padding = '0px';
+
+			addMouseoverListeners(this.element, outputId);
 		}
 
-		const previewRoot = previewContainerNode.shadowRoot;
-		const previewNode = previewRoot?.getElementById('preview') as HTMLElement;
 
-		// TODO: handle namespace
-		if (typeof content === 'string') {
-			if (content.trim().length === 0) {
-				previewContainerNode.classList.add('emptyMarkdownCell');
-				previewNode.innerText = '';
+		public render(content: webviewMessages.ICreationContent, preloadsAndErrors: unknown[]) {
+			this._content = { content, preloadsAndErrors };
+			if (content.type === 0 /* RenderOutputType.Html */) {
+				const trustedHtml = ttPolicy?.createHTML(content.htmlContent) ?? content.htmlContent;
+				this.element.innerHTML = trustedHtml as string;
+			} else if (preloadsAndErrors.some(e => e instanceof Error)) {
+				const errors = preloadsAndErrors.filter((e): e is Error => e instanceof Error);
+				showPreloadErrors(this.element, ...errors);
 			} else {
-				previewContainerNode.classList.remove('emptyMarkdownCell');
-				markdownRenderer.renderMarkup({
-					element: previewNode,
-					content: content
+				const rendererApi = preloadsAndErrors[0] as rendererApi.RendererApi;
+				try {
+					rendererApi.renderOutputItem(createOutputItem(this.outputId, content.mimeType, content.metadata, content.valueBytes), this.element);
+				} catch (e) {
+					showPreloadErrors(this.element, e);
+				}
+			}
+
+			if (!this.hasResizeObserver) {
+				this.hasResizeObserver = true;
+				resizeObserver.observe(this.element, this.outputId, true, this.cellId);
+			}
+
+			const offsetHeight = this.element.offsetHeight;
+			const cps = document.defaultView!.getComputedStyle(this.element);
+			if (offsetHeight !== 0 && cps.padding === '0px') {
+				// we set padding to zero if the output height is zero (then we can have a zero-height output DOM node)
+				// thus we need to ensure the padding is accounted when updating the init height of the output
+				dimensionUpdater.updateHeight(this.outputId, offsetHeight + ctx.style.outputNodePadding * 2, {
+					isOutput: true,
+					init: true,
 				});
 
-				if (!hasPostedRenderedMathTelemetry) {
-					const hasRenderedMath = previewNode.querySelector('.katex');
-					if (hasRenderedMath) {
-						hasPostedRenderedMathTelemetry = true;
-						postNotebookMessage<ITelemetryFoundRenderedMarkdownMath>('telemetryFoundRenderedMarkdownMath', {});
-					}
-				}
+				this.element.style.padding = `${ctx.style.outputNodePadding}px ${ctx.style.outputNodePadding}px ${ctx.style.outputNodePadding}px ${ctx.style.outputNodeLeftPadding}`;
+			} else {
+				dimensionUpdater.updateHeight(this.outputId, this.element.offsetHeight, {
+					isOutput: true,
+					init: true,
+				});
+			}
 
-				const matches = previewNode.innerText.match(unsupportedKatexTermsRegex);
-				if (matches) {
-					postNotebookMessage<ITelemetryFoundUnrenderedMarkdownMath>('telemetryFoundUnrenderedMarkdownMath', {
-						latexDirective: matches[0],
-					});
-				}
+			const root = this.element.shadowRoot ?? this.element;
+			const codeBlocks: Array<{ value: string; lang: string; id: string }> = MarkdownCodeBlock.requestHighlightCodeBlock(root);
+
+			if (codeBlocks.length > 0) {
+				postNotebookMessage<webviewMessages.IRenderedCellOutputMessage>('renderedCellOutput', {
+					codeBlocks
+				});
 			}
 		}
 
-		dimensionUpdater.update(cellId, previewContainerNode.clientHeight, {
-			isOutput: false
-		});
+		public rerender() {
+			if (this._content) {
+				this.render(this._content.content, this._content.preloadsAndErrors);
+			}
+		}
+
+		public updateAndRerender(content: webviewMessages.ICreationContent) {
+			if (this._content) {
+				this._content.content = content;
+				this.render(this._content.content, this._content.preloadsAndErrors);
+			}
+		}
 	}
 
-	const markdownPreviewDragManager = new class MarkdownPreviewDragManager {
+	const markupCellDragManager = new class MarkupCellDragManager {
 
-		private currentDrag: { cellId: string, clientY: number } | undefined;
+		private currentDrag: { cellId: string; clientY: number } | undefined;
+
+		// Transparent overlay that prevents elements from inside the webview from eating
+		// drag events.
+		private dragOverlay?: HTMLElement;
 
 		constructor() {
 			document.addEventListener('dragover', e => {
-				// Allow dropping dragged markdown cells
+				// Allow dropping dragged markup cells
 				e.preventDefault();
 			});
 
@@ -956,11 +2054,11 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 				}
 
 				this.currentDrag = undefined;
-				postNotebookMessage<ICellDropMessage>('cell-drop', {
+				postNotebookMessage<webviewMessages.ICellDropMessage>('cell-drop', {
 					cellId: drag.cellId,
 					ctrlKey: e.ctrlKey,
 					altKey: e.altKey,
-					position: { clientY: e.clientY },
+					dragOffsetY: e.clientY,
 				});
 			});
 		}
@@ -970,13 +2068,30 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 				return;
 			}
 
+			if (!currentOptions.dragAndDropEnabled) {
+				return;
+			}
+
 			this.currentDrag = { cellId, clientY: e.clientY };
 
+			const overlayZIndex = 9999;
+			if (!this.dragOverlay) {
+				this.dragOverlay = document.createElement('div');
+				this.dragOverlay.style.position = 'absolute';
+				this.dragOverlay.style.top = '0';
+				this.dragOverlay.style.left = '0';
+				this.dragOverlay.style.zIndex = `${overlayZIndex}`;
+				this.dragOverlay.style.width = '100%';
+				this.dragOverlay.style.height = '100%';
+				this.dragOverlay.style.background = 'transparent';
+				document.body.appendChild(this.dragOverlay);
+			}
+			(e.target as HTMLElement).style.zIndex = `${overlayZIndex + 1}`;
 			(e.target as HTMLElement).classList.add('dragging');
 
-			postNotebookMessage<ICellDragStartMessage>('cell-drag-start', {
+			postNotebookMessage<webviewMessages.ICellDragStartMessage>('cell-drag-start', {
 				cellId: cellId,
-				position: { clientY: e.clientY },
+				dragOffsetY: e.clientY,
 			});
 
 			// Continuously send updates while dragging instead of relying on `updateDrag`.
@@ -986,9 +2101,9 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 					return;
 				}
 
-				postNotebookMessage<ICellDragMessage>('cell-drag', {
+				postNotebookMessage<webviewMessages.ICellDragMessage>('cell-drag', {
 					cellId: cellId,
-					position: { clientY: this.currentDrag.clientY },
+					dragOffsetY: this.currentDrag.clientY,
 				});
 				requestAnimationFrame(trySendDragUpdate);
 			};
@@ -998,34 +2113,51 @@ async function webviewPreloads(markdownRendererModule: any, markdownDeps: any) {
 		updateDrag(e: DragEvent, cellId: string) {
 			if (cellId !== this.currentDrag?.cellId) {
 				this.currentDrag = undefined;
+			} else {
+				this.currentDrag = { cellId, clientY: e.clientY };
 			}
-			this.currentDrag = { cellId, clientY: e.clientY };
 		}
 
 		endDrag(e: DragEvent, cellId: string) {
 			this.currentDrag = undefined;
 			(e.target as HTMLElement).classList.remove('dragging');
-			postNotebookMessage<ICellDragEndMessage>('cell-drag-end', {
+			postNotebookMessage<webviewMessages.ICellDragEndMessage>('cell-drag-end', {
 				cellId: cellId
 			});
+
+			if (this.dragOverlay) {
+				document.body.removeChild(this.dragOverlay);
+				this.dragOverlay = undefined;
+			}
+
+			(e.target as HTMLElement).style.zIndex = '';
 		}
 	}();
 }
 
-export function preloadsScriptStr(styleValues: {
-	outputNodePadding: number;
-	outputNodeLeftPadding: number;
-}, markdownRenderer: {
-	entrypoint: string,
-	dependencies: Array<{ entrypoint: string }>,
-}) {
-	const markdownCtx = {
-		dependencies: markdownRenderer.dependencies,
-	};
+export interface RendererMetadata {
+	readonly id: string;
+	readonly entrypoint: string;
+	readonly mimeTypes: readonly string[];
+	readonly extends: string | undefined;
+	readonly messaging: boolean;
+	readonly isBuiltin: boolean;
+}
 
+export function preloadsScriptStr(styleValues: PreloadStyles, options: PreloadOptions, renderers: readonly RendererMetadata[], isWorkspaceTrusted: boolean, lineLimit: number, nonce: string) {
+	const ctx: PreloadContext = {
+		style: styleValues,
+		options,
+		rendererData: renderers,
+		isWorkspaceTrusted,
+		lineLimit,
+		nonce,
+	};
+	// TS will try compiling `import()` in webviewPreloads, so use a helper function instead
+	// of using `import(...)` directly
 	return `
-	import * as markdownRendererModule from "${markdownRenderer.entrypoint}";
-	(${webviewPreloads})(markdownRendererModule, JSON.parse(decodeURIComponent("${encodeURIComponent(JSON.stringify(markdownCtx))}")))`
-		.replace(/__outputNodePadding__/g, `${styleValues.outputNodePadding}`)
-		.replace(/__outputNodeLeftPadding__/g, `${styleValues.outputNodeLeftPadding}`);
+		const __import = (x) => import(x);
+		(${webviewPreloads})(
+			JSON.parse(decodeURIComponent("${encodeURIComponent(JSON.stringify(ctx))}"))
+		)\n//# sourceURL=notebookWebviewPreloads.js\n`;
 }

@@ -15,13 +15,6 @@ VSCODEEXTDIR=`mktemp -d -t adsext_XXXXXXXXXX 2>/dev/null`
 VSCODECRASHDIR=$ROOT/.build/crashes
 cd $ROOT
 
-# Default to only running stable tests if test grep isn't set
-if [[ "$ADS_TEST_GREP" == "" ]]; then
-	echo Running stable tests only
-	export ADS_TEST_GREP=@UNSTABLE@
-	export ADS_TEST_INVERT_GREP=1
-fi
-
 # Figure out which Electron to use for running tests
 if [ -z "$INTEGRATION_TEST_ELECTRON_PATH" ]
 then
@@ -53,12 +46,15 @@ else
 				compile-extension:azurecore \
 				compile-extension:cms \
 				compile-extension:dacpac \
+				compile-extension:datavirtualization \
 				compile-extension:import \
 				compile-extension:schema-compare \
 				compile-extension:machine-learning \
 				compile-extension:mssql \
 				compile-extension:notebook \
+				compile-extension:query-history \
 				compile-extension:resource-deployment \
+				compile-extension:sql-bindings \
 				compile-extension:sql-database-projects
 
 	# Configuration for more verbose output
@@ -87,7 +83,7 @@ cd $ROOT
 echo "VSCODEUSERDATADIR : '$VSCODEUSERDATADIR'"
 echo "VSCODEEXTDIR : '$VSCODEEXTDIR'"
 
-ALL_PLATFORMS_API_TESTS_EXTRA_ARGS="--disable-telemetry --crash-reporter-directory=$VSCODECRASHDIR --no-cached-data --disable-updates --disable-keytar --disable-extensions --user-data-dir=$VSCODEUSERDATADIR --extensions-dir=$VSCODEEXTDIR"
+ALL_PLATFORMS_API_TESTS_EXTRA_ARGS="--disable-telemetry --crash-reporter-directory=$VSCODECRASHDIR --no-cached-data --disable-updates --disable-extensions --user-data-dir=$VSCODEUSERDATADIR --extensions-dir=$VSCODEEXTDIR"
 
 echo ***************************************************
 echo *** starting admin tool extension windows tests ***
@@ -124,25 +120,21 @@ echo *** starting dacpac tests ***
 echo *****************************
 "$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/dacpac --extensionTestsPath=$ROOT/extensions/dacpac/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
 
+echo *****************************************
+echo *** starting datavirtualization tests ***
+echo *****************************************
+"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/datavirtualization --extensionTestsPath=$ROOT/extensions/datavirtualization/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
+
+# {{SQL CARBON TODO}} - disable tests for this extension
+# echo ********************************************
+# echo *** starting data-workspace tests ***
+# echo ********************************************
+# "$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/data-workspace --extensionTestsPath=$ROOT/extensions/data-workspace/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
+
 echo *****************************
 echo *** starting import tests ***
 echo *****************************
 "$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/import --extensionTestsPath=$ROOT/extensions/import/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
-
-echo *************************************
-echo *** starting schema compare tests ***
-echo *************************************
-"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/schema-compare --extensionTestsPath=$ROOT/extensions/schema-compare/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
-
-echo *******************************
-echo *** starting notebook tests ***
-echo *******************************
-"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/notebook --extensionTestsPath=$ROOT/extensions/notebook/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
-
-echo ******************************************
-echo *** starting resource deployment tests ***
-echo ******************************************
-"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/resource-deployment --extensionTestsPath=$ROOT/extensions/resource-deployment/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
 
 echo ************************************************
 echo *** starting machine-learning tests ***
@@ -154,15 +146,35 @@ echo ************************************************
 # echo ******************************************
 # "$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/mssql --extensionTestsPath=$ROOT/extensions/mssql/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
 
+echo *******************************
+echo *** starting notebook tests ***
+echo *******************************
+"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/notebook --extensionTestsPath=$ROOT/extensions/notebook/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
+
+echo ******************************************
+echo *** starting query-history tests ***
+echo ******************************************
+"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/query-history --extensionTestsPath=$ROOT/extensions/query-history/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
+
+echo ******************************************
+echo *** starting resource deployment tests ***
+echo ******************************************
+"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/resource-deployment --extensionTestsPath=$ROOT/extensions/resource-deployment/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
+
+echo *************************************
+echo *** starting schema compare tests ***
+echo *************************************
+"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/schema-compare --extensionTestsPath=$ROOT/extensions/schema-compare/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
+
+echo ********************************************
+echo *** starting sql-bindings tests ***
+echo ********************************************
+"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/sql-bindings --extensionTestsPath=$ROOT/extensions/sql-bindings/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
+
 echo ********************************************
 echo *** starting sql-database-projects tests ***
 echo ********************************************
 "$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/sql-database-projects --extensionTestsPath=$ROOT/extensions/sql-database-projects/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
-
-echo ********************************************
-echo *** starting data-workspace tests ***
-echo ********************************************
-"$INTEGRATION_TEST_ELECTRON_PATH" $LINUX_EXTRA_ARGS --extensionDevelopmentPath=$ROOT/extensions/data-workspace --extensionTestsPath=$ROOT/extensions/data-workspace/out/test $ALL_PLATFORMS_API_TESTS_EXTRA_ARGS
 
 if [[ "$NO_CLEANUP" == "" ]]; then
 	rm -r $VSCODEUSERDATADIR

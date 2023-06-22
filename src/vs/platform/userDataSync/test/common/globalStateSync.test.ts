@@ -4,15 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { IUserDataSyncStoreService, IUserDataSyncService, SyncResource, SyncStatus, IGlobalState, ISyncData } from 'vs/platform/userDataSync/common/userDataSync';
-import { UserDataSyncClient, UserDataSyncTestServer } from 'vs/platform/userDataSync/test/common/userDataSyncClient';
+import { VSBuffer } from 'vs/base/common/buffer';
 import { DisposableStore, toDisposable } from 'vs/base/common/lifecycle';
-import { UserDataSyncService } from 'vs/platform/userDataSync/common/userDataSyncService';
-import { IFileService } from 'vs/platform/files/common/files';
 import { IEnvironmentService } from 'vs/platform/environment/common/environment';
+import { IFileService } from 'vs/platform/files/common/files';
 import { IStorageService, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
 import { GlobalStateSynchroniser } from 'vs/platform/userDataSync/common/globalStateSync';
-import { VSBuffer } from 'vs/base/common/buffer';
+import { IGlobalState, ISyncData, IUserDataSyncStoreService, SyncResource, SyncStatus } from 'vs/platform/userDataSync/common/userDataSync';
+import { UserDataSyncClient, UserDataSyncTestServer } from 'vs/platform/userDataSync/test/common/userDataSyncClient';
 
 
 suite('GlobalStateSync', () => {
@@ -27,7 +26,7 @@ suite('GlobalStateSync', () => {
 	setup(async () => {
 		testClient = disposableStore.add(new UserDataSyncClient(server));
 		await testClient.setUp(true);
-		testObject = (testClient.instantiationService.get(IUserDataSyncService) as UserDataSyncService).getSynchroniser(SyncResource.GlobalState) as GlobalStateSynchroniser;
+		testObject = testClient.getSynchronizer(SyncResource.GlobalState) as GlobalStateSynchroniser;
 		disposableStore.add(toDisposable(() => testClient.instantiationService.get(IUserDataSyncStoreService).clear()));
 
 		client2 = disposableStore.add(new UserDataSyncClient(server));
@@ -214,22 +213,22 @@ suite('GlobalStateSync', () => {
 
 	function updateUserStorage(key: string, value: string, client: UserDataSyncClient): void {
 		const storageService = client.instantiationService.get(IStorageService);
-		storageService.store(key, value, StorageScope.GLOBAL, StorageTarget.USER);
+		storageService.store(key, value, StorageScope.PROFILE, StorageTarget.USER);
 	}
 
 	function updateMachineStorage(key: string, value: string, client: UserDataSyncClient): void {
 		const storageService = client.instantiationService.get(IStorageService);
-		storageService.store(key, value, StorageScope.GLOBAL, StorageTarget.MACHINE);
+		storageService.store(key, value, StorageScope.PROFILE, StorageTarget.MACHINE);
 	}
 
 	function removeStorage(key: string, client: UserDataSyncClient): void {
 		const storageService = client.instantiationService.get(IStorageService);
-		storageService.remove(key, StorageScope.GLOBAL);
+		storageService.remove(key, StorageScope.PROFILE);
 	}
 
 	function readStorage(key: string, client: UserDataSyncClient): string | undefined {
 		const storageService = client.instantiationService.get(IStorageService);
-		return storageService.get(key, StorageScope.GLOBAL);
+		return storageService.get(key, StorageScope.PROFILE);
 	}
 
 	async function readLocale(client: UserDataSyncClient): Promise<string | undefined> {

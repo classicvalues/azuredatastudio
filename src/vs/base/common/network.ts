@@ -3,8 +3,8 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { URI } from 'vs/base/common/uri';
 import * as platform from 'vs/base/common/platform';
+import { URI } from 'vs/base/common/uri';
 
 export namespace Schemas {
 
@@ -46,13 +46,15 @@ export namespace Schemas {
 
 	export const data = 'data';
 
+	export const attachment = 'attachment'; // {{SQL CARBON EDIT}} "Scheme" used for Notebook cell attachment data (not really a scheme but formatted like one...)
+
 	export const command = 'command';
 
 	export const vscodeRemote = 'vscode-remote';
 
 	export const vscodeRemoteResource = 'vscode-remote-resource';
 
-	export const userData = 'vscode-userdata';
+	export const vscodeUserData = 'vscode-userdata';
 
 	export const vscodeCustomEditor = 'vscode-custom-editor';
 
@@ -61,6 +63,9 @@ export namespace Schemas {
 	export const vscodeNotebookCell = 'vscode-notebook-cell';
 
 	export const vscodeNotebookCellMetadata = 'vscode-notebook-cell-metadata';
+	export const vscodeNotebookCellOutput = 'vscode-notebook-cell-output';
+	export const vscodeInteractive = 'vscode-interactive';
+	export const vscodeInteractiveInput = 'vscode-interactive-input';
 
 	export const vscodeSettings = 'vscode-settings';
 
@@ -68,6 +73,9 @@ export namespace Schemas {
 
 	export const vscodeTerminal = 'vscode-terminal';
 
+	/**
+	 * Scheme used internally for webviews that aren't linked to a resource (i.e. not custom editors)
+	 */
 	export const webviewPanel = 'webview-panel';
 
 	/**
@@ -90,14 +98,30 @@ export namespace Schemas {
 	 * Scheme used for temporary resources
 	 */
 	export const tmp = 'tmp';
+
+	/**
+	 * Scheme used vs live share
+	 */
+	export const vsls = 'vsls';
+
+	/**
+	 * Scheme used for the Source Control commit input's text document
+	 */
+	export const vscodeSourceControl = 'vscode-scm';
 }
 
+export const connectionTokenCookieName = 'vscode-tkn';
+export const connectionTokenQueryName = 'tkn';
+
 class RemoteAuthoritiesImpl {
-	private readonly _hosts: { [authority: string]: string | undefined; } = Object.create(null);
-	private readonly _ports: { [authority: string]: number | undefined; } = Object.create(null);
-	private readonly _connectionTokens: { [authority: string]: string | undefined; } = Object.create(null);
+	private readonly _defaultWebPort = 80; // {{SQL CARBON EDIT}}
+
+	private readonly _hosts: { [authority: string]: string | undefined } = Object.create(null);
+	private readonly _ports: { [authority: string]: number | undefined } = Object.create(null);
+	private readonly _connectionTokens: { [authority: string]: string | undefined } = Object.create(null);
 	private _preferredWebSchema: 'http' | 'https' = 'http';
 	private _delegate: ((uri: URI) => URI) | null = null;
+	private _remoteResourcesPath: string = `/${Schemas.vscodeRemoteResource}`;
 
 	setPreferredWebSchema(schema: 'http' | 'https') {
 		this._preferredWebSchema = schema;
@@ -107,6 +131,10 @@ class RemoteAuthoritiesImpl {
 		this._delegate = delegate;
 	}
 
+	setServerRootPath(serverRootPath: string): void {
+		this._remoteResourcesPath = `${serverRootPath}/${Schemas.vscodeRemoteResource}`;
+	}
+
 	set(authority: string, host: string, port: number): void {
 		this._hosts[authority] = host;
 		this._ports[authority] = port;
@@ -114,6 +142,10 @@ class RemoteAuthoritiesImpl {
 
 	setConnectionToken(authority: string, connectionToken: string): void {
 		this._connectionTokens[authority] = connectionToken;
+	}
+
+	getPreferredWebSchema(): 'http' | 'https' {
+		return this._preferredWebSchema;
 	}
 
 	rewrite(uri: URI): URI {
@@ -129,12 +161,12 @@ class RemoteAuthoritiesImpl {
 		const connectionToken = this._connectionTokens[authority];
 		let query = `path=${encodeURIComponent(uri.path)}`;
 		if (typeof connectionToken === 'string') {
-			query += `&tkn=${encodeURIComponent(connectionToken)}`;
+			query += `&${connectionTokenQueryName}=${encodeURIComponent(connectionToken)}`;
 		}
 		return URI.from({
 			scheme: platform.isWeb ? this._preferredWebSchema : Schemas.vscodeRemoteResource,
-			authority: `${host}:${port}`,
-			path: `/vscode-remote-resource`,
+			authority: platform.isWeb && port === this._defaultWebPort ? `${host}` : `${host}:${port}`, // {{SQL CARBON EDIT}} addresses same-origin-policy violation in web mode when port number is in authority, but not in URI.
+			path: this._remoteResourcesPath,
 			query
 		});
 	}
@@ -144,7 +176,7 @@ export const RemoteAuthorities = new RemoteAuthoritiesImpl();
 
 class FileAccessImpl {
 
-	private readonly FALLBACK_AUTHORITY = 'vscode-app';
+	private static readonly FALLBACK_AUTHORITY = 'vscode-app';
 
 	/**
 	 * Returns a URI to use in contexts where the browser is responsible
@@ -153,8 +185,8 @@ class FileAccessImpl {
 	 * **Note:** use `dom.ts#asCSSUrl` whenever the URL is to be used in CSS context.
 	 */
 	asBrowserUri(uri: URI): URI;
-	asBrowserUri(moduleId: string, moduleIdToUrl: { toUrl(moduleId: string): string }, __forceCodeFileUri?: boolean): URI;
-	asBrowserUri(uriOrModule: URI | string, moduleIdToUrl?: { toUrl(moduleId: string): string }, __forceCodeFileUri?: boolean): URI {
+	asBrowserUri(moduleId: string, moduleIdToUrl: { toUrl(moduleId: string): string }): URI;
+	asBrowserUri(uriOrModule: URI | string, moduleIdToUrl?: { toUrl(moduleId: string): string }): URI {
 		const uri = this.toUri(uriOrModule, moduleIdToUrl);
 
 		// Handle remote URIs via `RemoteAuthorities`
@@ -162,16 +194,24 @@ class FileAccessImpl {
 			return RemoteAuthorities.rewrite(uri);
 		}
 
-		// Only convert the URI if we are in a native context and it has `file:` scheme
-		// and we have explicitly enabled the conversion (sandbox, or VSCODE_BROWSER_CODE_LOADING)
-		if (platform.isNative && (__forceCodeFileUri || platform.isPreferringBrowserCodeLoad) && uri.scheme === Schemas.file) {
+		// Convert to `vscode-file` resource..
+		if (
+			// ...only ever for `file` resources
+			uri.scheme === Schemas.file &&
+			(
+				// ...and we run in native environments
+				platform.isNative ||
+				// ...or web worker extensions on desktop
+				(platform.isWebWorker && platform.globals.origin === `${Schemas.vscodeFileResource}://${FileAccessImpl.FALLBACK_AUTHORITY}`)
+			)
+		) {
 			return uri.with({
 				scheme: Schemas.vscodeFileResource,
 				// We need to provide an authority here so that it can serve
 				// as origin for network and loading matters in chromium.
 				// If the URI is not coming with an authority already, we
 				// add our own
-				authority: uri.authority || this.FALLBACK_AUTHORITY,
+				authority: uri.authority || FileAccessImpl.FALLBACK_AUTHORITY,
 				query: null,
 				fragment: null
 			});
@@ -196,7 +236,7 @@ class FileAccessImpl {
 				// Only preserve the `authority` if it is different from
 				// our fallback authority. This ensures we properly preserve
 				// Windows UNC paths that come with their own authority.
-				authority: uri.authority !== this.FALLBACK_AUTHORITY ? uri.authority : null,
+				authority: uri.authority !== FileAccessImpl.FALLBACK_AUTHORITY ? uri.authority : null,
 				query: null,
 				fragment: null
 			});

@@ -7,23 +7,27 @@
 	},
 	"plugins": [
 		"@typescript-eslint",
-		"jsdoc"
+		"jsdoc",
+		"header"
 	],
 	"rules": {
+		"no-undef": "off",
+		"no-unused-vars": "off",
 		"constructor-super": "warn",
-		"curly": "warn",
+		"curly": "off",
 		"eqeqeq": "warn",
 		"no-buffer-constructor": "warn",
 		"no-caller": "warn",
 		"no-debugger": "warn",
 		"no-duplicate-case": "warn",
-		"no-duplicate-imports": "warn",
+		"no-duplicate-imports": "off",
 		"no-eval": "warn",
+		"no-async-promise-executor": "off",
 		"no-extra-semi": "warn",
 		"no-new-wrappers": "warn",
 		"no-redeclare": "off",
 		"no-sparse-arrays": "warn",
-		"no-throw-literal": "warn",
+		"no-throw-literal": "off",
 		"no-unsafe-finally": "warn",
 		"no-unused-labels": "warn",
 		"no-restricted-globals": [
@@ -38,10 +42,10 @@
 			"orientation",
 			"context"
 		], // non-complete list of globals that are easy to access unintentionally
-		"no-var": "warn",
+		"no-var": "off",
 		"jsdoc/no-types": "warn",
 		"semi": "off",
-		"@typescript-eslint/semi": "warn",
+		"@typescript-eslint/semi": "off",
 		"@typescript-eslint/naming-convention": [
 			"warn",
 			{
@@ -52,15 +56,15 @@
 			}
 		],
 		"code-no-unused-expressions": [
-			"warn",
+			"off",
 			{
 				"allowTernary": true
 			}
 		],
-		"code-translation-remind": "warn",
+		"code-translation-remind": "off",
 		"code-no-nls-in-standalone-editor": "warn",
 		"code-no-standalone-editor": "warn",
-		"code-no-unexternalized-strings": "warn",
+		"code-no-unexternalized-strings": "off",
 		"code-layering": [
 			"warn",
 			{
@@ -88,7 +92,7 @@
 			}
 		],
 		"code-import-patterns": [
-			"warn",
+			"off",
 			// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 			// !!! Do not relax these rules !!!
 			// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -104,6 +108,7 @@
 				"restrictions": [
 					"assert",
 					"sinon",
+					"sinon-test",
 					"vs/nls",
 					"**/{vs,sql}/base/common/**",
 					"**/{vs,sql}/base/test/common/**"
@@ -132,7 +137,7 @@
 				"restrictions": [
 					"vs/nls",
 					"**/{vs,sql}/base/{common,node}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -141,6 +146,7 @@
 				"restrictions": [
 					"assert",
 					"sinon",
+					"sinon-test",
 					"vs/nls",
 					"**/{vs,sql}/base/{common,browser}/**",
 					"**/{vs,sql}/base/test/{common,browser}/**",
@@ -173,7 +179,7 @@
 					"vs/nls",
 					"**/{vs,sql}/base/{common,node}/**",
 					"**/{vs,sql}/base/parts/*/{common,node}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -192,7 +198,7 @@
 					"vs/css!./**/*",
 					"**/{vs,sql}/base/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/base/parts/*/{common,browser,node,electron-sandbox,electron-browser}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -201,7 +207,7 @@
 					"vs/nls",
 					"**/{vs,sql}/base/{common,node,electron-main}/**",
 					"**/{vs,sql}/base/parts/*/{common,node,electron-main}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -209,9 +215,13 @@
 				"restrictions": [
 					"vs/nls",
 					"azdata",
+					"mssql",
+					"azurecore",
 					"**/{vs,sql}/base/common/**",
 					"**/{vs,sql}/base/parts/*/common/**",
-					"**/{vs,sql}/platform/*/common/**"
+					"**/{vs,sql}/platform/*/common/**",
+					"@microsoft/1ds-post-js",
+					"@microsoft/1ds-core-js"
 				]
 			},
 			{
@@ -220,6 +230,7 @@
 					"assert",
 					"typemoq",
 					"sinon",
+					"sinon-test",
 					"vs/nls",
 					"azdata",
 					"**/{vs,sql}/base/common/**",
@@ -248,7 +259,9 @@
 					"**/{vs,sql}/base/{common,node}/**",
 					"**/{vs,sql}/base/parts/*/{common,node}/**",
 					"**/{vs,sql}/platform/*/{common,node}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*", // node modules
+					"@microsoft/1ds-post-js",
+					"@microsoft/1ds-core-js"
 				]
 			},
 			{
@@ -270,7 +283,7 @@
 					"**/{vs,sql}/base/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/base/parts/*/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/platform/*/{common,browser,node,electron-sandbox,electron-browser}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -281,8 +294,7 @@
 					"**/{vs,sql}/base/{common,node,electron-main}/**",
 					"**/{vs,sql}/base/parts/*/{common,node,electron-main}/**",
 					"**/{vs,sql}/platform/*/{common,node,electron-main}/**",
-					"**/{vs,sql}/code/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -292,12 +304,15 @@
 					"typemoq",
 					"sinon",
 					"azdata",
+					"sinon-test",
 					"vs/nls",
 					"**/{vs,sql}/base/{common,browser}/**",
 					"**/{vs,sql}/base/test/{common,browser}/**",
 					"**/{vs,sql}/base/parts/*/common/**", // {{SQL CARBON EDIT}}
 					"**/{vs,sql}/platform/*/{common,browser}/**",
-					"**/{vs,sql}/platform/*/test/{common,browser}/**"
+					"**/{vs,sql}/platform/*/test/{common,browser}/**",
+					"@microsoft/1ds-post-js",
+					"@microsoft/1ds-core-js"
 				]
 			},
 			{
@@ -315,6 +330,7 @@
 				"restrictions": [
 					"assert",
 					"sinon",
+					"sinon-test",
 					"vs/nls",
 					"**/{vs,sql}/base/common/**",
 					"**/{vs,sql}/platform/*/common/**",
@@ -338,6 +354,7 @@
 				"restrictions": [
 					"assert",
 					"sinon",
+					"sinon-test",
 					"vs/nls",
 					"**/{vs,sql}/base/{common,browser}/**",
 					"**/{vs,sql}/platform/*/{common,browser}/**",
@@ -361,6 +378,7 @@
 				"restrictions": [
 					"assert",
 					"sinon",
+					"sinon-test",
 					"vs/nls",
 					"**/{vs,sql}/base/common/**",
 					"**/{vs,sql}/platform/*/common/**",
@@ -387,6 +405,7 @@
 				"restrictions": [
 					"assert",
 					"sinon",
+					"sinon-test",
 					"vs/nls",
 					"**/{vs,sql}/base/{common,browser}/**",
 					"**/{vs,sql}/platform/*/{common,browser}/**",
@@ -401,6 +420,7 @@
 				"restrictions": [
 					"assert",
 					"sinon",
+					"sinon-test",
 					"vs/nls",
 					"**/{vs,sql}/base/{common,browser}/**",
 					"**/{vs,sql}/base/test/{common,browser}/**",
@@ -463,6 +483,8 @@
 				"restrictions": [
 					"vscode",
 					"azdata",
+					"mssql",
+					"azurecore",
 					"vs/nls",
 					"**/{vs,sql}/base/common/**",
 					"**/{vs,sql}/platform/*/common/**",
@@ -511,7 +533,7 @@
 					"**/{vs,sql}/workbench/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/workbench/api/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/workbench/services/*/{common,browser,node,electron-sandbox,electron-browser}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -523,10 +545,10 @@
 					"**/{vs,sql}/platform/**",
 					"**/{vs,sql}/editor/**",
 					"**/{vs,sql}/workbench/{common,browser,node,electron-sandbox,electron-browser}/**",
-					"vs/workbench/contrib/files/common/editors/fileEditorInput",
+					"vs/workbench/contrib/files/browser/editors/fileEditorInput",
 					"**/{vs,sql}/workbench/services/**",
 					"**/{vs,sql}/workbench/test/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -541,6 +563,7 @@
 					"**/{vs,sql}/workbench/common/**",
 					"**/{vs,sql}/workbench/services/**/common/**",
 					"**/{vs,sql}/workbench/api/**/common/**",
+					"**/{vs,sql}/workbench/contrib/**/common/**",
 					"vs/workbench/contrib/files/common/editors/fileEditorInput", // this should be fine, it only accesses constants from contrib
 					"vscode-textmate",
 					"vscode-oniguruma",
@@ -568,6 +591,8 @@
 					"vs/nls",
 					"vs/css!./**/*",
 					"azdata",
+					"mssql",
+					"azurecore",
 					"vscode",
 					"**/{vs,sql}/base/**/{common,browser,worker}/**",
 					"**/{vs,sql}/platform/**/{common,browser}/**",
@@ -576,14 +601,17 @@
 					"**/{vs,sql}/workbench/{common,browser}/**",
 					"**/{vs,sql}/workbench/api/{common,browser}/**",
 					"**/{vs,sql}/workbench/services/**/{common,browser}/**",
+					"**/{vs,sql}/workbench/contrib/**/common/**",
 					"vscode-textmate",
 					"vscode-oniguruma",
 					"iconv-lite-umd",
 					"jschardet",
+					"@vscode/vscode-languagedetection",
 					"@angular/*",
 					"rxjs/**",
 					"sanitize-html",
-					"ansi_up"
+					"ansi_up",
+					"@microsoft/applicationinsights-web"
 				]
 			},
 			{
@@ -596,7 +624,7 @@
 					"**/{vs,sql}/workbench/{common,node}/**",
 					"**/{vs,sql}/workbench/api/{common,node}/**",
 					"**/{vs,sql}/workbench/services/**/{common,node}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -627,7 +655,7 @@
 					"**/{vs,sql}/workbench/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/workbench/api/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/workbench/services/**/{common,browser,node,electron-sandbox,electron-browser}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -742,7 +770,7 @@
 					"chart.js",
 					"plotly.js",
 					"angular2-grid",
-					"html-query-plan",
+					"kburtram-query-plan",
 					"html-to-image",
 					"turndown",
 					"gridstack",
@@ -750,7 +778,8 @@
 					"vscode-textmate",
 					"vscode-oniguruma",
 					"iconv-lite-umd",
-					"jschardet"
+					"jschardet",
+					"azdataGraph"
 				]
 			},
 			{
@@ -765,7 +794,7 @@
 					"**/{vs,sql}/workbench/api/{common,node}/**",
 					"**/{vs,sql}/workbench/services/**/{common,node}/**",
 					"**/{vs,sql}/workbench/contrib/**/{common,node}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -798,7 +827,7 @@
 					"**/{vs,sql}/workbench/api/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/workbench/services/**/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/workbench/contrib/**/{common,browser,node,electron-sandbox,electron-browser}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -821,7 +850,7 @@
 					"**/{vs,sql}/base/parts/**/{common,node}/**",
 					"**/{vs,sql}/platform/**/{common,node}/**",
 					"**/{vs,sql}/code/**/{common,node}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -833,7 +862,7 @@
 					"**/{vs,sql}/base/parts/**/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/platform/**/{common,browser,node,electron-sandbox,electron-browser}/**",
 					"**/{vs,sql}/code/**/{common,browser,node,electron-sandbox,electron-browser}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -844,7 +873,7 @@
 					"**/{vs,sql}/base/parts/**/{common,node,electron-main}/**",
 					"**/{vs,sql}/platform/**/{common,node,electron-main}/**",
 					"**/{vs,sql}/code/**/{common,node,electron-main}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -856,8 +885,7 @@
 					"**/{vs,sql}/platform/**/{common,node}/**",
 					"**/{vs,sql}/workbench/**/{common,node}/**",
 					"**/{vs,sql}/server/**",
-					"**/{vs,sql}/code/**/{common,node}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -928,28 +956,28 @@
 				"target": "**/test/smoke/**",
 				"restrictions": [
 					"**/test/smoke/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
 				"target": "**/test/automation/**",
 				"restrictions": [
 					"**/test/automation/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
 				"target": "**/test/integration/**",
 				"restrictions": [
 					"**/test/integration/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
 				"target": "**/test/monaco/**",
 				"restrictions": [
 					"**/test/monaco/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -958,6 +986,7 @@
 					"**/{vs,sql}/**",
 					"assert",
 					"sinon",
+					"sinon-test",
 					"crypto",
 					"vscode",
 					"typemoq",
@@ -968,7 +997,7 @@
 				"target": "**/{node,electron-browser,electron-main}/**/*.test.ts",
 				"restrictions": [
 					"**/{vs,sql}/**",
-					"*", // node modules
+					"@vscode/*", "@parcel/*", "*", // node modules
 					"@angular/*" // {{SQL CARBON EDIT}}
 				]
 			},
@@ -976,14 +1005,14 @@
 				"target": "**/{node,electron-browser,electron-main}/**/test/**",
 				"restrictions": [
 					"**/{vs,sql}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
 				"target": "**/test/{node,electron-browser,electron-main}/**",
 				"restrictions": [
 					"**/{vs,sql}/**",
-					"*" // node modules
+					"@vscode/*", "@parcel/*", "*" // node modules
 				]
 			},
 			{
@@ -993,6 +1022,7 @@
 					"assert",
 					"typemoq",
 					"sinon",
+					"sinon-test",
 					"crypto",
 					"xterm*",
 					"azdata"
@@ -1005,10 +1035,21 @@
 					"assert",
 					"typemoq",
 					"sinon",
+					"sinon-test",
 					"crypto",
 					"xterm*"
 				]
 			}
+		],
+		"header/header": [
+			2,
+			"block",
+			[
+				"---------------------------------------------------------------------------------------------",
+				" *  Copyright (c) Microsoft Corporation. All rights reserved.",
+				" *  Licensed under the Source EULA. See License.txt in the project root for license information.",
+				" *--------------------------------------------------------------------------------------------"
+			]
 		]
 	},
 	"overrides": [
@@ -1042,6 +1083,7 @@
 				"vscode-dts-cancellation": "warn",
 				"vscode-dts-use-thenable": "warn",
 				"vscode-dts-region-comments": "warn",
+				"vscode-dts-vscode-in-comments": "warn",
 				"vscode-dts-provider-naming": [
 					"warn",
 					{
@@ -1094,6 +1136,47 @@
 							"write"
 						]
 					}
+				]
+			}
+		},
+		{
+			"files": [
+				"src/{vs,sql}/server/*",
+
+				// {{SQL CARBON EDIT}} Ignore our own that don't use our copyright
+				"extensions/azuremonitor/src/prompts/**",
+				"extensions/azuremonitor/src/typings/findRemove.d.ts",
+				"extensions/kusto/src/prompts/**",
+				"extensions/mssql/src/hdfs/webhdfs.ts",
+				"extensions/mssql/src/prompts/**",
+				"extensions/mssql/src/typings/bufferStreamReader.d.ts",
+				"extensions/mssql/src/typings/findRemove.d.ts",
+				"extensions/notebook/resources/jupyter_config/**",
+				"extensions/notebook/src/intellisense/text.ts",
+				"extensions/notebook/src/prompts/**",
+				"extensions/resource-deployment/src/typings/linuxReleaseInfo.d.ts",
+				"src/sql/base/browser/ui/table/plugins/autoSizeColumns.plugin.ts",
+				"src/sql/base/browser/ui/table/plugins/cellSelectionModel.plugin.ts",
+				"src/sql/base/browser/ui/table/plugins/checkboxSelectColumn.plugin.ts",
+				"src/sql/base/browser/ui/table/plugins/headerFilter.plugin.ts",
+				"src/sql/base/browser/ui/table/plugins/rowDetailView.ts",
+				"src/sql/base/browser/ui/table/plugins/rowMoveManager.plugin.ts",
+				"src/sql/base/browser/ui/table/plugins/rowSelectionModel.plugin.ts",
+				"src/sql/workbench/services/notebook/browser/outputs/factories.ts",
+				"src/sql/workbench/services/notebook/browser/outputs/mimemodel.ts",
+				"src/sql/workbench/services/notebook/browser/outputs/registry.ts",
+				"src/sql/workbench/services/notebook/browser/outputs/renderMimeInterfaces.ts",
+				"src/sql/workbench/services/notebook/browser/outputs/sanitizer.ts",
+				"src/sql/workbench/contrib/notebook/browser/models/outputProcessor.ts",
+				"src/sql/workbench/contrib/notebook/browser/turndownPluginGfm.ts",
+				"src/sql/workbench/services/notebook/common/nbformat.ts",
+				"src/sql/workbench/services/notebook/browser/outputs/renderers.ts",
+				"src/sql/workbench/services/notebook/browser/outputs/tableRenderers.ts"
+			],
+			"rules": {
+				"header/header": [
+					// hygiene.js still checks that all files (even those in this directory) are MIT licensed.
+					"off"
 				]
 			}
 		}

@@ -3,7 +3,7 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { EditorDescriptor, IEditorRegistry } from 'vs/workbench/browser/editor';
+import { EditorPaneDescriptor, IEditorPaneRegistry } from 'vs/workbench/browser/editor';
 import { EditorExtensions } from 'vs/workbench/common/editor';
 import { Registry } from 'vs/platform/registry/common/platform';
 import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
@@ -19,11 +19,13 @@ import { ResourceViewResourcesExtensionHandler } from 'sql/workbench/contrib/res
 import { ResourceViewerView } from 'sql/workbench/contrib/resourceViewer/browser/resourceViewerView';
 import { ResourceViewerViewlet } from 'sql/workbench/contrib/resourceViewer/browser/resourceViewerViewlet';
 import { RESOURCE_VIEWER_VIEW_CONTAINER_ID, RESOURCE_VIEWER_VIEW_ID } from 'sql/workbench/contrib/resourceViewer/common/resourceViewer';
-import { Codicon, registerCodicon } from 'vs/base/common/codicons';
+import { Codicon } from 'vs/base/common/codicons';
 import { localize } from 'vs/nls';
 import { Extensions as ViewContainerExtensions, IViewsRegistry, IViewContainersRegistry, ViewContainerLocation } from 'vs/workbench/common/views';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IProductService } from 'vs/platform/product/common/productService';
+import { CONFIG_WORKBENCH_ENABLEPREVIEWFEATURES } from 'sql/workbench/common/constants';
+import { registerIcon } from 'vs/platform/theme/common/iconRegistry';
 
 CommandsRegistry.registerCommand({
 	id: 'resourceViewer.openResourceViewer',
@@ -39,14 +41,14 @@ CommandsRegistry.registerCommand({
 	}
 });
 
-const resourceViewerDescriptor = EditorDescriptor.create(
+const resourceViewerDescriptor = EditorPaneDescriptor.create(
 	ResourceViewerEditor,
 	ResourceViewerEditor.ID,
 	'ResourceViewerEditor'
 );
 
-Registry.as<IEditorRegistry>(EditorExtensions.Editors)
-	.registerEditor(resourceViewerDescriptor, [new SyncDescriptor(ResourceViewerInput)]);
+Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane)
+	.registerEditorPane(resourceViewerDescriptor, [new SyncDescriptor(ResourceViewerInput)]);
 
 Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(ResourceViewResourcesExtensionHandler, LifecyclePhase.Ready);
 
@@ -56,7 +58,7 @@ class ResourceViewerContributor implements IWorkbenchContribution {
 		@IProductService readonly productService: IProductService
 	) {
 		// Only show for insiders and dev
-		if (['insider', ''].includes(productService.quality ?? '') && configurationService.getValue('workbench.enablePreviewFeatures')) {
+		if (['insider', ''].includes(productService.quality ?? '') && configurationService.getValue(CONFIG_WORKBENCH_ENABLEPREVIEWFEATURES)) {
 			registerResourceViewerContainer();
 		}
 	}
@@ -66,7 +68,7 @@ Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).regi
 
 function registerResourceViewerContainer() {
 
-	const resourceViewerIcon = registerCodicon('reosurce-view', Codicon.database);
+	const resourceViewerIcon = registerIcon('resource-view', Codicon.database, localize('resourceViewerIcon', 'Icon for resource viewer.'));
 	const viewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
 		id: RESOURCE_VIEWER_VIEW_CONTAINER_ID,
 		title: localize('resourceViewer', "Resource Viewer"),

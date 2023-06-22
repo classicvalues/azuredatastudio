@@ -18,6 +18,10 @@ const defaultBatchSize = 500;
 
 export interface SerializeDataParams {
 	/**
+	 *  The serializer to use for this request. Typically this is the ID of the connection provider used to run the query.
+	 */
+	serializationProviderId: string;
+	/**
 	 * 'csv', 'json', 'excel', 'xml'
 	 */
 	saveFormat: string;
@@ -45,6 +49,8 @@ export interface ISerializationService {
 
 	hasProvider(): boolean;
 
+	isProviderRegistered(providerId: string): boolean;
+
 	saveAs(saveFormat: string, savePath: string, results: string, appendToFile: boolean): Thenable<azdata.SaveResultRequestResult>;
 
 	disabledSaveAs(): Thenable<azdata.SaveResultRequestResult>;
@@ -69,6 +75,10 @@ export class SerializationService implements ISerializationService {
 		@IConnectionManagementService private _connectionService: IConnectionManagementService,
 		@ICapabilitiesService private _capabilitiesService: ICapabilitiesService
 	) {
+	}
+
+	public isProviderRegistered(providerId: string): boolean {
+		return this.providers.find(provider => provider.providerId.toUpperCase() === providerId.toUpperCase()) !== undefined;
 	}
 
 	public registerProvider(providerId: string, provider: azdata.SerializationProvider): void {
@@ -115,14 +125,16 @@ export class SerializationService implements ISerializationService {
 		}
 		try {
 			// Create a new session with the provider and send initial data
-			let provider = this.providers[0].provider;
+			let provider = this.providers.find(provider => provider.providerId === serializationRequest.serializationProviderId)?.provider;
+			if (!provider) {
+				return <azdata.SerializeDataResult>{
+					messages: localize('missingSerializationProviderError', "Could not find a serialization provider with the specified ID '{0}'", serializationRequest.serializationProviderId),
+					succeeded: false
+				};
+			}
 			let index = 0;
 			let startRequestParams = this.createStartRequest(serializationRequest, index);
 			index = index + startRequestParams.rows.length;
-			// Adjust row index based on whether or not header row is included
-			if (serializationRequest.includeHeaders) {
-				index--;
-			}
 
 			let startResult = await provider.startSerialization(startRequestParams);
 

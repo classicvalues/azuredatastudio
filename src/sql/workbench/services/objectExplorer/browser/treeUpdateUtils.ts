@@ -5,15 +5,18 @@
 
 import { ConnectionProfileGroup } from 'sql/platform/connection/common/connectionProfileGroup';
 import { IConnectionManagementService, IConnectionCompletionOptions, IConnectionCallbacks } from 'sql/platform/connection/common/connectionManagement';
-import { ITree } from 'vs/base/parts/tree/browser/tree';
+import { ITree } from 'sql/base/parts/tree/browser/tree';
 import { ConnectionProfile } from 'sql/platform/connection/common/connectionProfile';
 import { IObjectExplorerService } from 'sql/workbench/services/objectExplorer/browser/objectExplorerService';
 import { NodeType } from 'sql/workbench/services/objectExplorer/common/nodeType';
 
 import { TreeNode } from 'sql/workbench/services/objectExplorer/common/treeNode';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { onUnexpectedError } from 'vs/base/common/errors';
-import { AsyncServerTree, ServerTreeElement } from 'sql/workbench/services/objectExplorer/browser/asyncServerTree';
+import { Disposable, isDisposable } from 'vs/base/common/lifecycle';
+import { getErrorMessage, onUnexpectedError } from 'vs/base/common/errors';
+import { AsyncServerTree, ConnectionError as AsyncTreeConnectionError, ServerTreeElement } from 'sql/workbench/services/objectExplorer/browser/asyncServerTree';
+import { ObjectExplorerRequestStatus } from 'sql/workbench/services/objectExplorer/browser/treeSelectionHandler';
+import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
+import { localize } from 'vs/nls';
 
 export interface IExpandableTree extends ITree {
 	/**
@@ -45,6 +48,21 @@ export class TreeUpdateUtils {
 	public static isInDragAndDrop: boolean = false;
 
 	/**
+	 * Functions to restore/remove the groupId for title generation as they are removed when added to treeInput
+	 */
+	private static restoreGroupId(treeInput: ConnectionProfileGroup, originalProfiles: ConnectionProfile[]) {
+		for (let i = 0; i < treeInput.connections.length; i++) {
+			treeInput.connections[i].groupId = originalProfiles[i].groupId
+		}
+	}
+
+	private static removeGroupId(treeInput: ConnectionProfileGroup) {
+		for (let i = 0; i < treeInput.connections.length; i++) {
+			treeInput.connections[i].groupId = undefined;
+		}
+	}
+
+	/**
 	 * Set input for the tree.
 	 */
 	public static async structuralTreeUpdate(tree: AsyncServerTree | ITree, viewKey: 'recent' | 'active' | 'saved', connectionManagementService: IConnectionManagementService, providers?: string[]): Promise<void> {
@@ -65,11 +83,21 @@ export class TreeUpdateUtils {
 		if (viewKey === 'recent') {
 			groups = connectionManagementService.getRecentConnections(providers);
 			treeInput.addConnections(groups);
+			this.restoreGroupId(treeInput, connectionManagementService.getRecentConnections(providers));
+			let treeArray = TreeUpdateUtils.alterTreeChildrenTitles([treeInput], connectionManagementService);
+			this.removeGroupId(treeInput);
+			treeInput = treeArray[0];
 		} else if (viewKey === 'active') {
 			groups = connectionManagementService.getActiveConnections(providers);
 			treeInput.addConnections(groups);
+			this.restoreGroupId(treeInput, connectionManagementService.getActiveConnections(providers));
+			let treeArray = TreeUpdateUtils.alterTreeChildrenTitles([treeInput], connectionManagementService);
+			this.removeGroupId(treeInput);
+			treeInput = treeArray[0];
 		} else if (viewKey === 'saved') {
 			treeInput = TreeUpdateUtils.getTreeInput(connectionManagementService, providers);
+			let treeArray = TreeUpdateUtils.alterTreeChildrenTitles([treeInput], connectionManagementService);
+			treeInput = treeArray[0];
 		}
 		const previousTreeInput = tree.getInput();
 		if (treeInput) {
@@ -91,12 +119,28 @@ export class TreeUpdateUtils {
 	}
 
 	/**
+	 * Calls alterConnectionTitles on all levels of the Object Explorer Tree
+	 * so that profiles in connection groups can have distinguishing titles too.
+	 */
+	public static alterTreeChildrenTitles(inputGroups: ConnectionProfileGroup[], connectionManagementService: IConnectionManagementService, includeGroupName?: boolean): ConnectionProfileGroup[] {
+		inputGroups.forEach(group => {
+			group.children = TreeUpdateUtils.alterTreeChildrenTitles(group.children, connectionManagementService, includeGroupName);
+			let connections = group.connections;
+			TreeUpdateUtils.alterConnectionTitles(connections, connectionManagementService, includeGroupName);
+			group.connections = connections;
+		});
+		return inputGroups;
+	}
+
+	/**
 	 * Set input for the registered servers tree.
 	 */
 	public static async registeredServerUpdate(tree: ITree | AsyncServerTree, connectionManagementService: IConnectionManagementService, elementToSelect?: any): Promise<void> {
 		if (tree instanceof AsyncServerTree) {
-			const treeInput = TreeUpdateUtils.getTreeInput(connectionManagementService);
+			let treeInput = TreeUpdateUtils.getTreeInput(connectionManagementService);
 			if (treeInput) {
+				let treeArray = this.alterTreeChildrenTitles([treeInput], connectionManagementService, false);
+				treeInput = treeArray[0];
 				await tree.setInput(treeInput);
 			}
 			tree.rerender();
@@ -125,14 +169,20 @@ export class TreeUpdateUtils {
 
 			let treeInput = TreeUpdateUtils.getTreeInput(connectionManagementService);
 			if (treeInput) {
-				if (treeInput !== tree.getInput()) {
+				let treeArray = TreeUpdateUtils.alterTreeChildrenTitles([treeInput], connectionManagementService, false);
+				treeInput = treeArray[0];
+				const originalInput = tree.getInput();
+				if (treeInput !== originalInput) {
 					return tree.setInput(treeInput).then(async () => {
+						if (originalInput && isDisposable(originalInput)) {
+							originalInput.dispose();
+						}
 						// Make sure to expand all folders that where expanded in the previous session
 						if (targetsToExpand) {
 							await tree.expandAll(targetsToExpand);
 						}
 						if (selectedElement) {
-							tree.select(selectedElement);
+							tree.setFocus(selectedElement);
 						}
 						tree.getFocus();
 					}, onUnexpectedError);
@@ -143,10 +193,7 @@ export class TreeUpdateUtils {
 
 	public static getTreeInput(connectionManagementService: IConnectionManagementService, providers?: string[]): ConnectionProfileGroup | undefined {
 		const groups = connectionManagementService.getConnectionGroups(providers);
-		const input = groups.find(group => group.isRoot);
-		// Dispose of the unused groups to clean up their handlers
-		groups.filter(g => g !== input).forEach(g => g.dispose());
-		return input;
+		return groups.find(group => group.isRoot);
 	}
 
 	public static hasObjectExplorerNode(connection: ConnectionProfile, connectionManagementService: IConnectionManagementService): boolean {
@@ -159,52 +206,58 @@ export class TreeUpdateUtils {
 		options: IConnectionCompletionOptions,
 		connectionManagementService: IConnectionManagementService,
 		tree: AsyncServerTree | ITree | undefined): Promise<ConnectionProfile | undefined> {
-		if (!connectionManagementService.isProfileConnected(connection)) {
-			// don't try to reconnect if currently connecting
-			if (connectionManagementService.isProfileConnecting(connection)) {
-				return undefined;
 
-				// else if we aren't connected or connecting then try to connect
-			} else {
-				let callbacks: IConnectionCallbacks | undefined;
-				if (tree instanceof AsyncServerTree) {
-					callbacks = {
-						onConnectStart: () => { },
-						onConnectReject: () => { },
-						onConnectSuccess: () => { },
-						onDisconnect: () => { },
-						onConnectCanceled: () => { },
-					};
-				} else if (tree) {
-					// Show the spinner in OE by adding the 'loading' trait to the connection, and set up callbacks to hide the spinner
-					tree.addTraits('loading', [connection]);
-					let rejectOrCancelCallback = () => {
-						tree.collapse(connection);
-						tree.removeTraits('loading', [connection]);
-					};
-					callbacks = {
-						onConnectStart: () => { },
-						onConnectReject: rejectOrCancelCallback,
-						onConnectSuccess: () => tree.removeTraits('loading', [connection]),
-						onDisconnect: () => { },
-						onConnectCanceled: rejectOrCancelCallback,
-					};
-				}
+		try {
+			if (!connectionManagementService.isProfileConnected(connection)) {
+				// don't try to reconnect if currently connecting
+				if (connectionManagementService.isProfileConnecting(connection)) {
+					return undefined;
 
-				const result = await connectionManagementService.connect(connection, undefined, options, callbacks);
-				if (result.connected) {
-					let existingConnection = connectionManagementService.findExistingConnection(connection);
-					return existingConnection;
+					// else if we aren't connected or connecting then try to connect
 				} else {
-					throw new Error(result.errorMessage);
+					let callbacks: IConnectionCallbacks | undefined;
+					if (tree instanceof AsyncServerTree) {
+						callbacks = {
+							onConnectStart: () => { },
+							onConnectReject: () => { },
+							onConnectSuccess: () => { },
+							onDisconnect: () => { },
+							onConnectCanceled: () => { },
+						};
+					} else if (tree) {
+						// Show the spinner in OE by adding the 'loading' trait to the connection, and set up callbacks to hide the spinner
+						tree.addTraits('loading', [connection]);
+						let rejectOrCancelCallback = () => {
+							tree.collapse(connection);
+							tree.removeTraits('loading', [connection]);
+						};
+						callbacks = {
+							onConnectStart: () => { },
+							onConnectReject: rejectOrCancelCallback,
+							onConnectSuccess: () => tree.removeTraits('loading', [connection]),
+							onDisconnect: () => { },
+							onConnectCanceled: rejectOrCancelCallback,
+						};
+					}
+
+					const result = await connectionManagementService.connect(connection, undefined, options, callbacks);
+					if (result?.connected) {
+						let existingConnection = connectionManagementService.findExistingConnection(connection);
+						return existingConnection;
+					} else {
+						throw new Error(result ? result.errorMessage : localize('connectionFailedError', 'Failed to connect, please try again.'));
+					}
 				}
+			} else {
+				let existingConnection = connectionManagementService.findExistingConnection(connection);
+				if (options && options.showDashboard) {
+					await connectionManagementService.showDashboard(connection);
+				}
+				return existingConnection;
 			}
-		} else {
-			let existingConnection = connectionManagementService.findExistingConnection(connection);
-			if (options && options.showDashboard) {
-				await connectionManagementService.showDashboard(connection);
-			}
-			return existingConnection;
+		} catch (e) {
+			// Since the connection dialog handles connection errors, we don't need to do anything here
+			throw new AsyncTreeConnectionError(getErrorMessage(e), connection);
 		}
 	}
 
@@ -217,8 +270,14 @@ export class TreeUpdateUtils {
 	 * @param connectionManagementService Connection management service instance
 	 * @param objectExplorerService Object explorer service instance
 	 */
-	public static async connectAndCreateOeSession(connection: ConnectionProfile, options: IConnectionCompletionOptions,
-		connectionManagementService: IConnectionManagementService, objectExplorerService: IObjectExplorerService, tree: AsyncServerTree | ITree | undefined): Promise<boolean> {
+	public static async connectAndCreateOeSession(
+		connection: ConnectionProfile,
+		options: IConnectionCompletionOptions,
+		connectionManagementService: IConnectionManagementService,
+		objectExplorerService: IObjectExplorerService,
+		tree: AsyncServerTree | ITree | undefined,
+		requestStatus?: ObjectExplorerRequestStatus | undefined): Promise<boolean> {
+
 		const connectedConnection = await TreeUpdateUtils.connectIfNotConnected(connection, options, connectionManagementService, tree);
 		if (connectedConnection) {
 			// append group ID and original display name to build unique OE session ID
@@ -227,7 +286,7 @@ export class TreeUpdateUtils {
 
 			let rootNode: TreeNode | undefined = objectExplorerService.getObjectExplorerNode(connectedConnection);
 			if (!rootNode) {
-				await objectExplorerService.updateObjectExplorerNodes(connectedConnection);
+				await objectExplorerService.updateObjectExplorerNodes(connectedConnection, requestStatus);
 				return true;
 				// The oe request is sent. an event will be raised when the session is created
 			} else {
@@ -259,7 +318,12 @@ export class TreeUpdateUtils {
 		}
 	}
 
-	public static async getAsyncConnectionNodeChildren(connection: ConnectionProfile, connectionManagementService: IConnectionManagementService, objectExplorerService: IObjectExplorerService): Promise<TreeNode[]> {
+	public static async getAsyncConnectionNodeChildren(
+		connection: ConnectionProfile,
+		connectionManagementService: IConnectionManagementService,
+		objectExplorerService: IObjectExplorerService,
+		configurationService: IConfigurationService
+	): Promise<TreeNode[]> {
 		if (connection.isDisconnecting) {
 			return [];
 		} else {
@@ -277,13 +341,19 @@ export class TreeUpdateUtils {
 					showDashboard: false
 				};
 				// Need to wait for the OE service to update its nodes in order to resolve the children
-				const nodesUpdatedPromise = new Promise((resolve, reject) => {
-					objectExplorerService.onUpdateObjectExplorerNodes(e => {
-						if (e.errorMessage) {
-							reject(new Error(e.errorMessage));
-						}
-						if (e.connection.id === connection.id) {
-							resolve(undefined);
+				const nodesUpdatedPromise = new Promise<void>((resolve, reject) => {
+					// Clean up timeout and listener
+					const cleanup = () => {
+						nodesUpdatedListener.dispose();
+					}
+					const nodesUpdatedListener = objectExplorerService.onUpdateObjectExplorerNodes(e => {
+						if (e.connection && e.connection.id === connection.id) {
+							if (e.errorMessage) {
+								reject(new Error(e.errorMessage));
+							} else {
+								resolve();
+							}
+							cleanup();
 						}
 					});
 				});
@@ -342,5 +412,15 @@ export class TreeUpdateUtils {
 			connectionProfile = connectionProfile?.cloneWithDatabase(databaseName);
 		}
 		return connectionProfile;
+	}
+
+	private static alterConnectionTitles(inputList: ConnectionProfile[], connectionManagementService: IConnectionManagementService, includeGroupName?: boolean): void {
+		for (let i = 0; i < inputList.length; i++) {
+			let currentConnection = inputList[i];
+			let listOfDuplicates = inputList.filter(connection => connection.getOriginalTitle() === currentConnection.getOriginalTitle());
+			if (listOfDuplicates.length > 1) {
+				inputList[i].title = connectionManagementService.getEditorConnectionProfileTitle(inputList[i], false, includeGroupName);
+			}
+		}
 	}
 }

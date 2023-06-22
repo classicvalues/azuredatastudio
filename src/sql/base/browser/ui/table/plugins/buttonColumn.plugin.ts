@@ -5,7 +5,7 @@
 
 import 'vs/css!./media/buttonColumn.plugin';
 import 'vs/css!./media/iconColumn';
-import { BaseClickableColumn, getIconCellValue, IconColumnOptions } from 'sql/base/browser/ui/table/plugins/tableColumn';
+import { BaseClickableColumn, ClickableColumnOptions, getIconCellValue, IconColumnOptions } from 'sql/base/browser/ui/table/plugins/tableColumn';
 import { escape } from 'sql/base/common/strings';
 
 export interface ButtonCellValue {
@@ -13,17 +13,17 @@ export interface ButtonCellValue {
 	title: string;
 }
 
-export interface ButtonColumnOptions extends IconColumnOptions {
+export interface ButtonColumnOptions extends IconColumnOptions, ClickableColumnOptions {
 	/**
 	 * Whether to show the text.
 	 */
-	showText?: boolean
+	showText?: boolean;
 }
 
 export class ButtonColumn<T extends Slick.SlickData> extends BaseClickableColumn<T> {
 
 	constructor(private options: ButtonColumnOptions) {
-		super();
+		super(options);
 	}
 
 	public get definition(): Slick.Column<T> {
@@ -33,14 +33,20 @@ export class ButtonColumn<T extends Slick.SlickData> extends BaseClickableColumn
 			formatter: (row: number, cell: number, value: any, columnDef: Slick.Column<T>, dataContext: T): string => {
 				const iconValue = getIconCellValue(this.options, dataContext);
 				const escapedTitle = escape(iconValue.title ?? '');
-				const iconCssClasses = iconValue.iconCssClass ? `codicon icon slick-plugin-icon ${iconValue.iconCssClass}` : '';
+				let iconCssClasses = '';
+				if (iconValue.iconCssClass) {
+					iconCssClasses = this.options.isFontIcon ? iconValue.iconCssClass : `codicon icon slick-plugin-icon ${iconValue.iconCssClass}`;
+				}
 				const buttonTypeCssClass = this.options.showText ? 'slick-plugin-button slick-plugin-text-button' : 'slick-plugin-button slick-plugin-image-only-button';
 				const buttonText = this.options.showText ? escapedTitle : '';
-				return `<button tabindex=-1 class="${iconCssClasses} ${buttonTypeCssClass}" title="${escapedTitle}" aria-label="${escapedTitle}">${buttonText}</button>`;
+				const disabledAttribute = this.isCellEnabled(row, cell) ? '' : 'disabled';
+				return `<button tabindex=-1 class="${iconCssClasses} ${buttonTypeCssClass}" title="${escapedTitle}" aria-label="${escapedTitle}" ${disabledAttribute}>${buttonText}</button>`;
 			},
 			name: this.options.name,
+			toolTip: this.options.title,
 			resizable: this.options.resizable,
-			selectable: false
+			selectable: false,
+			cssClass: 'slick-plugin-button-cell'
 		};
 	}
 }

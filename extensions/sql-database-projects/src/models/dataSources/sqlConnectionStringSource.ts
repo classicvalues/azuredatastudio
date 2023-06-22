@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type * as azdataType from 'azdata';
+import * as vscodeMssql from 'vscode-mssql';
 import { DataSource } from './dataSources';
 import * as constants from '../../common/constants';
 
@@ -44,11 +45,11 @@ export class SqlConnectionDataSource extends DataSource {
 
 	public get authType(): string {
 		if (this.azureMFA) {
-			return constants.azureMfaAuth;
+			return vscodeMssql.AuthenticationType.AzureMFA;
 		} else if (this.integratedSecurity) {
-			return constants.integratedAuth;
+			return vscodeMssql.AuthenticationType.Integrated;
 		} else {
-			return constants.sqlAuth;
+			return 'SqlAuth';
 		}
 	}
 
@@ -59,6 +60,18 @@ export class SqlConnectionDataSource extends DataSource {
 	public get password(): string {
 		// TODO: secure password storage; https://github.com/microsoft/azuredatastudio/issues/10561
 		return this.getSetting(constants.passwordSetting);
+	}
+
+	public get encrypt(): string {
+		return this.getSetting(constants.encryptSetting);
+	}
+
+	public get trustServerCertificate(): string {
+		return this.getSetting(constants.trustServerCertificateSetting);
+	}
+
+	public get hostnameInCertificate(): string {
+		return this.getSetting(constants.hostnameInCertificateSetting);
 	}
 
 	constructor(name: string, connectionString: string) {
@@ -99,7 +112,11 @@ export class SqlConnectionDataSource extends DataSource {
 			providerName: 'MSSQL',
 			saveProfile: true,
 			id: this.name + '-dataSource',
-			options: []
+			options: {
+				'encrypt': this.encrypt,
+				'trustServerCertificate': this.trustServerCertificate,
+				'hostnameInCertificate': this.hostnameInCertificate
+			}
 		};
 
 		return connProfile;

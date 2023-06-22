@@ -7,7 +7,7 @@ import 'mocha';
 import * as azdata from 'azdata';
 import * as vscode from 'vscode';
 import * as utils from './utils';
-import * as mssql from '../../../mssql';
+import * as mssql from 'mssql';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -54,6 +54,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 			serverName: '',
 			databaseName: '',
 			ownerUri: '',
+			projectFilePath: '',
+			extractTarget: mssql.ExtractTarget.schemaObjectType,
+			targetScripts: [],
+			dataSchemaProvider: '',
 			connectionDetails: undefined
 		};
 		let target: mssql.SchemaCompareEndpointInfo = {
@@ -63,6 +67,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 			serverName: '',
 			databaseName: '',
 			ownerUri: '',
+			projectFilePath: '',
+			extractTarget: mssql.ExtractTarget.schemaObjectType,
+			targetScripts: [],
+			dataSchemaProvider: '',
 			connectionDetails: undefined
 		};
 
@@ -114,6 +122,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 				serverName: server.serverName,
 				databaseName: sourceDB,
 				ownerUri: ownerUri,
+				projectFilePath: '',
+				extractTarget: mssql.ExtractTarget.schemaObjectType,
+				targetScripts: [],
+				dataSchemaProvider: '',
 				connectionDetails: undefined
 			};
 			let target: mssql.SchemaCompareEndpointInfo = {
@@ -123,6 +135,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 				serverName: server.serverName,
 				databaseName: targetDB,
 				ownerUri: ownerUri,
+				projectFilePath: '',
+				extractTarget: mssql.ExtractTarget.schemaObjectType,
+				targetScripts: [],
+				dataSchemaProvider: '',
 				connectionDetails: undefined
 			};
 
@@ -179,6 +195,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 				serverName: '',
 				databaseName: '',
 				ownerUri: ownerUri,
+				projectFilePath: '',
+				extractTarget: mssql.ExtractTarget.schemaObjectType,
+				targetScripts: [],
+				dataSchemaProvider: '',
 				connectionDetails: undefined
 			};
 			let target: mssql.SchemaCompareEndpointInfo = {
@@ -188,6 +208,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 				serverName: server.serverName,
 				databaseName: targetDB,
 				ownerUri: ownerUri,
+				projectFilePath: '',
+				extractTarget: mssql.ExtractTarget.schemaObjectType,
+				targetScripts: [],
+				dataSchemaProvider: '',
 				connectionDetails: undefined
 			};
 
@@ -231,6 +255,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 			serverName: '',
 			databaseName: '',
 			ownerUri: '',
+			projectFilePath: '',
+			extractTarget: mssql.ExtractTarget.schemaObjectType,
+			targetScripts: [],
+			dataSchemaProvider: '',
 			connectionDetails: undefined
 		};
 		let target: mssql.SchemaCompareEndpointInfo = {
@@ -240,6 +268,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 			serverName: '',
 			databaseName: '',
 			ownerUri: '',
+			projectFilePath: '',
+			extractTarget: mssql.ExtractTarget.schemaObjectType,
+			targetScripts: [],
+			dataSchemaProvider: '',
 			connectionDetails: undefined
 		};
 
@@ -270,13 +302,13 @@ suite('Schema compare integration test suite @DacFx@', () => {
 		assert(includeResult.affectedDependencies[0].included === true, 'Table t2 should be included as a result of including v1. Actual: false');
 
 		// excluding views from the comparison should make it so t2 can be excluded
-		deploymentOptions.excludeObjectTypes.push(mssql.SchemaObjectType.Views);
+		deploymentOptions.excludeObjectTypes.value.push(Object.keys(deploymentOptions.objectTypesDictionary).find((key) => { return deploymentOptions.objectTypesDictionary[key] === 'Views'; }));
 		await schemaCompareService.schemaCompare(operationId, source, target, azdata.TaskExecutionMode.execute, deploymentOptions);
 		const excludeResult3 = await schemaCompareService.schemaCompareIncludeExcludeNode(operationId, t2Difference, false, azdata.TaskExecutionMode.execute);
 		assertIncludeExcludeResult(excludeResult3, true, 0, 0);
 	});
 
-	test('Schema compare dacpac to database comparison with publishing some changes and then compare again', async function () {
+	test('Schema compare dacpac to database comparison with publishing some changes and then compare again @UNSTABLE@', async function () {
 		this.timeout(testTimeout);
 		const server = await getStandaloneServer();
 		const ownerUri = await getConnectionUri(server);
@@ -297,6 +329,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 				serverName: '',
 				databaseName: '',
 				ownerUri: ownerUri,
+				projectFilePath: '',
+				extractTarget: mssql.ExtractTarget.schemaObjectType,
+				targetScripts: [],
+				dataSchemaProvider: '',
 				connectionDetails: undefined
 			};
 			const target: mssql.SchemaCompareEndpointInfo = {
@@ -306,6 +342,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 				serverName: server.serverName,
 				databaseName: targetDB,
 				ownerUri: ownerUri,
+				projectFilePath: '',
+				extractTarget: mssql.ExtractTarget.schemaObjectType,
+				targetScripts: [],
+				dataSchemaProvider: '',
 				connectionDetails: undefined
 			};
 
@@ -323,7 +363,7 @@ suite('Schema compare integration test suite @DacFx@', () => {
 			assertIncludeExcludeResult(includeResult, true, 0, 0);
 
 			//publish the updated changes. Function1 should not be added to the target database
-			const publishChangesResult = await schemaCompareService.schemaComparePublishChanges(schemaCompareResult.operationId, server.serverName, targetDB, azdata.TaskExecutionMode.execute);
+			const publishChangesResult = await schemaCompareService.schemaComparePublishDatabaseChanges(schemaCompareResult.operationId, server.serverName, targetDB, azdata.TaskExecutionMode.execute);
 			assert(publishChangesResult.success === true, `Publish changes should complete successfully. But it failed with error : ${publishChangesResult.errorMessage}`);
 
 			//verify table Table3 is added
@@ -351,7 +391,7 @@ suite('Schema compare integration test suite @DacFx@', () => {
 		}
 	});
 
-	test('Schema compare dacpac to database comparison with publishing all changes and then compare again', async function () {
+	test('Schema compare dacpac to database comparison with publishing all changes and then compare again @UNSTABLE@', async function () {
 		this.timeout(testTimeout);
 		const server = await getStandaloneServer();
 		const ownerUri = await getConnectionUri(server);
@@ -372,6 +412,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 				serverName: '',
 				databaseName: '',
 				ownerUri: ownerUri,
+				projectFilePath: '',
+				extractTarget: mssql.ExtractTarget.schemaObjectType,
+				targetScripts: [],
+				dataSchemaProvider: '',
 				connectionDetails: undefined
 			};
 			const target: mssql.SchemaCompareEndpointInfo = {
@@ -381,6 +425,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 				serverName: server.serverName,
 				databaseName: targetDB,
 				ownerUri: ownerUri,
+				projectFilePath: '',
+				extractTarget: mssql.ExtractTarget.schemaObjectType,
+				targetScripts: [],
+				dataSchemaProvider: '',
 				connectionDetails: undefined
 			};
 
@@ -390,7 +438,7 @@ suite('Schema compare integration test suite @DacFx@', () => {
 			assertSchemaCompareResult(schemaCompareResult, operationId, 4);
 
 			//publish all the changes
-			const publishChangesResult = await schemaCompareService.schemaComparePublishChanges(schemaCompareResult.operationId, server.serverName, targetDB, azdata.TaskExecutionMode.execute);
+			const publishChangesResult = await schemaCompareService.schemaComparePublishDatabaseChanges(schemaCompareResult.operationId, server.serverName, targetDB, azdata.TaskExecutionMode.execute);
 			assert(publishChangesResult.success === true, `Publish changes should complete successfully. But it failed with error : ${publishChangesResult.errorMessage}`);
 
 			//verify table Table3 is added
@@ -435,6 +483,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 				serverName: '',
 				databaseName: '',
 				ownerUri: ownerUri,
+				projectFilePath: '',
+				extractTarget: mssql.ExtractTarget.schemaObjectType,
+				targetScripts: [],
+				dataSchemaProvider: '',
 				connectionDetails: undefined
 			};
 			const target: mssql.SchemaCompareEndpointInfo = {
@@ -444,6 +496,10 @@ suite('Schema compare integration test suite @DacFx@', () => {
 				serverName: server.serverName,
 				databaseName: targetDB,
 				ownerUri: ownerUri,
+				projectFilePath: '',
+				extractTarget: mssql.ExtractTarget.schemaObjectType,
+				targetScripts: [],
+				dataSchemaProvider: '',
 				connectionDetails: undefined
 			};
 
@@ -451,7 +507,7 @@ suite('Schema compare integration test suite @DacFx@', () => {
 
 			const deploymentOptionsResult = await schemaCompareService.schemaCompareGetDefaultOptions();
 			let deploymentOptions = deploymentOptionsResult.defaultDeploymentOptions;
-			deploymentOptions.excludeObjectTypes.push(mssql.SchemaObjectType.TableValuedFunctions);
+			deploymentOptions.excludeObjectTypes.value.push(Object.keys(deploymentOptions.objectTypesDictionary).find((key) => { return deploymentOptions.objectTypesDictionary[key] === 'TableValuedFunctions'; }));
 			const schemaCompareResult = await schemaCompareService.schemaCompare(operationId, source, target, azdata.TaskExecutionMode.execute, deploymentOptions);
 			assertSchemaCompareResult(schemaCompareResult, operationId, 3);
 

@@ -7,6 +7,7 @@ import { InputBox as vsInputBox, IInputOptions as vsIInputBoxOptions, IInputBoxS
 import { IContextViewProvider } from 'vs/base/browser/ui/contextview/contextview';
 import { Color } from 'vs/base/common/color';
 import { Event, Emitter } from 'vs/base/common/event';
+import { AdsWidget } from 'sql/base/browser/ui/adsWidget';
 
 export interface OnLoseFocusParams {
 	value: string;
@@ -26,9 +27,10 @@ export interface IInputOptions extends vsIInputBoxOptions {
 	 */
 	requireForceValidations?: boolean;
 	required?: boolean;
+	ariaDescription?: string;
 }
 
-export class InputBox extends vsInputBox {
+export class InputBox extends vsInputBox implements AdsWidget {
 	private enabledInputBackground?: Color;
 	private enabledInputForeground?: Color;
 	private enabledInputBorder?: Color;
@@ -41,10 +43,13 @@ export class InputBox extends vsInputBox {
 	private _onLoseFocus = this._register(new Emitter<OnLoseFocusParams>());
 	public onLoseFocus: Event<OnLoseFocusParams> = this._onLoseFocus.event;
 
+	private _onInputFocus = this._register(new Emitter<void>());
+	public onInputFocus: Event<void> = this._onInputFocus.event;
+
 	private _isTextAreaInput = false;
 	private _hideErrors = false;
 
-	constructor(container: HTMLElement, contextViewProvider: IContextViewProvider, private _sqlOptions?: IInputOptions) {
+	constructor(container: HTMLElement, contextViewProvider: IContextViewProvider, private _sqlOptions?: IInputOptions, id?: string) {
 		super(container, contextViewProvider, _sqlOptions);
 		this.enabledInputBackground = this.inputBackground;
 		this.enabledInputForeground = this.inputForeground;
@@ -58,10 +63,22 @@ export class InputBox extends vsInputBox {
 			self._lastLoseFocusValue = self.value;
 		});
 
+		this.onfocus(this.inputElement, () => {
+			self._onInputFocus.fire();
+		});
+
 		if (_sqlOptions && _sqlOptions.type === 'textarea') {
 			this._isTextAreaInput = true;
 		}
-		this.required = !!this._sqlOptions.required;
+		this.required = !!this._sqlOptions?.required;
+
+		if (this._sqlOptions.ariaDescription) {
+			this.inputElement.setAttribute('aria-description', this._sqlOptions.ariaDescription);
+		}
+
+		if (id !== undefined) {
+			this.inputElement.id = id;
+		}
 	}
 
 	public override style(styles: IInputBoxStyles): void {
@@ -170,5 +187,23 @@ export class InputBox extends vsInputBox {
 			return super.validate();
 		}
 		return undefined;
+	}
+
+	public override set width(width: number) {
+		super.width = width;
+		this.element.style.width = 'fit-content';
+	}
+
+	public override get value() {
+		return super.value;
+	}
+
+	public override set value(newValue: string) {
+		this._lastLoseFocusValue = newValue;
+		super.value = newValue;
+	}
+
+	public get id(): string {
+		return this.input.id;
 	}
 }

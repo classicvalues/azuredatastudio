@@ -21,7 +21,7 @@ import { IClipboardService } from 'vs/platform/clipboard/common/clipboardService
 import { append, $ } from 'vs/base/browser/dom';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { ILogService } from 'vs/platform/log/common/log';
-import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfigurationService';
+import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfiguration';
 import { IAdsTelemetryService } from 'sql/platform/telemetry/common/telemetry';
 import { onUnexpectedError } from 'vs/base/common/errors';
 import { attachModalDialogStyler } from 'sql/workbench/common/styler';
@@ -96,7 +96,21 @@ export class WizardModal extends Modal {
 		};
 
 		messageChangeHandler(this._wizard.message);
-		this._wizard.onMessageChange(message => messageChangeHandler(message));
+		this._register(this._wizard.onMessageChange(message => messageChangeHandler(message)));
+
+		this._register(this._wizard.onLoadingChange((loadingState) => {
+			this.spinner = loadingState;
+		}));
+		this._register(this._wizard.onLoadingChange((loadingState) => {
+			this.spinner = loadingState;
+		}));
+		this._register(this._wizard.onLoadingTextChange((loadingText) => {
+			this._modalOptions.spinnerTitle = loadingText;
+
+		}));
+		this._register(this._wizard.onLoadingCompletedTextChange((loadingCompletedText) => {
+			this._modalOptions.onSpinnerHideText = loadingCompletedText;
+		}));
 	}
 
 	private addDialogButton(button: DialogButton, onSelect: () => void = () => undefined, registerClickEvent: boolean = true, requirePageValid: boolean = false, index?: number): Button {
@@ -227,7 +241,10 @@ export class WizardModal extends Modal {
 				.withAdditionalProperties({
 					wizardName: this._wizard.name,
 					pageNavigationFrom: this._wizard.pages[prevPageIndex].pageName ?? prevPageIndex,
-					pageNavigationTo: this._wizard.pages[index].pageName ?? index
+					pageNavigationTo: this._wizard.pages[index].pageName ?? index,
+					pageNavigationFromIndex: prevPageIndex,
+					pageNavigationToIndex: index,
+					direction: index > prevPageIndex ? 'forward' : 'backward'
 				}).send();
 		}
 	}

@@ -8,18 +8,17 @@
 	],
 	"version": "1.0.0",
 	"contents": {
-		"package": {
-			"displayName": "Cuenta Microsoft",
-			"description": "Proveedor de autenticación de Microsoft",
-			"signIn": "Iniciar sesión",
-			"signOut": "Cerrar sesión"
-		},
 		"dist/AADHelper": {
+			"pasteCodePlaceholder": "Pegue aquí el código de autorización...",
+			"pasteCodePrompt": "Proporcione el código de autorización para completar el flujo de inicio de sesión.",
+			"pasteCodeTitle": "Autenticación de Microsoft",
 			"signOut": "Se ha cerrado la sesión porque se ha producido un error al leer la información de autenticación almacenada."
 		},
-		"dist/keychain": {
-			"troubleshooting": "Guía de solución de problemas",
-			"keychainWriteError": "Error al escribir la información de inicio de sesión en la cadena de claves: \"{0}\"."
+		"package": {
+			"description": "Proveedor de autenticación de Microsoft",
+			"displayName": "Cuenta Microsoft",
+			"signIn": "Iniciar sesión",
+			"signOut": "Cerrar sesión"
 		}
 	}
 }

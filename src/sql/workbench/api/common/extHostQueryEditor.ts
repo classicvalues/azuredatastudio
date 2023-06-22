@@ -3,13 +3,14 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IMainContext } from 'vs/workbench/api/common/extHost.protocol';
-import { ExtHostQueryEditorShape, SqlMainContext, MainThreadQueryEditorShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
+import { IMainContext, SqlMainContext } from 'vs/workbench/api/common/extHost.protocol';
+import { ExtHostQueryEditorShape, MainThreadQueryEditorShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
 import * as azdata from 'azdata';
-import { IQueryEvent } from 'sql/workbench/services/query/common/queryModel';
 import { mssqlProviderName } from 'sql/platform/connection/common/constants';
 import { Disposable } from 'vs/workbench/api/common/extHostTypes';
 import { URI } from 'vs/base/common/uri';
+import { IQueryEvent } from 'sql/workbench/services/query/common/queryModel';
+import * as sqlTypeConverters from 'sql/workbench/api/common/sqlExtHostTypeConverters';
 
 class ExtHostQueryDocument implements azdata.queryeditor.QueryDocument {
 	constructor(
@@ -43,7 +44,7 @@ export class ExtHostQueryEditor implements ExtHostQueryEditorShape {
 	constructor(
 		mainContext: IMainContext
 	) {
-		this._proxy = mainContext.getProxy(SqlMainContext.MainThreadQueryEditor);
+		this._proxy = <MainThreadQueryEditorShape><unknown>mainContext.getProxy(SqlMainContext.MainThreadQueryEditor);
 	}
 
 	public $connect(fileUri: string, connectionId: string): Thenable<void> {
@@ -68,7 +69,7 @@ export class ExtHostQueryEditor implements ExtHostQueryEditorShape {
 		let listener: azdata.queryeditor.QueryEventListener = this._queryListeners[handle];
 		if (listener) {
 			let params = event.params && event.params.planXml ? event.params.planXml : event.params;
-			listener.onQueryEvent(event.type, new ExtHostQueryDocument(providerId, fileUri, this._proxy), params);
+			listener.onQueryEvent(event.type, new ExtHostQueryDocument(providerId, fileUri, this._proxy), params, sqlTypeConverters.QueryInfo.to(event.queryInfo));
 		}
 	}
 

@@ -11,9 +11,10 @@ import { generateUuid } from 'vs/base/common/uuid';
 import * as vscode from 'vscode';
 import * as azdata from 'azdata';
 
-import { SqlMainContext, ExtHostModelViewDialogShape, MainThreadModelViewDialogShape, ExtHostModelViewShape, ExtHostBackgroundTaskManagementShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
+import { ExtHostModelViewDialogShape, MainThreadModelViewDialogShape, ExtHostModelViewShape, ExtHostBackgroundTaskManagementShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
 import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
 import { TabOrientation, DialogWidth, DialogStyle, DialogPosition, IDialogProperties } from 'sql/workbench/api/common/sqlExtHostTypes';
+import { SqlMainContext } from 'vs/workbench/api/common/extHost.protocol';
 
 const DONE_LABEL = nls.localize('dialogDoneLabel', "Done");
 const CANCEL_LABEL = nls.localize('dialogCancelLabel', "Cancel");
@@ -26,7 +27,7 @@ class ModelViewPanelImpl implements azdata.window.ModelViewPanel {
 	public handle: number;
 	protected _modelViewId: string;
 	protected _valid: boolean = true;
-	protected _onValidityChanged: vscode.Event<boolean>;
+	protected _onValidityChanged: Event<boolean>;
 
 	constructor(private _viewType: string,
 		protected _extHostModelViewDialog: ExtHostModelViewDialog,
@@ -132,6 +133,12 @@ class DialogImpl extends ModelViewPanelImpl implements azdata.window.Dialog {
 	private _renderHeader: boolean;
 	private _renderFooter: boolean;
 	private _dialogProperties: IDialogProperties;
+	private _loading: boolean;
+	private _loadingText: string;
+	private _loadingCompletedText: string;
+
+	private _onClosed = new Emitter<azdata.window.CloseReason>();
+	public onClosed = this._onClosed.event;
 
 	constructor(extHostModelViewDialog: ExtHostModelViewDialog,
 		extHostModelView: ExtHostModelViewShape,
@@ -212,6 +219,33 @@ class DialogImpl extends ModelViewPanelImpl implements azdata.window.Dialog {
 		this._extHostModelViewDialog.updateDialogContent(this);
 	}
 
+	public get loading(): boolean {
+		return this._loading;
+	}
+
+	public set loading(value: boolean) {
+		this._loading = value;
+		this._extHostModelViewDialog.updateDialogContent(this);
+	}
+
+	public get loadingText(): string {
+		return this._loadingText;
+	}
+
+	public set loadingText(value: string) {
+		this._loadingText = value;
+		this._extHostModelViewDialog.updateDialogContent(this);
+	}
+
+	public get loadingCompletedText(): string {
+		return this._loadingCompletedText;
+	}
+
+	public set loadingCompletedText(value: string) {
+		this._loadingCompletedText = value;
+		this._extHostModelViewDialog.updateDialogContent(this);
+	}
+
 	public get dialogName(): string {
 		return this._dialogName;
 	}
@@ -238,6 +272,10 @@ class DialogImpl extends ModelViewPanelImpl implements azdata.window.Dialog {
 		} else {
 			return Promise.resolve(true);
 		}
+	}
+
+	public handleOnClosed(reason: azdata.window.CloseReason): void {
+		this._onClosed.fire(reason);
 	}
 }
 
@@ -435,6 +473,9 @@ class WizardImpl implements azdata.window.Wizard {
 	public readonly onPageChanged = this._pageChangedEmitter.event;
 	private _navigationValidator: (info: azdata.window.WizardPageChangeInfo) => boolean | Thenable<boolean>;
 	private _message: azdata.window.DialogMessage;
+	private _loading: boolean;
+	private _loadingText: string;
+	private _loadingCompletedText: string;
 	private _displayPageTitles: boolean = true;
 	private _operationHandler: BackgroundOperationHandler;
 	private _width: DialogWidth;
@@ -476,6 +517,33 @@ class WizardImpl implements azdata.window.Wizard {
 
 	public set message(value: azdata.window.DialogMessage) {
 		this._message = value;
+		this._extHostModelViewDialog.updateWizard(this);
+	}
+
+	public get loading(): boolean {
+		return this._loading;
+	}
+
+	public set loading(value: boolean) {
+		this._loading = value;
+		this._extHostModelViewDialog.updateWizard(this);
+	}
+
+	public get loadingText(): string {
+		return this._loadingText
+	}
+
+	public set loadingText(value: string) {
+		this._loadingText = value;
+		this._extHostModelViewDialog.updateWizard(this);
+	}
+
+	public get loadingCompletedText(): string {
+		return this._loadingCompletedText;
+	}
+
+	public set loadingCompletedText(value: string) {
+		this._loadingCompletedText = value;
 		this._extHostModelViewDialog.updateWizard(this);
 	}
 
@@ -697,11 +765,20 @@ export class ExtHostModelViewDialog implements ExtHostModelViewDialogShape {
 		return editor.handleSave();
 	}
 
+	public $onClosed(handle: number, reason: azdata.window.CloseReason): void {
+		let dialog = this._objectsByHandle.get(handle) as DialogImpl;
+		dialog.handleOnClosed(reason);
+	}
+
 	public openDialog(dialog: azdata.window.Dialog): void {
 		let handle = this.getHandle(dialog);
 		this.updateDialogContent(dialog);
 		dialog.dialogName ? this._proxy.$openDialog(handle, dialog.dialogName) :
 			this._proxy.$openDialog(handle);
+	}
+
+	public openCustomErrorDialog(options: azdata.window.IErrorDialogOptions): Thenable<string | undefined> {
+		return this._proxy.$openCustomErrorDialog(options);
 	}
 
 	public closeDialog(dialog: azdata.window.Dialog): void {
@@ -784,7 +861,10 @@ export class ExtHostModelViewDialog implements ExtHostModelViewDialogShape {
 			cancelButton: this.getHandle(dialog.cancelButton),
 			content: dialog.content && typeof dialog.content !== 'string' ? dialog.content.map(tab => this.getHandle(tab)) : dialog.content as string,
 			customButtons: dialog.customButtons ? dialog.customButtons.map(button => this.getHandle(button)) : undefined,
-			message: dialog.message
+			message: dialog.message,
+			loading: dialog.loading,
+			loadingText: dialog.loadingText,
+			loadingCompletedText: dialog.loadingCompletedText
 		});
 	}
 
@@ -931,7 +1011,10 @@ export class ExtHostModelViewDialog implements ExtHostModelViewDialogShape {
 			nextButton: this.getHandle(wizard.nextButton),
 			customButtons: wizard.customButtons ? wizard.customButtons.map(button => this.getHandle(button)) : undefined,
 			message: wizard.message,
-			displayPageTitles: wizard.displayPageTitles
+			displayPageTitles: wizard.displayPageTitles,
+			loading: wizard.loading,
+			loadingText: wizard.loadingText,
+			loadingCompletedText: wizard.loadingCompletedText,
 		});
 	}
 

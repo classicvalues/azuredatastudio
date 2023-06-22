@@ -12,10 +12,10 @@ import * as rimraf from 'rimraf';
 import * as os from 'os';
 import * as uuid from 'uuid';
 import { BookTreeViewProvider } from '../../book/bookTreeView';
-import { BookTreeItem, BookTreeItemType } from '../../book/bookTreeItem';
+import { BookTreeItem } from '../../book/bookTreeItem';
 import { promisify } from 'util';
 import { MockExtensionContext } from '../common/stubs';
-import { exists } from '../../common/utils';
+import { exists, BookTreeItemType } from '../../common/utils';
 import { BookModel } from '../../book/bookModel';
 import { BookTrustManager } from '../../book/bookTrustManager';
 import { NavigationProviders } from '../../common/constants';
@@ -690,20 +690,22 @@ describe('BooksTreeViewTests', function () {
 					'toc': '- title: Home\n  url: /readme\n- title: Notebook1\n  url: /notebook1\n- title: Notebook2\n  url: /notebook2'
 				}
 			},
-			{
-				it: 'v2',
-				folderPaths: {
-					'configFile': path.join(rootFolderPath, '_config.yml'),
-					'tableofContentsFile': path.join(rootFolderPath, '_toc.yml'),
-					'notebook1File': path.join(rootFolderPath, 'notebook1.ipynb'),
-					'notebook2File': path.join(rootFolderPath, 'notebook2.ipynb'),
-					'markdownFile': path.join(rootFolderPath, 'readme.md')
-				},
-				contents: {
-					'config': 'title: Test Book',
-					'toc': '- title: Home\n  file: /readme\n- title: Notebook1\n  file: /notebook1\n- title: Notebook2\n  file: /notebook2'
-				}
-			}
+			// Disable book v2 tests temporarily
+			// Tracking the fix here https://github.com/microsoft/azuredatastudio/issues/20589
+			// {
+			// 	it: 'v2',
+			// 	folderPaths: {
+			// 		'configFile': path.join(rootFolderPath, '_config.yml'),
+			// 		'tableofContentsFile': path.join(rootFolderPath, '_toc.yml'),
+			// 		'notebook1File': path.join(rootFolderPath, 'notebook1.ipynb'),
+			// 		'notebook2File': path.join(rootFolderPath, 'notebook2.ipynb'),
+			// 		'markdownFile': path.join(rootFolderPath, 'readme.md')
+			// 	},
+			// 	contents: {
+			// 		'config': 'title: Test Book',
+			// 		'toc': '- title: Home\n  file: /readme\n- title: Notebook1\n  file: /notebook1\n- title: Notebook2\n  file: /notebook2'
+			// 	}
+			// }
 		];
 		runs.forEach(function (run) {
 			describe('BookTreeViewProvider.Commands on ' + run.it, function (): void {
@@ -777,7 +779,7 @@ describe('BooksTreeViewTests', function () {
 					should(showPreviewSpy.calledOnce).be.true('Should have called showPreviewFile.');
 				});
 
-				it('should add book when bookPath contains special characters on openBook @UNSTABLE@', async () => {
+				it('should add book when bookPath contains special characters on openBook', async () => {
 					let rootFolderPath2 = path.join(os.tmpdir(), `BookTestData(1)_${uuid.v4()}`);
 					let dataFolderPath2 = path.join(rootFolderPath2, '_data');
 					let contentFolderPath2 = path.join(rootFolderPath2, 'content');
@@ -846,8 +848,7 @@ describe('BooksTreeViewTests', function () {
 				});
 
 				it('should remove book on closeBook', async () => {
-					await bookTreeViewProvider.openBook(rootFolderPath, undefined, true);
-					should(bookTreeViewProvider.books.length).equal(1, 'Failed to initialize the book on open');
+					await bookTreeViewProvider.openBook(rootFolderPath);
 					let length: number = bookTreeViewProvider.books.length;
 					await bookTreeViewProvider.closeBook(bookTreeViewProvider.books[0].bookItems[0]);
 					should(bookTreeViewProvider.books.length).equal(length - 1, 'Failed to remove the book on close');

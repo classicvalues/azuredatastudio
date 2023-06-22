@@ -17,7 +17,7 @@ import { IDashboardWebview, IDashboardViewService } from 'sql/platform/dashboard
 import { AngularDisposable } from 'sql/base/browser/lifecycle';
 
 import * as azdata from 'azdata';
-import { WebviewElement, IWebviewService } from 'vs/workbench/contrib/webview/browser/webview';
+import { IWebviewElement, IWebviewService } from 'vs/workbench/contrib/webview/browser/webview';
 
 @Component({
 	template: '',
@@ -32,7 +32,7 @@ export class WebviewContent extends AngularDisposable implements OnInit, IDashbo
 	public readonly onMessage: Event<string> = this._onMessage.event;
 
 	private _onMessageDisposable: IDisposable;
-	private _webview: WebviewElement;
+	private _webview: IWebviewElement;
 	private _html: string;
 
 	constructor(
@@ -98,11 +98,14 @@ export class WebviewContent extends AngularDisposable implements OnInit, IDashbo
 			this._onMessageDisposable.dispose();
 		}
 
-		this._webview = this.webviewService.createWebviewElement(this.id,
-			{},
-			{
-				allowScripts: true
-			}, undefined);
+		this._webview = this.webviewService.createWebviewElement({
+			id: this.id,
+			contentOptions: {
+				allowScripts: true,
+			},
+			options: {},
+			extension: undefined
+		});
 
 		this._webview.mountTo(this._el.nativeElement);
 

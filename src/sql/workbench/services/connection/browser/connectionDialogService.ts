@@ -27,6 +27,7 @@ import * as types from 'vs/base/common/types';
 import { trim } from 'vs/base/common/strings';
 import { localize } from 'vs/nls';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
+import { TelemetryView } from 'sql/platform/telemetry/common/telemetryKeys';
 import { CmsConnectionController } from 'sql/workbench/services/connection/browser/cmsConnectionController';
 import { entries } from 'sql/base/common/collections';
 import { onUnexpectedError } from 'vs/base/common/errors';
@@ -49,7 +50,7 @@ export interface IConnectionComponentCallbacks {
 export interface IConnectionComponentController {
 	showUiComponent(container: HTMLElement, didChange?: boolean): void;
 	initDialog(providers: string[], model: IConnectionProfile): void;
-	validateConnection(): IConnectionValidateResult;
+	validateConnection(): Promise<IConnectionValidateResult>;
 	fillInConnectionInputs(connectionInfo: IConnectionProfile): void;
 	handleOnConnecting(): void;
 	handleResetConnection(): void;
@@ -152,14 +153,24 @@ export class ConnectionDialogService implements IConnectionDialogService {
 		return defaultProvider || Constants.mssqlProviderName;
 	}
 
-	private handleOnConnect(params: INewConnectionParams, profile?: IConnectionProfile): void {
+	private getDefaultAuthenticationTypeName(): string {
+		let defaultAuthenticationType: string;
+		if (!defaultAuthenticationType && this._configurationService) {
+			defaultAuthenticationType = WorkbenchUtils.getSqlConfigValue<string>(this._configurationService, Constants.defaultAuthenticationType);
+		}
+
+		return defaultAuthenticationType || Constants.AuthenticationType.SqlLogin;  // as a fallback, default to sql login if the value from settings is not available
+
+	}
+
+	private async handleOnConnect(params: INewConnectionParams, profile?: IConnectionProfile): Promise<void> {
 		this._logService.debug('ConnectionDialogService: onConnect event is received');
 		if (!this._connecting) {
 			this._logService.debug('ConnectionDialogService: Start connecting');
 			this._connecting = true;
 			this.handleProviderOnConnecting();
 			if (!profile) {
-				let result = this.uiController.validateConnection();
+				let result = await this.uiController.validateConnection();
 				if (!result.isValid) {
 					this._logService.debug('ConnectionDialogService: Connection is invalid');
 					this._connecting = false;
@@ -167,24 +178,8 @@ export class ConnectionDialogService implements IConnectionDialogService {
 					return;
 				}
 				profile = result.connection;
-
-				if (params.oldProfileId && params.isEditConnection) {
-					profile.id = params.oldProfileId;
-				}
-
 				profile.serverName = trim(profile.serverName);
-
-				// append the port to the server name for SQL Server connections
-				if (this._currentProviderType === Constants.mssqlProviderName ||
-					this._currentProviderType === Constants.cmsProviderName) {
-					let portPropertyName: string = 'port';
-					let portOption: string = profile.options[portPropertyName];
-					if (portOption && portOption.indexOf(',') === -1) {
-						profile.serverName = profile.serverName + ',' + portOption;
-					}
-					profile.options[portPropertyName] = undefined;
-					profile.providerName = Constants.mssqlProviderName;
-				}
+				this.updatePortAndProvider(profile);
 
 				// Disable password prompt during reconnect if connected with an empty password
 				if (profile.password === '' && profile.savePassword === false) {
@@ -194,10 +189,25 @@ export class ConnectionDialogService implements IConnectionDialogService {
 				this.handleDefaultOnConnect(params, profile).catch(err => onUnexpectedError(err));
 			} else {
 				profile.serverName = trim(profile.serverName);
+				this.updatePortAndProvider(profile);
 				this._connectionManagementService.addSavedPassword(profile).then(async (connectionWithPassword) => {
 					await this.handleDefaultOnConnect(params, connectionWithPassword);
 				}).catch(err => onUnexpectedError(err));
 			}
+		}
+	}
+
+	private updatePortAndProvider(profile: IConnectionProfile): void {
+		// append the port to the server name for SQL Server connections
+		if (this._currentProviderType === Constants.mssqlProviderName ||
+			this._currentProviderType === Constants.cmsProviderName) {
+			let portPropertyName: string = 'port';
+			let portOption: string = profile.options[portPropertyName];
+			if (portOption && portOption.indexOf(',') === -1) {
+				profile.serverName = profile.serverName + ',' + portOption;
+			}
+			profile.options[portPropertyName] = undefined;
+			profile.providerName = Constants.mssqlProviderName;
 		}
 	}
 
@@ -214,7 +224,7 @@ export class ConnectionDialogService implements IConnectionDialogService {
 		} else {
 			if (params && params.input && params.connectionType === ConnectionType.editor) {
 				this._connectionManagementService.cancelEditorConnection(params.input);
-			} else {
+			} else if (!params.isEditConnection) { // Do not cancel connected connection if this is Edit mode.
 				this._connectionManagementService.cancelConnection(this._model);
 			}
 			if (params && params.input && params.input.onConnectCanceled) {
@@ -229,6 +239,14 @@ export class ConnectionDialogService implements IConnectionDialogService {
 		}
 	}
 
+	/**
+	 * Calls the default connect function (used by password reset dialog)
+	 */
+	public async callDefaultOnConnect(connection: IConnectionProfile, params: INewConnectionParams): Promise<void> {
+		// Needed for password reset dialog to connect after changing password.
+		return this.handleDefaultOnConnect(params, connection);
+	}
+
 	private async handleDefaultOnConnect(params: INewConnectionParams, connection: IConnectionProfile): Promise<void> {
 		if (this.ignoreNextConnect) {
 			this._connectionDialog.resetConnection();
@@ -239,7 +257,8 @@ export class ConnectionDialogService implements IConnectionDialogService {
 			return;
 		}
 		let fromEditor = params && params.connectionType === ConnectionType.editor;
-		let isTemporaryConnection = params && params.connectionType === ConnectionType.temporary;
+		let hasSaveProfile = connection && connection.hasOwnProperty('saveProfile');
+		let isTemporaryConnection = (params && params.connectionType === ConnectionType.temporary) || (hasSaveProfile && !connection.saveProfile);
 		let uri: string = undefined;
 		if (fromEditor && params && params.input) {
 			uri = params.input.uri;
@@ -247,11 +266,14 @@ export class ConnectionDialogService implements IConnectionDialogService {
 		let options: IConnectionCompletionOptions = this._options || {
 			params: params,
 			saveTheConnection: !isTemporaryConnection,
-			showDashboard: params && params.showDashboard !== undefined ? params.showDashboard : !fromEditor && !isTemporaryConnection,
+			showDashboard: params?.showDashboard ?? false,
 			showConnectionDialogOnError: false,
 			showFirewallRuleOnError: true
 		};
 
+		if (params && options.params === undefined) {
+			options.params = params;
+		}
 		try {
 			const connectionResult = await this._connectionManagementService.connectAndSaveProfile(connection, uri, options, params && params.input);
 			this._connecting = false;
@@ -265,7 +287,7 @@ export class ConnectionDialogService implements IConnectionDialogService {
 				this._logService.debug(`ConnectionDialogService: Error handled and connection reset - Error: ${connectionResult.errorMessage}`);
 			} else {
 				this._connectionDialog.resetConnection();
-				this.showErrorDialog(Severity.Error, this._connectionErrorTitle, connectionResult.errorMessage, connectionResult.callStack);
+				this.showErrorDialog(Severity.Error, this._connectionErrorTitle, connectionResult.errorMessage, connectionResult.messageDetails);
 				this._logService.debug(`ConnectionDialogService: Connection error: ${connectionResult.errorMessage}`);
 			}
 		} catch (err) {
@@ -325,11 +347,7 @@ export class ConnectionDialogService implements IConnectionDialogService {
 			}
 		}
 		this._model.providerName = this._currentProviderType;
-		const previousModel = this._model;
 		this._model = new ConnectionProfile(this._capabilitiesService, this._model);
-		if (previousModel) {
-			previousModel.dispose();
-		}
 		if (this._inputModel && this._inputModel.options) {
 			this.uiController.showUiComponent(input.container,
 				this._inputModel.options.authTypeChanged);
@@ -343,15 +361,16 @@ export class ConnectionDialogService implements IConnectionDialogService {
 		this.uiController.initDialog(this._params && this._params.providers, this._model);
 	}
 
-	private handleFillInConnectionInputs(connectionInfo: IConnectionProfile): void {
-		this._connectionManagementService.addSavedPassword(connectionInfo).then(connectionWithPassword => {
-			if (this._model) {
-				this._model.dispose();
-			}
-			this._model = this.createModel(connectionWithPassword);
-
+	private async handleFillInConnectionInputs(connectionInfo: IConnectionProfile): Promise<void> {
+		try {
+			const connectionWithPassword = await this.createModel(connectionInfo);
+			this._model = connectionWithPassword;
 			this.uiController.fillInConnectionInputs(this._model);
-		}).catch(err => onUnexpectedError(err));
+		}
+		catch (err) {
+			this._logService.error(`Error filling in connection inputs with password. Original error message: ${err}`);
+		}
+
 		this._connectionDialog.updateProvider(this._providerNameToDisplayNameMap[connectionInfo.providerName]);
 	}
 
@@ -363,11 +382,8 @@ export class ConnectionDialogService implements IConnectionDialogService {
 		this.uiController.handleOnConnecting();
 	}
 
-	private updateModelServerCapabilities(model: IConnectionProfile) {
-		if (this._model) {
-			this._model.dispose();
-		}
-		this._model = this.createModel(model);
+	private async updateModelServerCapabilities(model: IConnectionProfile) {
+		this._model = await this.createModel(model);
 		if (this._model.providerName) {
 			this._currentProviderType = this._model.providerName;
 			if (this._connectionDialog) {
@@ -376,14 +392,30 @@ export class ConnectionDialogService implements IConnectionDialogService {
 		}
 	}
 
-	private createModel(model: IConnectionProfile): ConnectionProfile {
+	private async createModel(model: IConnectionProfile): Promise<ConnectionProfile> {
 		const defaultProvider = this.getDefaultProviderName();
 		let providerName = model ? model.providerName : defaultProvider;
 		providerName = providerName ? providerName : defaultProvider;
 		if (model && !model.providerName) {
 			model.providerName = providerName;
 		}
+
+		const defaultAuthenticationType = this.getDefaultAuthenticationTypeName();
+		let authenticationTypeName = model ? model.authenticationType : defaultAuthenticationType;
+		authenticationTypeName = authenticationTypeName ? authenticationTypeName : defaultAuthenticationType;
+		if (model && !model.authenticationType) {
+			model.authenticationType = authenticationTypeName;
+		}
+
 		let newProfile = new ConnectionProfile(this._capabilitiesService, model || providerName);
+		if (model && !model.password) {
+			try {
+				await this._connectionManagementService.addSavedPassword(newProfile);
+			}
+			catch (err) {
+				this._logService.error(`Error filling in password for connection dialog model. Original error message: ${err}`);
+			}
+		}
 		newProfile.saveProfile = true;
 		newProfile.generateNewId();
 		// If connecting from a query editor set "save connection" to false
@@ -394,7 +426,7 @@ export class ConnectionDialogService implements IConnectionDialogService {
 	}
 
 	private async showDialogWithModel(): Promise<void> {
-		this.updateModelServerCapabilities(this._inputModel);
+		await this.updateModelServerCapabilities(this._inputModel);
 		await this.doShowDialog(this._params);
 	}
 
@@ -433,7 +465,7 @@ export class ConnectionDialogService implements IConnectionDialogService {
 		this._params = params;
 		this._inputModel = model;
 
-		this.updateModelServerCapabilities(model);
+		await this.updateModelServerCapabilities(model);
 
 		// If connecting from a query editor set "save connection" to false
 		if (params && (params.input && params.connectionType === ConnectionType.editor ||
@@ -443,7 +475,7 @@ export class ConnectionDialogService implements IConnectionDialogService {
 		await this.showDialogWithModel();
 
 		if (connectionResult && connectionResult.errorMessage) {
-			this.showErrorDialog(Severity.Error, this._connectionErrorTitle, connectionResult.errorMessage, connectionResult.callStack);
+			this.showErrorDialog(Severity.Error, this._connectionErrorTitle, connectionResult.errorMessage, connectionResult.messageDetails);
 		}
 	}
 
@@ -454,8 +486,8 @@ export class ConnectionDialogService implements IConnectionDialogService {
 				this._connectionDialog.databaseDropdownExpanded = this.uiController.databaseDropdownExpanded;
 				this.handleOnCancel(this._connectionDialog.newConnectionParams);
 			});
-			this._connectionDialog.onConnect((profile) => {
-				this.handleOnConnect(this._connectionDialog.newConnectionParams, profile as IConnectionProfile);
+			this._connectionDialog.onConnect(async (profile) => {
+				await this.handleOnConnect(this._connectionDialog.newConnectionParams, profile as IConnectionProfile);
 			});
 			this._connectionDialog.onShowUiComponent((input) => this.handleShowUiComponent(input));
 			this._connectionDialog.onInitDialog(() => this.handleInitDialog());
@@ -469,7 +501,6 @@ export class ConnectionDialogService implements IConnectionDialogService {
 		const recentConnections: ConnectionProfile[] = this._connectionManagementService.getRecentConnections(params.providers);
 		await this._connectionDialog.open(recentConnections.length > 0);
 		this.uiController.focusOnOpen();
-		recentConnections.forEach(conn => conn.dispose());
 	}
 
 	private showErrorDialog(severity: Severity, headerTitle: string, message: string, messageDetails?: string): void {
@@ -486,7 +517,7 @@ export class ConnectionDialogService implements IConnectionDialogService {
 				localize('kerberosHelpLink', "Help configuring Kerberos is available at {0}", helpLink),
 				localize('kerberosKinit', "If you have previously connected you may need to re-run kinit.")
 			].join('\r\n');
-			actions.push(new Action('Kinit', 'Run kinit', null, true, async () => {
+			actions.push(new Action('Kinit', localize('runKinit', "Run Kinit"), undefined, true, async () => {
 				this._connectionDialog.close();
 				await this._clipboardService.writeText('kinit\r');
 				await this._commandService.executeCommand('workbench.action.terminal.focus');
@@ -496,9 +527,10 @@ export class ConnectionDialogService implements IConnectionDialogService {
 				}, 10);
 				return;
 			}));
-
 		}
+
 		this._logService.error(message);
-		this._errorMessageService.showDialog(severity, headerTitle, message, messageDetails, actions);
+
+		this._errorMessageService.showDialog(severity, headerTitle, message, messageDetails, TelemetryView.ConnectionErrorDialog, actions, undefined, undefined);
 	}
 }

@@ -6,7 +6,7 @@
 import * as azdata from 'azdata';
 import * as vscode from 'vscode';
 import { ImportDataModel, ColumnMetadata } from '../wizard/api/models';
-import { FlatFileProvider, PROSEDiscoveryParams, InsertDataParams, GetColumnInfoParams, ChangeColumnSettingsParams, PROSEDiscoveryResponse, InsertDataResponse, ChangeColumnSettingsResponse, GetColumnInfoResponse } from '../services/contracts';
+import { FlatFileProvider, PROSEDiscoveryParams, InsertDataParams, GetColumnInfoParams, ChangeColumnSettingsParams, PROSEDiscoveryResponse, InsertDataResponse, ChangeColumnSettingsResponse, GetColumnInfoResponse, LearnTransformationParams, LearnTransformationResponse, SaveTransformationParams, SaveTransformationResponse } from '../services/contracts';
 
 export class ImportTestUtils {
 
@@ -37,12 +37,12 @@ export class ImportTestUtils {
 	}
 
 	public static async getExtensionPath(): Promise<string> {
-		return await vscode.extensions.getExtension('Microsoft.import').extensionPath;
+		return vscode.extensions.getExtension('Microsoft.import').extensionPath;
 	}
 
 	public static async getTestExtensionContext(): Promise<TestExtensionContext> {
 		let testContext = new TestExtensionContext();
-		testContext.extensionPath = await vscode.extensions.getExtension('Microsoft.import').extensionPath;
+		testContext.extensionPath = vscode.extensions.getExtension('Microsoft.import').extensionPath;
 		return testContext;
 	}
 }
@@ -72,7 +72,13 @@ export class TestQueryProvider implements azdata.QueryProvider {
 	disposeQuery(ownerUri: string): Thenable<void> {
 		throw new Error('Method not implemented.');
 	}
+	connectionUriChanged(newUri: string, oldUri: string): Thenable<void> {
+		throw new Error('Method not implemented.');
+	}
 	saveResults(requestParams: azdata.SaveResultsRequestParams): Thenable<azdata.SaveResultRequestResult> {
+		throw new Error('Method not implemented.');
+	}
+	copyResults(requestParams: azdata.CopyResultsRequestParams): Thenable<void> {
 		throw new Error('Method not implemented.');
 	}
 	setQueryExecutionOptions(ownerUri: string, options: azdata.QueryExecutionOptions): Thenable<void> {
@@ -167,6 +173,10 @@ export class TestImportDataModel implements ImportDataModel {
 	schema: string;
 	filePath: string;
 	fileType: string;
+	transPreviews: string[][];
+	originalProseColumns: ColumnMetadata[];
+	derivedColumnName: string;
+	newFileSelected: boolean;
 }
 
 export class TestFlatFileProvider implements FlatFileProvider {
@@ -181,6 +191,12 @@ export class TestFlatFileProvider implements FlatFileProvider {
 		throw new Error('Method not implemented.');
 	}
 	sendChangeColumnSettingsRequest(params: ChangeColumnSettingsParams): Thenable<ChangeColumnSettingsResponse> {
+		throw new Error('Method not implemented.');
+	}
+	sendLearnTransformationRequest(params: LearnTransformationParams): Thenable<LearnTransformationResponse> {
+		throw new Error('Method not implemented.');
+	}
+	sendSaveTransformationRequest(params: SaveTransformationParams): Thenable<SaveTransformationResponse> {
 		throw new Error('Method not implemented.');
 	}
 

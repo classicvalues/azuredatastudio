@@ -58,6 +58,9 @@ export interface IssueReporterData extends WindowData {
 	issueType?: IssueType;
 	extensionId?: string;
 	experiments?: string;
+	restrictedMode: boolean;
+	previewFeaturesEnabled: boolean; // {{SQL CARBON EDIT}} Add preview features flag
+	isUnsupported: boolean;
 	githubAccessToken: string;
 	readonly issueTitle?: string;
 	readonly issueBody?: string;
@@ -70,8 +73,14 @@ export interface ISettingSearchResult {
 }
 
 export interface ProcessExplorerStyles extends WindowStyles {
-	hoverBackground?: string;
-	hoverForeground?: string;
+	listHoverBackground?: string;
+	listHoverForeground?: string;
+	listFocusBackground?: string;
+	listFocusForeground?: string;
+	listFocusOutline?: string;
+	listActiveSelectionBackground?: string;
+	listActiveSelectionForeground?: string;
+	listHoverOutline?: string;
 }
 
 export interface ProcessExplorerData extends WindowData {
@@ -95,7 +104,7 @@ export interface IssueReporterWindowConfiguration extends ISandboxConfiguration 
 		type: string;
 		arch: string;
 		release: string;
-	}
+	};
 }
 
 export interface ProcessExplorerWindowConfiguration extends ISandboxConfiguration {

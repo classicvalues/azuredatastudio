@@ -14,7 +14,6 @@ import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IClipboardService } from 'vs/platform/clipboard/common/clipboardService';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { ILogService } from 'vs/platform/log/common/log';
-import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfigurationService';
 import { IAdsTelemetryService } from 'sql/platform/telemetry/common/telemetry';
 import { ILayoutService } from 'vs/platform/layout/browser/layoutService';
 import { Deferred } from 'sql/base/common/promise';
@@ -22,6 +21,7 @@ import { InputBox } from 'sql/base/browser/ui/inputBox/inputBox';
 import { attachCalloutDialogStyler } from 'sql/workbench/common/styler';
 import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { escapeLabel, escapeUrl, unquoteText } from 'sql/workbench/contrib/notebook/browser/calloutDialog/common/utils';
+import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfiguration';
 
 export interface ILinkCalloutDialogOptions {
 	insertTitle?: string,
@@ -158,7 +158,8 @@ export class LinkCalloutDialog extends Modal {
 	public insert(): void {
 		this.hide('ok');
 		let escapedLabel = escapeLabel(this._linkTextInputBox.value);
-		let escapedUrl = escapeUrl(unquoteText(this._linkUrlInputBox.value));
+		let unquotedUrl = unquoteText(this._linkUrlInputBox.value);
+		let escapedUrl = escapeUrl(unquotedUrl);
 
 		if (this._previouslySelectedRange) {
 			// Reset selection to previous state before callout was open
@@ -169,7 +170,7 @@ export class LinkCalloutDialog extends Modal {
 			this._selectionComplete.resolve({
 				insertEscapedMarkdown: `[${escapedLabel}](${escapedUrl})`,
 				insertUnescapedLinkLabel: this._linkTextInputBox.value,
-				insertUnescapedLinkUrl: this._linkUrlInputBox.value
+				insertUnescapedLinkUrl: unquotedUrl
 			});
 		}
 	}

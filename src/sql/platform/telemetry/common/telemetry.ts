@@ -53,22 +53,10 @@ export interface ITelemetryEvent {
 	withServerInfo(serverInfo?: azdata.ServerInfo): ITelemetryEvent;
 }
 
-export interface ITelemetryInfo {
-	sessionId: string;
-	machineId: string;
-	instanceId: string;
-}
-
 export interface IAdsTelemetryService {
 
 	// ITelemetryService functions
 	_serviceBrand: undefined;
-
-	setEnabled(value: boolean): void;
-
-	getTelemetryInfo(): Promise<ITelemetryInfo>;
-
-	isOptedIn: boolean;
 
 	// Custom event functions
 	createViewEvent(view: string): ITelemetryEvent;

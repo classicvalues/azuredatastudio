@@ -24,6 +24,20 @@
 			: undefined
 	);
 
+	function canUseEval(): boolean {
+		try {
+			const func = (
+				trustedTypesPolicy
+					? self.eval(<any>trustedTypesPolicy.createScript('', 'true'))
+					: new Function('true')
+			);
+			func.call(self);
+			return true;
+		} catch (err) {
+			return false;
+		}
+	}
+
 	function loadAMDLoader() {
 		return new Promise<void>((resolve, reject) => {
 			if (typeof (<any>self).define === 'function' && (<any>self).define.amd) {
@@ -32,7 +46,7 @@
 			const loaderSrc: string | TrustedScriptURL = monacoBaseUrl + 'vs/loader.js';
 
 			const isCrossOrigin = (/^((http:)|(https:)|(file:))/.test(loaderSrc) && loaderSrc.substring(0, self.origin.length) !== self.origin);
-			if (!isCrossOrigin) {
+			if (!isCrossOrigin && canUseEval()) {
 				// use `fetch` if possible because `importScripts`
 				// is synchronous and can lead to deadlocks on Safari
 				fetch(loaderSrc).then((response) => {
@@ -62,30 +76,42 @@
 		});
 	}
 
-	const loadCode = function (moduleId: string) {
+	function configureAMDLoader() {
+		require.config({
+			baseUrl: monacoBaseUrl,
+			catchError: true,
+			trustedTypesPolicy,
+			amdModulesPattern: /^vs\//
+		});
+	}
+
+	function loadCode(moduleId: string) {
 		loadAMDLoader().then(() => {
-			require.config({
-				baseUrl: monacoBaseUrl,
-				catchError: true,
-				trustedTypesPolicy,
-			});
+			configureAMDLoader();
 			require([moduleId], function (ws) {
 				setTimeout(function () {
-					let messageHandler = ws.create((msg: any, transfer?: Transferable[]) => {
+					const messageHandler = ws.create((msg: any, transfer?: Transferable[]) => {
 						(<any>self).postMessage(msg, transfer);
 					}, null);
 
-					self.onmessage = (e: MessageEvent) => messageHandler.onmessage(e.data);
+					self.onmessage = (e: MessageEvent) => messageHandler.onmessage(e.data, e.ports);
 					while (beforeReadyMessages.length > 0) {
 						self.onmessage(beforeReadyMessages.shift()!);
 					}
 				}, 0);
 			});
 		});
-	};
+	}
+
+	// If the loader is already defined, configure it immediately
+	// This helps in the bundled case, where we must load nls files
+	// and they need a correct baseUrl to be loaded.
+	if (typeof (<any>self).define === 'function' && (<any>self).define.amd) {
+		configureAMDLoader();
+	}
 
 	let isFirstMessage = true;
-	let beforeReadyMessages: MessageEvent[] = [];
+	const beforeReadyMessages: MessageEvent[] = [];
 	self.onmessage = (message: MessageEvent) => {
 		if (!isFirstMessage) {
 			beforeReadyMessages.push(message);

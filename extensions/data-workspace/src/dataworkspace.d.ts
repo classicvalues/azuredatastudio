@@ -8,7 +8,7 @@ declare module 'dataworkspace' {
 	import * as vscode from 'vscode';
 	export const enum extension {
 		name = 'Microsoft.data-workspace',
-		vscodeName = 'Microsoft.data-workspace-vscode'
+		vscodeName = 'ms-mssql.data-workspace-vscode'
 	}
 
 	/**
@@ -34,6 +34,11 @@ declare module 'dataworkspace' {
 		showProjectsView(): void;
 
 		/**
+		 * Fires event to refresh the project tree. The tree is not guaranteed to be refreshed after this call returns
+		 */
+		refreshProjectsTree(): void;
+
+		/**
 		 * Returns the default location to save projects
 		 */
 		defaultProjectSaveLocation: vscode.Uri | undefined;
@@ -49,6 +54,32 @@ declare module 'dataworkspace' {
 		 * @returns the uri of the created the project or undefined if no project was created
 		 */
 		openSpecificProjectNewProjectDialog(projectType: IProjectType): Promise<vscode.Uri | undefined>;
+
+		/**
+		 * Determines if a given character is a valid filename character
+		 * @param c Character to validate
+		 */
+		isValidFilenameCharacter(c: string): boolean;
+
+		/**
+		 * Replaces invalid filename characters in a string with underscores
+		 * @param s The string to be sanitized for a filename
+		*/
+		sanitizeStringForFilename(s: string): string;
+
+		/**
+		 * Returns true if the string is a valid filename
+		 * Logic is copied from src\vs\base\common\extpath.ts
+		 * @param name filename to check
+		*/
+		isValidBasename(name: string | null | undefined): boolean;
+
+		/**
+		 * Returns specific error message if file name is invalid otherwise returns undefined
+		 * Logic is copied from src\vs\base\common\extpath.ts
+		 * @param name filename to check
+		 */
+		isValidBasenameErrorMessage(name: string | null | undefined): string | undefined;
 	}
 
 	/**
@@ -67,8 +98,9 @@ declare module 'dataworkspace' {
 		 * @param location the parent directory of the project
 		 * @param projectTypeId the identifier of the selected project type
 		 * @param projectTargetPlatform the target platform of the project
+		 * @param sdkStyleProject whether or not a project is SDK-style
 		 */
-		createProject(name: string, location: vscode.Uri, projectTypeId: string, projectTargetPlatform?: string): Promise<vscode.Uri>;
+		createProject(name: string, location: vscode.Uri, projectTypeId: string, projectTargetPlatform?: string, sdkStyleProject?: boolean): Promise<vscode.Uri>;
 
 		/**
 		 * Gets the project data corresponding to the project file, to be placed in the dashboard container
@@ -88,7 +120,20 @@ declare module 'dataworkspace' {
 		/**
 		 * Gets the project image to be used as background in dashboard container
 		 */
-		 readonly image?: azdata.ThemedIconPath;
+		readonly image?: azdata.ThemedIconPath;
+
+		/**
+		 * Whether or not the tree data provider supports drag and drop
+		 */
+		readonly supportsDragAndDrop?: boolean;
+
+		/**
+		 * Moves a file from the source to target location. Must be implemented if supportsDragAndDrop is true
+		 * @param projectUri
+		 * @param source
+		 * @param target
+		 */
+		moveFile?(projectUri: vscode.Uri, source: any, target: WorkspaceTreeItem): Promise<void>;
 	}
 
 	/**
@@ -129,6 +174,21 @@ declare module 'dataworkspace' {
 		 * Gets the default target platform
 		 */
 		readonly defaultTargetPlatform?: string;
+
+		/**
+		 * Whether or not sdk style project is an option
+		 */
+		readonly sdkStyleOption?: boolean;
+
+		/**
+		 * Location where clicking on the Learn More next to SDK style checkbox will go. sdkStyleOption needs to be set to true to use this
+		 */
+		readonly sdkStyleLearnMoreUrl?: string
+
+		/**
+		 * Location where clicking on the Learn More to know more about project type will go
+		 */
+		readonly learnMoreUrl?: string
 	}
 
 	/**
@@ -212,4 +272,5 @@ declare module 'dataworkspace' {
 	 * Union type representing data types in dashboard table
 	 */
 	export type IDashboardColumnType = 'string' | 'icon';
+
 }

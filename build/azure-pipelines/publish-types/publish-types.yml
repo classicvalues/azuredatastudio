@@ -2,14 +2,17 @@
 
 trigger:
   branches:
-    include: ["refs/tags/*"]
+    include: ["refs/tags/*.0"] # {{SQL CARBON EDIT}} Only run on major version releases
 
 pr: none
+
+pool:
+  vmImage: ubuntu-latest
 
 steps:
   - task: NodeTool@0
     inputs:
-      versionSpec: "14.x"
+      versionSpec: "16.x"
 
   - task: geeklearningio.gl-vsts-tasks-yarn.yarn-installer-task.YarnInstaller@3
     inputs:
@@ -17,7 +20,7 @@ steps:
 
   # - bash: |
   #     TAG_VERSION=$(git describe --tags `git rev-list --tags --max-count=1`)
-  #     CHANNEL="G1C14HJ2F"
+  #    CHANNEL="G1C14HJ2F"
 
   #     if [ "$TAG_VERSION" == "1.999.0" ]; then
   #       MESSAGE="<!here>. Someone pushed 1.999.0 tag. Please delete it ASAP from remote and local."
@@ -44,17 +47,21 @@ steps:
       git config --global user.name "Azure Data Studio"
 
       git clone https://$(GITHUB_TOKEN)@$(REPO) --depth=1
-      node build/azure-pipelines/publish-types/update-types.js
-
-      TAG_VERSION=$(git describe --tags `git rev-list --tags --max-count=1`)
-
       cd DefinitelyTyped
 
       # Sync up to latest from the DT repo
       git remote add upstream https://github.com/DefinitelyTyped/DefinitelyTyped.git
-      git merge upstream/master
-      git push origin
+      git fetch upstream
+      git reset --hard upstream/master
+      git push --force
 
+      # Update and format the typings file
+      cd ..
+      node build/azure-pipelines/publish-types/update-types.js
+      TAG_VERSION=$(git describe --tags `git rev-list --tags --max-count=1`)
+
+      # Create and push the branch
+      cd DefinitelyTyped
       git diff --color | cat
       git add -A
       git status

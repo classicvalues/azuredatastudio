@@ -1,8 +1,8 @@
+"use strict";
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.minifyTask = exports.optimizeTask = exports.loaderConfig = void 0;
 const es = require("event-stream");
@@ -37,32 +37,59 @@ function loaderConfig() {
 }
 exports.loaderConfig = loaderConfig;
 const IS_OUR_COPYRIGHT_REGEXP = /Copyright \(C\) Microsoft Corporation/i;
-function loader(src, bundledFileHeader, bundleLoader) {
-    let sources = [
-        `${src}/vs/loader.js`
-    ];
-    if (bundleLoader) {
-        sources = sources.concat([
-            `${src}/vs/css.js`,
-            `${src}/vs/nls.js`
-        ]);
-    }
-    let isFirst = true;
+function loaderPlugin(src, base, amdModuleId) {
     return (gulp
-        .src(sources, { base: `${src}` })
+        .src(src, { base })
         .pipe(es.through(function (data) {
-        if (isFirst) {
-            isFirst = false;
-            this.emit('data', new VinylFile({
-                path: 'fake',
+        if (amdModuleId) {
+            let contents = data.contents.toString('utf8');
+            contents = contents.replace(/^define\(/m, `define("${amdModuleId}",`);
+            data.contents = Buffer.from(contents);
+        }
+        this.emit('data', data);
+    })));
+}
+function loader(src, bundledFileHeader, bundleLoader, externalLoaderInfo) {
+    let loaderStream = gulp.src(`${src}/vs/loader.js`, { base: `${src}` });
+    if (bundleLoader) {
+        loaderStream = es.merge(loaderStream, loaderPlugin(`${src}/vs/css.js`, `${src}`, 'vs/css'), loaderPlugin(`${src}/vs/nls.js`, `${src}`, 'vs/nls'));
+    }
+    const files = [];
+    const order = (f) => {
+        if (f.path.endsWith('loader.js')) {
+            return 0;
+        }
+        if (f.path.endsWith('css.js')) {
+            return 1;
+        }
+        if (f.path.endsWith('nls.js')) {
+            return 2;
+        }
+        return 3;
+    };
+    return (loaderStream
+        .pipe(es.through(function (data) {
+        files.push(data);
+    }, function () {
+        files.sort((a, b) => {
+            return order(a) - order(b);
+        });
+        files.unshift(new VinylFile({
+            path: 'fake',
+            base: '.',
+            contents: Buffer.from(bundledFileHeader)
+        }));
+        if (externalLoaderInfo !== undefined) {
+            files.push(new VinylFile({
+                path: 'fake2',
                 base: '.',
-                contents: Buffer.from(bundledFileHeader)
+                contents: Buffer.from(`require.config(${JSON.stringify(externalLoaderInfo, undefined, 2)});`)
             }));
-            this.emit('data', data);
         }
-        else {
-            this.emit('data', data);
+        for (const file of files) {
+            this.emit('data', file);
         }
+        this.emit('end');
     }))
         .pipe(concat('vs/loader.js')));
 }
@@ -148,7 +175,7 @@ function optimizeTask(opts) {
             }
             es.readArray(bundleInfoArray).pipe(bundleInfoStream);
         });
-        const result = es.merge(loader(src, bundledFileHeader, bundleLoader), bundlesStream, resourcesStream, bundleInfoStream);
+        const result = es.merge(loader(src, bundledFileHeader, bundleLoader, opts.externalLoaderInfo), bundlesStream, resourcesStream, bundleInfoStream);
         return result
             .pipe(sourcemaps.write('./', {
             sourceRoot: undefined,
@@ -170,8 +197,10 @@ function minifyTask(src, sourceMapBaseUrl) {
         const cssnano = require('cssnano');
         const postcss = require('gulp-postcss');
         const sourcemaps = require('gulp-sourcemaps');
+        const svgmin = require('gulp-svgmin');
         const jsFilter = filter('**/*.js', { restore: true });
         const cssFilter = filter('**/*.css', { restore: true });
+        const svgFilter = filter('**/*.svg', { restore: true });
         pump(gulp.src([src + '/**', '!' + src + '/**/*.map']), jsFilter, sourcemaps.init({ loadMaps: true }), es.map((f, cb) => {
             esbuild.build({
                 entryPoints: [f.path],
@@ -179,7 +208,7 @@ function minifyTask(src, sourceMapBaseUrl) {
                 sourcemap: 'external',
                 outdir: '.',
                 platform: 'node',
-                target: ['node12.18'],
+                target: ['esnext'],
                 write: false
             }).then(res => {
                 const jsFile = res.outputFiles.find(f => /\.js$/.test(f.path));
@@ -188,7 +217,13 @@ function minifyTask(src, sourceMapBaseUrl) {
                 f.sourceMap = JSON.parse(sourceMapFile.text);
                 cb(undefined, f);
             }, cb);
-        }), jsFilter.restore, cssFilter, postcss([cssnano({ preset: 'default' })]), cssFilter.restore, sourcemaps.mapSources((sourcePath) => {
+        }), jsFilter.restore, cssFilter, postcss([cssnano({ preset: 'default' })]), cssFilter.restore, svgFilter, 
+        // {{SQL CARBON EDIT}} - Disable the removeViewBox option because some SVG files ADS needs will not scale properly when the view box information is removed.
+        svgmin({
+            plugins: [
+                { removeViewBox: false }
+            ]
+        }), svgFilter.restore, sourcemaps.mapSources((sourcePath) => {
             if (sourcePath === 'bootstrap-fork.js') {
                 return 'bootstrap-fork.orig.js';
             }

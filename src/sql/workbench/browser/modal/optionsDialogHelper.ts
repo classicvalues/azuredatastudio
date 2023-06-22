@@ -41,12 +41,13 @@ export function createOptionElement(option: azdata.ServiceOption, rowContainer: 
 					}
 				}
 			},
-			ariaLabel: option.displayName
-		});
+			ariaLabel: option.displayName,
+			placeholder: option.placeholder
+		}, option.name);
 		optionWidget.value = optionValue;
 		inputElement = findElement(rowContainer, 'input');
 	} else if (option.valueType === ServiceOptionType.category || option.valueType === ServiceOptionType.boolean) {
-		optionWidget = new SelectBox(possibleInputs, optionValue.toString(), contextViewService, undefined, { ariaLabel: option.displayName });
+		optionWidget = new SelectBox(possibleInputs, optionValue.toString(), contextViewService, undefined, { ariaLabel: option.displayName }, option.name);
 		DialogHelper.appendInputSelectBox(rowContainer, optionWidget);
 		inputElement = findElement(rowContainer, 'monaco-select-box');
 	} else if (option.valueType === ServiceOptionType.string || option.valueType === ServiceOptionType.password) {
@@ -54,8 +55,9 @@ export function createOptionElement(option: azdata.ServiceOption, rowContainer: 
 			validationOptions: {
 				validation: (value: string) => (!value && option.isRequired) ? ({ type: MessageType.ERROR, content: option.displayName + missingErrorMessage }) : null
 			},
-			ariaLabel: option.displayName
-		});
+			ariaLabel: option.displayName,
+			placeholder: option.placeholder
+		}, option.name);
 		optionWidget.value = optionValue;
 		if (option.valueType === ServiceOptionType.password) {
 			optionWidget.inputElement.type = 'password';
@@ -147,8 +149,8 @@ export function updateOptions(options: { [optionName: string]: any }, optionsMap
 	}
 }
 
-export let trueInputValue: string = 'True';
-export let falseInputValue: string = 'False';
+export let trueInputValue: string = localize('boolean.true', 'True');
+export let falseInputValue: string = localize('boolean.false', 'False');
 
 export function findElement(container: HTMLElement, className: string): HTMLElement {
 	let elementBuilder = container;
@@ -167,7 +169,7 @@ export function groupOptionsByCategory(options: azdata.ServiceOption[]): { [cate
 	options.forEach(option => {
 		let groupName = option.groupName;
 		if (groupName === null || groupName === undefined) {
-			groupName = 'General';
+			groupName = localize('optionsDialog.defaultGroupName', 'General');
 		}
 
 		if (!!connectionOptionsMap[groupName]) {

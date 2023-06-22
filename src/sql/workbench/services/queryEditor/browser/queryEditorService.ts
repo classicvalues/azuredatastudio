@@ -7,7 +7,7 @@ import { QueryResultsInput } from 'sql/workbench/common/editor/query/queryResult
 import { EditDataInput } from 'sql/workbench/browser/editData/editDataInput';
 import { ConnectionType, IConnectableInput, IConnectionCompletionOptions, IConnectionManagementService } from 'sql/platform/connection/common/connectionManagement';
 import { IQueryEditorService, INewSqlEditorOptions } from 'sql/workbench/services/queryEditor/common/queryEditorService';
-import { UntitledQueryEditorInput } from 'sql/workbench/common/editor/query/untitledQueryEditorInput';
+import { UntitledQueryEditorInput } from 'sql/base/query/browser/untitledQueryEditorInput';
 
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
@@ -51,23 +51,24 @@ export class QueryEditorService implements IQueryEditorService {
 	/**
 	 * Creates new untitled document for SQL/Kusto query and opens in new editor tab
 	 */
-	public async newSqlEditor(options: INewSqlEditorOptions = {}, connectionProviderName?: string): Promise<UntitledQueryEditorInput> {
+	public async newSqlEditor(options: INewSqlEditorOptions = {}, connectionProviderName?: string, initialConnectionUri?: string): Promise<UntitledQueryEditorInput> {
 		options = mixin(options, defaults, false);
 		// Create file path and file URI
 		let docUri: URI = options.resource ?? URI.from({ scheme: Schemas.untitled, path: await this.createUntitledSqlFilePath(connectionProviderName) });
 
 		// Create a sql document pane with accoutrements
-		const fileInput = this._editorService.createEditorInput({ forceUntitled: true, resource: docUri, mode: this._connectionManagementService.getProviderLanguageMode(connectionProviderName) }) as UntitledTextEditorInput;
+		const mode = this._connectionManagementService.getProviderLanguageMode(connectionProviderName);
+		const fileInput = await this._editorService.createEditorInput({ forceUntitled: true, resource: docUri, languageId: mode }) as UntitledTextEditorInput;
 		let untitledEditorModel = await fileInput.resolve();
-		if (options.initalContent) {
-			untitledEditorModel.textEditorModel.setValue(options.initalContent);
+		if (options.initialContent) {
+			untitledEditorModel.textEditorModel.setValue(options.initialContent);
 			if (options.dirty === false || (options.dirty === undefined && !this._configurationService.getValue<IQueryEditorConfiguration>('queryEditor').promptToSaveGeneratedFiles)) {
 				(untitledEditorModel as UntitledTextEditorModel).setDirty(false);
 			}
 		}
 
 		const queryResultsInput: QueryResultsInput = this._instantiationService.createInstance(QueryResultsInput, docUri.toString());
-		let queryInput = this._instantiationService.createInstance(UntitledQueryEditorInput, options.description, fileInput, queryResultsInput);
+		let queryInput = this._instantiationService.createInstance(UntitledQueryEditorInput, options.description, fileInput, queryResultsInput, initialConnectionUri);
 		let profile: IConnectionProfile | undefined = undefined;
 		// If we're told to connect then get the connection before opening the editor since it will try to get the connection for the current
 		// active editor and so we need to get this before opening a new one.
@@ -93,7 +94,7 @@ export class QueryEditorService implements IQueryEditorService {
 	/**
 	 * Creates new edit data session
 	 */
-	public async newEditDataEditor(schemaName: string, tableName: string, sqlContent: string): Promise<IConnectableInput> {
+	public async newEditDataEditor(schemaName: string, tableName: string, sqlContent: string, initialConnectionUri?: string): Promise<IConnectableInput> {
 
 		// Create file path and file URI
 		let objectName = schemaName ? schemaName + '.' + tableName : tableName;
@@ -101,13 +102,13 @@ export class QueryEditorService implements IQueryEditorService {
 		let docUri: URI = URI.from({ scheme: Schemas.untitled, path: filePath });
 
 		// Create a sql document pane with accoutrements
-		const fileInput = this._editorService.createEditorInput({ forceUntitled: true, resource: docUri, mode: 'sql' }) as UntitledTextEditorInput;
+		const fileInput = await this._editorService.createEditorInput({ forceUntitled: true, resource: docUri, languageId: 'sql' }) as UntitledTextEditorInput;
 		const m = await fileInput.resolve();
 		//when associatedResource editor is created it is dirty, this must be set to false to be able to detect changes to the editor.
 		(m as UntitledTextEditorModel).setDirty(false);
 		// Create an EditDataInput for editing
 		const resultsInput: EditDataResultsInput = this._instantiationService.createInstance(EditDataResultsInput, docUri.toString());
-		let editDataInput: EditDataInput = this._instantiationService.createInstance(EditDataInput, docUri, schemaName, tableName, fileInput, sqlContent, resultsInput);
+		let editDataInput: EditDataInput = this._instantiationService.createInstance(EditDataInput, docUri, schemaName, tableName, fileInput, sqlContent, resultsInput, initialConnectionUri);
 		// Determine whether to show edit data upon opening.
 		editDataInput.queryPaneEnabled = this._configurationService.getValue('editor.showEditDataSqlPaneOnStartup');
 		if (sqlContent) {

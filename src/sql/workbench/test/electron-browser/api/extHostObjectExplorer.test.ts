@@ -14,6 +14,7 @@ const nodes: { [nodeName: string]: azdata.NodeInfo } =
 {
 	'Server1': {
 		nodePath: 'MyServer',
+		parentNodePath: '',
 		nodeStatus: '',
 		nodeSubType: '',
 		nodeType: 'Server',
@@ -24,6 +25,7 @@ const nodes: { [nodeName: string]: azdata.NodeInfo } =
 	},
 	'DatabasesFolder': {
 		nodePath: 'MyServer/Databases',
+		parentNodePath: 'MyServer',
 		nodeStatus: '',
 		nodeSubType: '',
 		nodeType: 'Folder',
@@ -34,6 +36,7 @@ const nodes: { [nodeName: string]: azdata.NodeInfo } =
 	},
 	'Database1': {
 		nodePath: 'MyServer/Databases/MyDatabase',
+		parentNodePath: 'MyServer/Databases',
 		nodeStatus: '',
 		nodeSubType: '',
 		nodeType: 'Database',
@@ -44,6 +47,7 @@ const nodes: { [nodeName: string]: azdata.NodeInfo } =
 	},
 	'Database2': {
 		nodePath: 'MyServer/Databases/My/TrickyDatabase',
+		parentNodePath: 'MyServer/Databases',
 		nodeStatus: '',
 		nodeSubType: '',
 		nodeType: 'Database',
@@ -54,6 +58,7 @@ const nodes: { [nodeName: string]: azdata.NodeInfo } =
 	},
 	'TablesFolder': {
 		nodePath: 'MyServer/Databases/My/TrickyDatabase/Tables',
+		parentNodePath: 'MyServer/Databases/My/TrickyDatabase',
 		nodeStatus: '',
 		nodeSubType: '',
 		nodeType: 'Folder',
@@ -84,27 +89,27 @@ suite('ExtHostObjectExplorer Tests', () => {
 		suite('getParent', () => {
 			test('Should return undefined if no parent', async () => {
 				extHostObjectExplorerNode = new ExtHostObjectExplorerNode(nodes['Server1'], 'connectionId', mockProxy.object);
-				assert.equal(await extHostObjectExplorerNode.getParent(), undefined);
+				assert.strictEqual(await extHostObjectExplorerNode.getParent(), undefined);
 			});
 
 			test('should return root with direct descendent of root', async () => {
 				extHostObjectExplorerNode = new ExtHostObjectExplorerNode(nodes['DatabasesFolder'], 'connectionId', mockProxy.object);
-				assert.equal((await extHostObjectExplorerNode.getParent()).nodePath, nodes['Server1'].nodePath);
+				assert.strictEqual((await extHostObjectExplorerNode.getParent()).nodePath, nodes['Server1'].nodePath);
 			});
 
 			test('should return correct parent with further descendent of root', async () => {
 				extHostObjectExplorerNode = new ExtHostObjectExplorerNode(nodes['Database1'], 'connectionId', mockProxy.object);
-				assert.equal((await extHostObjectExplorerNode.getParent()).nodePath, nodes['DatabasesFolder'].nodePath);
+				assert.strictEqual((await extHostObjectExplorerNode.getParent()).nodePath, nodes['DatabasesFolder'].nodePath);
 			});
 
 			test('should return correct parent with node having / in its name', async () => {
 				extHostObjectExplorerNode = new ExtHostObjectExplorerNode(nodes['Database2'], 'connectionId', mockProxy.object);
-				assert.equal((await extHostObjectExplorerNode.getParent()).nodePath, nodes['DatabasesFolder'].nodePath);
+				assert.strictEqual((await extHostObjectExplorerNode.getParent()).nodePath, nodes['DatabasesFolder'].nodePath);
 			});
 
 			test('should return correct parent with parent node having / in its name', async () => {
 				extHostObjectExplorerNode = new ExtHostObjectExplorerNode(nodes['TablesFolder'], 'connectionId', mockProxy.object);
-				assert.equal((await extHostObjectExplorerNode.getParent()).nodePath, nodes['Database2'].nodePath);
+				assert.strictEqual((await extHostObjectExplorerNode.getParent()).nodePath, nodes['Database2'].nodePath);
 			});
 		});
 	});

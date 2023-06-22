@@ -248,6 +248,12 @@
 			}
 		},
 		{
+			"scope": "markup.strikethrough",
+			"settings": {
+				"fontStyle": "strikethrough"
+			}
+		},
+		{
 			"name": "Markup Inline",
 			"scope": "markup.inline.raw",
 			"settings": {
@@ -363,7 +369,7 @@
 		// "peekViewTitleDescription.foreground": "",
 
 		// Ports
-		"ports.iconRunningProcessforeground": "#80a2c2",
+		"ports.iconRunningProcessForeground": "#80a2c2",
 		// Editor: Diff
 		"diffEditor.insertedTextBackground": "#31958A55",
 		// "diffEditor.insertedTextBorder": "",

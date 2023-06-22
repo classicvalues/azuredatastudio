@@ -12,9 +12,12 @@ export class RadioGroupLoadingComponentBuilder implements azdata.ComponentBuilde
 	private _optionsLoadingBuilder: azdata.LoadingComponentBuilder;
 	private _onValueChangedEmitter: vscode.EventEmitter<void> = new vscode.EventEmitter();
 	private _currentRadioOption!: azdata.RadioButtonComponent;
+	private _enabled: boolean | undefined;
 	constructor(private _view: azdata.ModelView, private _onNewDisposableCreated: (disposable: vscode.Disposable) => void, private _fieldInfo: FieldInfo) {
 		this._optionsDivContainer = this._view!.modelBuilder.divContainer().withProps({ clickable: false }).component();
 		this._optionsLoadingBuilder = this._view!.modelBuilder.loadingComponent().withItem(this._optionsDivContainer);
+		// Dynamic enablement fields will default to false since they're calculated later
+		this._enabled = instanceOfDynamicEnablementInfo(this._fieldInfo.enabled) ? false : this._fieldInfo.enabled;
 	}
 
 	component(): azdata.LoadingComponent {
@@ -22,7 +25,7 @@ export class RadioGroupLoadingComponentBuilder implements azdata.ComponentBuilde
 	}
 
 	withProperties<U>(properties: U): azdata.ComponentBuilder<azdata.LoadingComponent, azdata.LoadingComponentProperties> {
-		return this._optionsLoadingBuilder.withProps(properties);
+		return this._optionsLoadingBuilder.withProps(<any>properties);
 	}
 
 	withProps(properties: azdata.LoadingComponentProperties): azdata.ComponentBuilder<azdata.LoadingComponent, azdata.LoadingComponentProperties> {
@@ -51,7 +54,7 @@ export class RadioGroupLoadingComponentBuilder implements azdata.ComponentBuilde
 					label: option.displayName,
 					value: option.name,
 					checked: option.displayName === defaultValue,
-					enabled: instanceOfDynamicEnablementInfo(this._fieldInfo.enabled) ? false : this._fieldInfo.enabled // Dynamic enablement is initially set to false
+					enabled: this._enabled
 				}).component();
 				if (radioOption.checked) {
 					this._currentRadioOption = radioOption;
@@ -90,6 +93,7 @@ export class RadioGroupLoadingComponentBuilder implements azdata.ComponentBuilde
 		this._optionsDivContainer.items.forEach(radioButton => {
 			radioButton.enabled = enabled;
 		});
+		this._enabled = enabled;
 	}
 
 	get onValueChanged(): vscode.Event<void> {

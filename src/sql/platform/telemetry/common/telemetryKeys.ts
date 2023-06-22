@@ -17,6 +17,7 @@ export const enum ModalDialogName {
 	Connection = 'Connection',
 	Backup = 'Backup',
 	FileBrowser = 'FileBrowser',
+	UrlBrowser = 'UrlBrowser',
 	Restore = 'Restore',
 	Insights = 'Insights',
 	Profiler = 'Profiler',
@@ -26,7 +27,8 @@ export const enum ModalDialogName {
 	AutoOAuth = 'AutoOAuth',
 	AddNewDashboardTab = 'AddNewDashboardTab',
 	ProfilerFilter = 'ProfilerFilter',
-	CalloutDialog = 'CalloutDialog'
+	CalloutDialog = 'CalloutDialog',
+	TableDesignerPublishDialog = 'TableDesignerPublishDialog'
 }
 
 export const enum TelemetryView {
@@ -36,24 +38,43 @@ export const enum TelemetryView {
 	AgentJobSteps = 'AgentJobSteps',
 	AgentNotebookHistory = 'AgentNotebookHistory',
 	AgentNotebooks = 'AgentNotebooks',
-	ConnectionDialog = 'ConnectionDialog',
+	ConnectionErrorDialog = 'ConnectionErrorDialog',
+	ErrorMessageDialog = 'ErrorMessageDialog',
+	ExecutionPlan = 'ExecutionPlan',
 	ExtensionHost = 'ExtensionHost',
 	ExtensionRecommendationDialog = 'ExtensionRecommendationDialog',
+	LinkedAccounts = 'LinkedAccounts',
 	Notebook = 'Notebook',
+	NotifyEncryptionDialog = 'NotifyEncryptionDialog',
+	NotifyHiddenTenantDialog = 'NotifyHiddenTenantDialog',
 	ResultsPanel = 'ResultsPanel',
 	Shell = 'Shell',
-	SqlAssessment = 'SqlAssessment'
+	SqlAssessment = 'SqlAssessment',
+	TableDesigner = 'TableDesigner',
+	ObjectExplorer = 'ObjectExplorer'
 }
 
 export const enum TelemetryError {
-	DatabaseConnectionError = 'DatabaseConnectionError'
+	DatabaseConnectionError = 'DatabaseConnectionError',
+	ObjectExplorerExpandError = 'ObjectExplorerExpandError',
+	AddAzureAccountError = 'AddAzureAccountError',
+	AddAzureAccountErrorNoResult = 'AddAzureAccountErrorNoResult',
+	RefreshAzureAccountError = 'RefreshAzureAccountError',
+	RefreshAzureAccountErrorNoResult = 'RefreshAzureAccountErrorNoResult',
 }
 
 export const enum TelemetryAction {
-	AddServerGroup = 'AddServerGroup',
 	adsCommandExecuted = 'adsCommandExecuted',
-	ConnectToServer = 'ConnectToServer',
+	AddExecutionPlan = 'AddExecutionPlan',
+	AddServerGroup = 'AddServerGroup',
+	AddAzureAccount = 'AddAzureAccount',
 	BackupCreated = 'BackupCreated',
+	ConnectToServer = 'ConnectToServer',
+	CustomZoom = 'CustomZoom',
+	CancelQuery = 'CancelQuery',
+	ChartCreated = 'ChartCreated',
+	Click = 'Click',
+	CompareExecutionPlan = 'CompareExecutionPlan',
 	DashboardNavigated = 'DashboardNavigated',
 	DatabaseConnected = 'DatabaseConnected',
 	DatabaseDisconnected = 'DatabaseDisconnected',
@@ -64,12 +85,13 @@ export const enum TelemetryAction {
 	DeleteAgentProxy = 'DeleteAgentProxy',
 	DeleteConnection = 'DeleteConnection',
 	DeleteServerGroup = 'DeleteServerGroup',
-	CancelQuery = 'CancelQuery',
-	ChartCreated = 'ChartCreated',
-	Click = 'Click',
+	FindNode = 'FindNode',
 	FirewallRuleRequested = 'FirewallRuleCreated',
+	GenerateScript = 'GenerateScript',
+	GeneratePreviewReport = 'GeneratePreviewReport',
 	GetDataGridItems = 'GetDataGridItems',
 	GetDataGridColumns = 'GetDataGridColumns',
+	HighlightExpensiveOperation = 'HighlightExpensiveOperation',
 	ModelViewDashboardOpened = 'ModelViewDashboardOpened',
 	ModalDialogClosed = 'ModalDialogClosed',
 	ModalDialogOpened = 'ModalDialogOpened',
@@ -77,17 +99,29 @@ export const enum TelemetryAction {
 	MoveServerGroup = 'MoveServerGroup',
 	NewQuery = 'NewQuery',
 	ObjectExplorerExpand = 'ObjectExplorerExpand',
+	ObjectExplorerFilter = 'ObjectExplorerFilter',
+	ObjectExplorerRemoveFilter = 'ObjectExplorerRemoveFilter',
 	Open = 'Open',
+	OpenQuery = 'OpenQuery',
+	OpenExecutionPlanProperties = 'OpenExecutionPlanProperties',
+	PublishChanges = 'PublishChanges',
+	RefreshAzureAccount = 'RefreshAzureAccount',
 	RestoreRequested = 'RestoreRequested',
 	RunAgentJob = 'RunAgentJob',
 	RunQuery = 'RunQuery',
 	RunQueryStatement = 'RunQueryStatement',
 	RunQueryString = 'RunQueryString',
+	SearchCompleted = 'SearchCompleted',
+	SearchStarted = 'SearchStarted',
 	ShowChart = 'ShowChart',
 	StopAgentJob = 'StopAgentJob',
+	ToggleActualExecutionPlan = 'ToggleActualExecutionPlan',
+	ViewExecutionPlanComparisonProperties = 'ViewExecutionPlanComparisonProperties',
+	ViewTopOperations = 'ViewTopOperations',
 	WizardPagesNavigation = 'WizardPagesNavigation',
-	SearchStarted = 'SearchStarted',
-	SearchCompleted = 'SearchCompleted'
+	ZoomIn = 'ZoomIn',
+	ZoomOut = 'ZoomOut',
+	ZoomToFit = 'ZoomToFIt'
 }
 
 export const enum NbTelemetryAction {
@@ -95,11 +129,22 @@ export const enum NbTelemetryAction {
 	RunAll = 'RunNotebook',
 	AddCell = 'AddCell',
 	KernelChanged = 'KernelChanged',
-	NewNotebookFromConnections = 'NewNotebookWithConnectionProfile'
+	ConnectionChanged = 'ConnectionChanged',
+	TrustChanged = 'TrustChanged',
+	RunWithParameters = 'RunWithParameters',
+	NewNotebookFromConnections = 'NewNotebookWithConnectionProfile',
+	UndoCell = 'UndoCell',
+	RedoCell = 'RedoCell',
+	MoveCell = 'MoveCell',
+	MIMETypeRendererNotFound = 'MIMETypeRendererNotFound',
+	CellExecutionFailed = 'CellExecutionFailed',
+	TextCellToolbarAction = 'TextCellToolbarAction',
+	WYSIWYGKeyboardAction = 'WYSIWYGKeyboardAction'
 }
 
 export const enum TelemetryPropertyName {
 	ChartMaxRowCountExceeded = 'chartMaxRowCountExceeded',
-	ConnectionSource = 'connectionSource'
+	ConnectionSource = 'connectionSource',
+	AuthLibrary = 'AuthLibrary'
 }
 

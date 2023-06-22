@@ -6,51 +6,86 @@
 import 'vs/css!./media/hover';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 import { registerThemingParticipant } from 'vs/platform/theme/common/themeService';
-import { editorHoverBackground, editorHoverBorder, textLinkForeground, editorHoverForeground, editorHoverStatusBarBackground, textCodeBlockBackground, widgetShadow } from 'vs/platform/theme/common/colorRegistry';
-import { IHoverService, IHoverOptions } from 'vs/workbench/services/hover/browser/hover';
-import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
+import { editorHoverBackground, editorHoverBorder, textLinkForeground, editorHoverForeground, editorHoverStatusBarBackground, textCodeBlockBackground, widgetShadow, textLinkActiveForeground, focusBorder, toolbarHoverBackground } from 'vs/platform/theme/common/colorRegistry';
+import { IHoverService, IHoverOptions, IHoverWidget } from 'vs/workbench/services/hover/browser/hover';
+import { IContextMenuService, IContextViewService } from 'vs/platform/contextview/browser/contextView';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { HoverWidget } from 'vs/workbench/services/hover/browser/hoverWidget';
 import { IContextViewProvider, IDelegate } from 'vs/base/browser/ui/contextview/contextview';
-import { IDisposable } from 'vs/base/common/lifecycle';
+import { DisposableStore, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
+import { addDisposableListener, EventType } from 'vs/base/browser/dom';
 
 export class HoverService implements IHoverService {
 	declare readonly _serviceBrand: undefined;
 
 	private _currentHoverOptions: IHoverOptions | undefined;
+	private _currentHover: HoverWidget | undefined;
 
 	constructor(
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
-		@IContextViewService private readonly _contextViewService: IContextViewService
+		@IContextViewService private readonly _contextViewService: IContextViewService,
+		@IContextMenuService contextMenuService: IContextMenuService
 	) {
+		contextMenuService.onDidShowContextMenu(() => this.hideHover());
 	}
 
-	showHover(options: IHoverOptions, focus?: boolean): IDisposable | undefined {
+	showHover(options: IHoverOptions, focus?: boolean): IHoverWidget | undefined {
 		if (this._currentHoverOptions === options) {
 			return undefined;
 		}
 		this._currentHoverOptions = options;
 
+		const hoverDisposables = new DisposableStore();
 		const hover = this._instantiationService.createInstance(HoverWidget, options);
-		hover.onDispose(() => this._currentHoverOptions = undefined);
+		hover.onDispose(() => {
+			// Only clear the current options if it's the current hover, the current options help
+			// reduce flickering when the same hover is shown multiple times
+			if (this._currentHoverOptions === options) {
+				this._currentHoverOptions = undefined;
+			}
+			hoverDisposables.dispose();
+		});
 		const provider = this._contextViewService as IContextViewProvider;
 		provider.showContextView(new HoverContextViewDelegate(hover, focus));
 		hover.onRequestLayout(() => provider.layout());
+		if ('targetElements' in options.target) {
+			for (const element of options.target.targetElements) {
+				hoverDisposables.add(addDisposableListener(element, EventType.CLICK, () => this.hideHover()));
+			}
+		} else {
+			hoverDisposables.add(addDisposableListener(options.target, EventType.CLICK, () => this.hideHover()));
+		}
+		const focusedElement = <HTMLElement | null>document.activeElement;
+		if (focusedElement) {
+			hoverDisposables.add(addDisposableListener(focusedElement, EventType.KEY_DOWN, e => this._keyDown(e, hover)));
+			hoverDisposables.add(addDisposableListener(document, EventType.KEY_DOWN, e => this._keyDown(e, hover)));
+			hoverDisposables.add(addDisposableListener(focusedElement, EventType.KEY_UP, e => this._keyUp(e, hover)));
+			hoverDisposables.add(addDisposableListener(document, EventType.KEY_UP, e => this._keyUp(e, hover)));
+		}
+		if (options.hideOnKeyDown) {
+			const focusedElement = document.activeElement;
+			if (focusedElement) {
+				hoverDisposables.add(addDisposableListener(focusedElement, EventType.KEY_DOWN, () => this.hideHover()));
+			}
+		}
 
 		if ('IntersectionObserver' in window) {
 			const observer = new IntersectionObserver(e => this._intersectionChange(e, hover), { threshold: 0 });
 			const firstTargetElement = 'targetElements' in options.target ? options.target.targetElements[0] : options.target;
 			observer.observe(firstTargetElement);
-			hover.onDispose(() => observer.disconnect());
+			hoverDisposables.add(toDisposable(() => observer.disconnect()));
 		}
+
+		this._currentHover = hover;
 
 		return hover;
 	}
 
 	hideHover(): void {
-		if (!this._currentHoverOptions) {
+		if (this._currentHover?.isLocked || !this._currentHoverOptions) {
 			return;
 		}
+		this._currentHover = undefined;
 		this._currentHoverOptions = undefined;
 		this._contextViewService.hideContextView();
 	}
@@ -59,6 +94,24 @@ export class HoverService implements IHoverService {
 		const entry = entries[entries.length - 1];
 		if (!entry.isIntersecting) {
 			hover.dispose();
+		}
+	}
+
+	private _keyDown(e: KeyboardEvent, hover: HoverWidget) {
+		if (e.key === 'Alt') {
+			hover.isLocked = true;
+			return;
+		}
+		this.hideHover();
+	}
+
+	private _keyUp(e: KeyboardEvent, hover: HoverWidget) {
+		if (e.key === 'Alt') {
+			hover.isLocked = false;
+			// Hide if alt is released while the mouse os not over hover/target
+			if (!hover.isMouseIn) {
+				this.hideHover();
+			}
 		}
 	}
 }
@@ -106,6 +159,8 @@ registerThemingParticipant((theme, collector) => {
 	const hoverBorder = theme.getColor(editorHoverBorder);
 	if (hoverBorder) {
 		collector.addRule(`.monaco-workbench .workbench-hover { border: 1px solid ${hoverBorder}; }`);
+		collector.addRule(`.monaco-workbench .workbench-hover-container.locked .workbench-hover { outline: 1px solid ${hoverBorder}; }`);
+
 		collector.addRule(`.monaco-workbench .workbench-hover .hover-row:not(:first-child):not(:empty) { border-top: 1px solid ${hoverBorder.transparent(0.5)}; }`);
 		collector.addRule(`.monaco-workbench .workbench-hover hr { border-top: 1px solid ${hoverBorder.transparent(0.5)}; }`);
 		collector.addRule(`.monaco-workbench .workbench-hover hr { border-bottom: 0px solid ${hoverBorder.transparent(0.5)}; }`);
@@ -113,9 +168,22 @@ registerThemingParticipant((theme, collector) => {
 		collector.addRule(`.monaco-workbench .workbench-hover-pointer:after { border-right: 1px solid ${hoverBorder}; }`);
 		collector.addRule(`.monaco-workbench .workbench-hover-pointer:after { border-bottom: 1px solid ${hoverBorder}; }`);
 	}
+	const focus = theme.getColor(focusBorder);
+	if (focus) {
+		collector.addRule(`.monaco-workbench .workbench-hover-container.locked .workbench-hover:focus { outline-color: ${focus}; }`);
+		collector.addRule(`.monaco-workbench .workbench-hover-lock:focus { outline: 1px solid ${focus}; }`);
+	}
+	const toolbarHoverBackgroundColor = theme.getColor(toolbarHoverBackground);
+	if (toolbarHoverBackgroundColor) {
+		collector.addRule(`.monaco-workbench .workbench-hover-container.locked .workbench-hover-lock:hover { background-color: ${toolbarHoverBackgroundColor}; }`);
+	}
 	const link = theme.getColor(textLinkForeground);
 	if (link) {
 		collector.addRule(`.monaco-workbench .workbench-hover a { color: ${link}; }`);
+	}
+	const linkHover = theme.getColor(textLinkActiveForeground);
+	if (linkHover) {
+		collector.addRule(`.monaco-workbench .workbench-hover a:hover { color: ${linkHover}; }`);
 	}
 	const hoverForeground = theme.getColor(editorHoverForeground);
 	if (hoverForeground) {

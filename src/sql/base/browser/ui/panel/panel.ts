@@ -16,14 +16,14 @@ import { Color } from 'vs/base/common/color';
 import { isUndefinedOrNull } from 'vs/base/common/types';
 
 export interface ITabbedPanelStyles {
-	titleActiveForeground?: Color;
-	titleActiveBorder?: Color;
-	titleInactiveForeground?: Color;
+	titleSelectedForeground?: Color;
+	titleSelectedBorder?: Color;
+	titleUnSelectedForeground?: Color;
 	focusBorder?: Color;
 	outline?: Color;
-	activeBackgroundForVerticalLayout?: Color;
+	selectedBackgroundForVerticalLayout?: Color;
 	border?: Color;
-	activeTabContrastBorder?: Color;
+	selectedTabContrastBorder?: Color;
 }
 
 export interface IPanelOptions {
@@ -108,6 +108,10 @@ export class TabbedPanel extends Disposable {
 		return this.parent;
 	}
 
+	public get selectedTabId(): string | undefined {
+		return this._shownTabId;
+	}
+
 	public override dispose() {
 		this.header.remove();
 		this.tabList.remove();
@@ -116,8 +120,8 @@ export class TabbedPanel extends Disposable {
 		this._styleElement.remove();
 	}
 
-	public contains(tab: IPanelTab): boolean {
-		return this._tabMap.has(tab.identifier);
+	public contains(tabId: string): boolean {
+		return this._tabMap.has(tabId);
 	}
 
 	public pushTab(tab: IPanelTab, index?: number, destroyTabBody?: boolean): PanelTabIdentifier {
@@ -205,8 +209,8 @@ export class TabbedPanel extends Disposable {
 		if (this._shownTabId) {
 			const shownTab = this._tabMap.get(this._shownTabId);
 			if (shownTab) {
-				shownTab.label.classList.remove('active');
-				shownTab.header.classList.remove('active');
+				shownTab.label.classList.remove('selected');
+				shownTab.header.classList.remove('selected');
 				shownTab.header.setAttribute('aria-selected', 'false');
 				shownTab.header.tabIndex = -1;
 				if (shownTab.body) {
@@ -235,8 +239,8 @@ export class TabbedPanel extends Disposable {
 		}
 		this.body.appendChild(tab.body);
 		this.body.setAttribute('aria-labelledby', tab.tab.identifier);
-		tab.label.classList.add('active');
-		tab.header.classList.add('active');
+		tab.label.classList.add('selected');
+		tab.header.classList.add('selected');
 		tab.header.setAttribute('aria-selected', 'true');
 		this._onTabChange.fire(id);
 		if (tab.tab.view.onShow) {
@@ -246,6 +250,12 @@ export class TabbedPanel extends Disposable {
 			const tabHeight = this._currentDimensions.height - (this._headerVisible ? this.headersize : 0);
 			this._layoutCurrentTab(new DOM.Dimension(this._currentDimensions.width, tabHeight));
 		}
+	}
+
+	public clearTabs(): void {
+		this._tabMap.forEach((value, key, map) => {
+			this.removeTab(key);
+		});
 	}
 
 	public removeTab(tab: PanelTabIdentifier) {
@@ -319,27 +329,27 @@ export class TabbedPanel extends Disposable {
 			}`);
 		}
 
-		if (styles.titleActiveForeground && styles.titleActiveBorder) {
+		if (styles.titleSelectedForeground && styles.titleSelectedBorder) {
 			content.push(`
 			.tabbedPanel > .title .tabList .tab:hover .tabLabel,
-			.tabbedPanel > .title .tabList .tab .tabLabel.active {
-				color: ${styles.titleActiveForeground};
-				border-bottom-color: ${styles.titleActiveBorder};
+			.tabbedPanel > .title .tabList .tab .tabLabel.selected {
+				color: ${styles.titleSelectedForeground};
+				border-bottom-color: ${styles.titleSelectedBorder};
 				border-bottom-width: 2px;
 			}`);
 		}
 
-		if (styles.titleInactiveForeground) {
+		if (styles.titleUnSelectedForeground) {
 			content.push(`
 			.tabbedPanel > .title .tabList .tab .tabLabel {
-				color: ${styles.titleInactiveForeground};
+				color: ${styles.titleUnSelectedForeground};
 			}`);
 		}
 
-		if (styles.focusBorder && styles.titleActiveForeground) {
+		if (styles.focusBorder && styles.titleSelectedForeground) {
 			content.push(`
 			.tabbedPanel > .title .tabList .tab .tabLabel:focus {
-				color: ${styles.titleActiveForeground};
+				color: ${styles.titleSelectedForeground};
 				border-bottom-color: ${styles.focusBorder} !important;
 				border-bottom: 1px solid;
 				outline: none;
@@ -348,7 +358,7 @@ export class TabbedPanel extends Disposable {
 
 		if (styles.outline) {
 			content.push(`
-			.tabbedPanel > .title .tabList .tab-header.active,
+			.tabbedPanel > .title .tabList .tab-header.selected,
 			.tabbedPanel > .title .tabList .tab-header:hover {
 				outline-color: ${styles.outline};
 				outline-width: 1px;
@@ -357,7 +367,7 @@ export class TabbedPanel extends Disposable {
 				outline-offset: -5px;
 			}
 
-			.tabbedPanel > .title .tabList .tab-header:hover:not(.active) {
+			.tabbedPanel > .title .tabList .tab-header:hover:not(.selected) {
 				outline-style: dashed;
 			}`);
 		}

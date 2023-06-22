@@ -6,13 +6,12 @@
 import { OnInit, Component, Input, Inject, ViewChild, ElementRef, ChangeDetectorRef, forwardRef } from '@angular/core';
 import * as azdata from 'azdata';
 
-import { IGridDataProvider, getResultsString } from 'sql/workbench/services/query/common/gridDataProvider';
+import { IGridDataProvider, copySelectionToClipboard, getTableHeaderString } from 'sql/workbench/services/query/common/gridDataProvider';
 import { IContextMenuService, IContextViewService } from 'vs/platform/contextview/browser/contextView';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { IDataResource } from 'sql/workbench/services/notebook/browser/sql/sqlSessionManager';
-import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfigurationService';
+import { IDataResource, rowHasColumnNameKeys } from 'sql/workbench/services/notebook/browser/sql/sqlSessionManager';
 import { getEolString, shouldIncludeHeaders, shouldRemoveNewLines } from 'sql/workbench/services/query/common/queryRunner';
 import { ResultSetSummary, ResultSetSubset, ICellValue } from 'sql/workbench/services/query/common/query';
 import { INotificationService } from 'vs/platform/notification/common/notification';
@@ -29,7 +28,7 @@ import { GridTableState } from 'sql/workbench/common/editor/query/gridTableState
 import { GridTableBase } from 'sql/workbench/contrib/query/browser/gridPanel';
 import { getErrorMessage, onUnexpectedError } from 'vs/base/common/errors';
 import { ISerializationService, SerializeDataParams } from 'sql/platform/serialization/common/serializationService';
-import { SaveResultAction, IGridActionContext } from 'sql/workbench/contrib/query/browser/actions';
+import { IGridActionContext } from 'sql/workbench/contrib/query/browser/actions';
 import { SaveFormat, ResultSerializer, SaveResultsResponse } from 'sql/workbench/services/query/common/resultSerializer';
 import { IUntitledTextEditorService } from 'vs/workbench/services/untitled/common/untitledTextEditorService';
 import { ChartView } from 'sql/workbench/contrib/charts/browser/chartView';
@@ -38,9 +37,7 @@ import { IInsightOptions } from 'sql/workbench/common/editor/query/chartState';
 import { NotebookChangeType } from 'sql/workbench/services/notebook/common/contracts';
 import { IQueryModelService } from 'sql/workbench/services/query/common/queryModel';
 import { ActionsOrientation } from 'vs/base/browser/ui/actionbar/actionbar';
-import { values } from 'vs/base/common/collections';
 import { URI } from 'vs/base/common/uri';
-import { assign } from 'vs/base/common/objects';
 import { QueryResultId } from 'sql/workbench/services/notebook/browser/models/cell';
 import { equals } from 'vs/base/common/arrays';
 import { IDisposableDataProvider } from 'sql/base/common/dataProvider';
@@ -48,6 +45,14 @@ import { IStorageService } from 'vs/platform/storage/common/storage';
 import { getChartMaxRowCount, notifyMaxRowCountExceeded } from 'sql/workbench/contrib/charts/browser/utils';
 import { IAdsTelemetryService } from 'sql/platform/telemetry/common/telemetry';
 import * as TelemetryKeys from 'sql/platform/telemetry/common/telemetryKeys';
+import { IExecutionPlanService } from 'sql/workbench/services/executionPlan/common/interfaces';
+import { ITextResourcePropertiesService } from 'vs/editor/common/services/textResourceConfiguration';
+import { mssqlProviderName } from 'sql/platform/connection/common/constants';
+import { IAccessibilityService } from 'vs/platform/accessibility/common/accessibility';
+import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
+import { IComponentContextService } from 'sql/workbench/services/componentContext/browser/componentContextService';
+import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
+import { ILogService } from 'vs/platform/log/common/log';
 
 @Component({
 	selector: GridOutputComponent.SELECTOR,
@@ -191,7 +196,7 @@ function reorderGridData(source: IDataResource): void {
 	if (source.data.length > 0) {
 		let rowKeys = Object.keys(source.data[0]);
 		if (!equals(columnNames, rowKeys)) {
-			// SQL notebooks do not use columnName as key (instead use indices)
+			// Older SQL notebooks use indices as keys instead of the column name.
 			// Indicies indicate the row is ordered properly
 			// We must check the data to know if it is in index form
 			let notIndexOrderKeys = false;
@@ -238,12 +243,18 @@ class DataResourceTable extends GridTableBase<any> {
 		@IQueryModelService queryModelService: IQueryModelService,
 		@IThemeService themeService: IThemeService,
 		@IContextViewService contextViewService: IContextViewService,
-		@INotificationService notificationService: INotificationService
+		@INotificationService notificationService: INotificationService,
+		@IExecutionPlanService executionPlanService: IExecutionPlanService,
+		@IAccessibilityService accessibilityService: IAccessibilityService,
+		@IQuickInputService quickInputService: IQuickInputService,
+		@IComponentContextService componentContextService: IComponentContextService,
+		@IContextKeyService contextKeyService: IContextKeyService,
+		@ILogService logService: ILogService
 	) {
 		super(state, createResultSet(source), {
 			actionOrientation: ActionsOrientation.HORIZONTAL,
 			inMemoryDataProcessing: true
-		}, contextMenuService, instantiationService, editorService, untitledEditorService, configurationService, queryModelService, themeService, contextViewService, notificationService);
+		}, contextMenuService, instantiationService, editorService, untitledEditorService, configurationService, queryModelService, themeService, contextViewService, notificationService, executionPlanService, accessibilityService, quickInputService, componentContextService, contextKeyService, logService);
 		this._gridDataProvider = this.instantiationService.createInstance(DataResourceDataProvider, source, this.resultSet, this.cellModel);
 		this._chart = this.instantiationService.createInstance(ChartView, false);
 
@@ -256,6 +267,7 @@ class DataResourceTable extends GridTableBase<any> {
 		this._chart.onOptionsChange(options => {
 			this.setChartOptions(options);
 		});
+		this.providerId = cellModel.notebookModel.context?.providerName;
 	}
 
 	public get gridDataProvider(): IGridDataProvider {
@@ -266,16 +278,14 @@ class DataResourceTable extends GridTableBase<any> {
 		return this.cellOutput.metadata.azdata_chartOptions !== undefined;
 	}
 
-	protected getCurrentActions(): IAction[] {
-		return this.getContextActions();
+	protected override getActionBarItems(): IAction[] {
+		const items = super.getActionBarItems();
+		items.push(this.instantiationService.createInstance(NotebookChartAction, this));
+		return items;
 	}
 
 	protected getContextActions(): IAction[] {
 		return [
-			this.instantiationService.createInstance(SaveResultAction, SaveResultAction.SAVECSV_ID, SaveResultAction.SAVECSV_LABEL, SaveResultAction.SAVECSV_ICON, SaveFormat.CSV),
-			this.instantiationService.createInstance(SaveResultAction, SaveResultAction.SAVEEXCEL_ID, SaveResultAction.SAVEEXCEL_LABEL, SaveResultAction.SAVEEXCEL_ICON, SaveFormat.EXCEL),
-			this.instantiationService.createInstance(SaveResultAction, SaveResultAction.SAVEJSON_ID, SaveResultAction.SAVEJSON_LABEL, SaveResultAction.SAVEJSON_ICON, SaveFormat.JSON),
-			this.instantiationService.createInstance(SaveResultAction, SaveResultAction.SAVEXML_ID, SaveResultAction.SAVEXML_LABEL, SaveResultAction.SAVEXML_ICON, SaveFormat.XML),
 			this.instantiationService.createInstance(NotebookChartAction, this)
 		];
 	}
@@ -362,19 +372,27 @@ export class DataResourceDataProvider implements IGridDataProvider {
 	}
 
 	private transformSource(source: IDataResource): void {
-		this._rows = source.data.map(row => {
-			let rowData: azdata.DbCellValue[] = [];
-			Object.keys(row).forEach((val, index) => {
-				let displayValue = String(values(row)[index]);
-				// Since the columns[0] represents the row number, start at 1
-				rowData.push({
-					displayValue: displayValue,
-					isNull: false,
-					invariantCultureDisplayValue: displayValue
-				});
+		if (source.data.length > 0) {
+			let columns = source.schema.fields;
+			// Rows are either indexed by column name or ordinal number, so check for one column name to see if it uses that format
+			let useColumnNameKey = rowHasColumnNameKeys(source.data[0], source.schema.fields.map(field => field.name));
+			this._rows = source.data.map(row => {
+				let rowData: azdata.DbCellValue[] = [];
+				for (let index = 0; index < Object.keys(row).length; index++) {
+					let key = useColumnNameKey ? columns[index].name : index;
+					let displayValue = String(row[key]);
+					// Since the columns[0] represents the row number, start at 1
+					rowData.push({
+						displayValue: displayValue,
+						isNull: false,
+						invariantCultureDisplayValue: displayValue
+					});
+				}
+				return rowData;
 			});
-			return rowData;
-		});
+		} else {
+			this._rows = [];
+		}
 	}
 
 	public updateResultSet(resultSet: ResultSetSummary, rows: ICellValue[][]): void {
@@ -400,10 +418,18 @@ export class DataResourceDataProvider implements IGridDataProvider {
 
 	private async copyResultsAsync(selection: Slick.Range[], includeHeaders?: boolean, tableView?: IDisposableDataProvider<Slick.SlickData>): Promise<void> {
 		try {
-			let results = await getResultsString(this, selection, includeHeaders, tableView);
-			this._clipboardService.writeText(results);
+			await copySelectionToClipboard(this._clipboardService, this._notificationService, this, selection, includeHeaders, tableView);
 		} catch (error) {
-			this._notificationService.error(localize('copyFailed', "Copy failed with error {0}", getErrorMessage(error)));
+			this._notificationService.error(localize('copyFailed', "Copy failed with error: {0}", getErrorMessage(error)));
+		}
+	}
+
+	async copyHeaders(selection: Slick.Range[]): Promise<void> {
+		try {
+			const results = getTableHeaderString(this, selection);
+			await this._clipboardService.writeText(results);
+		} catch (error) {
+			this._notificationService.error(localize('copyFailed', "Copy failed with error: {0}", getErrorMessage(error)));
 		}
 	}
 
@@ -437,7 +463,7 @@ export class DataResourceDataProvider implements IGridDataProvider {
 		if (!this.canSerialize) {
 			return Promise.resolve(undefined);
 		}
-		// TODO implement selection support
+
 		let columns = this._resultSet.columnInfo;
 		let rowLength = this._rows.length;
 		let minRow = 0;
@@ -459,35 +485,46 @@ export class DataResourceDataProvider implements IGridDataProvider {
 			if (endIndex > maxRow) {
 				endIndex = maxRow;
 			}
-			let result: ICellValue[][] = [];
-			if (includeHeaders) {
-				result.push(columns.map(col => {
-					let headerData: azdata.DbCellValue;
-					headerData = {
-						displayValue: col.columnName,
-						isNull: false,
-						invariantCultureDisplayValue: col.columnName
-					};
-					return headerData;
-				}));
-			}
-			result = result.concat(this._rows.slice(index, endIndex).map(row => {
+
+			return [].concat(this._rows.slice(index, endIndex).map(row => {
 				if (this.isSelected(singleSelection)) {
 					return row.slice(singleSelection.fromCell, singleSelection.toCell + 1);
 				} else {
 					return row;
 				}
 			}));
-			return result;
 		};
 
-		let serializeRequestParams: SerializeDataParams = <SerializeDataParams>assign(serializer.getBasicSaveParameters(format), <Partial<SerializeDataParams>>{
+		// This code path uses the serialization service which uses a different request parameter
+		// interface than the query execution service's saveResults handlers. Here, we take the
+		// format-specific request params (eg, includeHeaders for CSV) and merge the format-agnostic
+		// request params for the serialization request (eg, saveFormat, filePath).
+		let provider = this.cellModel.notebookModel.context?.providerName;
+		if (!provider) {
+			// If no connection currently exists, then pick the first connection provider for the current kernel.
+			// If there's still no provider, then fallback to the default MSSQL one.
+			let connProviders = this.cellModel.notebookModel.getApplicableConnectionProviderIds(this.cellModel.notebookModel.selectedKernelDisplayName);
+			if (connProviders?.length > 0) {
+				provider = connProviders[0];
+			}
+		}
+		if (!provider || !this._serializationService.isProviderRegistered(provider)) {
+			// Serializing notebook query results to file is agnostic of database engine since the data is already available in the notebook.
+			// If the provider doesn't have its own serializer we can let the mssql provider handle it.
+			provider = mssqlProviderName;
+		}
+		let formatSpecificParams = serializer.getBasicSaveParameters(format);
+		let formatAgnosticParams = <Partial<SerializeDataParams>>{
+			serializationProviderId: provider,
 			saveFormat: format,
-			columns: columns,
 			filePath: filePath.fsPath,
-			getRowRange: (rowStart, includeHeaders, numberOfRows) => getRows(rowStart, includeHeaders, numberOfRows),
-			rowCount: rowLength
-		});
+			columns: columns,
+			rowCount: rowLength,
+			getRowRange: (rowStart: number, includeHeaders: boolean, numberOfRows?: number) =>
+				getRows(rowStart, includeHeaders, numberOfRows),
+		};
+		let serializeRequestParams = <SerializeDataParams>Object.assign(formatSpecificParams, formatAgnosticParams);
+
 		return this._serializationService.serializeResults(serializeRequestParams);
 	}
 

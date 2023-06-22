@@ -8,6 +8,8 @@ import { IExtension, IProjectType } from 'dataworkspace';
 import { WorkspaceService } from '../services/workspaceService';
 import { defaultProjectSaveLocation } from './projectLocationHelper';
 import { openSpecificProjectNewProjectDialog } from '../dialogs/newProjectDialog';
+import { isValidBasename, isValidBasenameErrorMessage, isValidFilenameCharacter, sanitizeStringForFilename } from './pathUtilsHelper';
+import { noProjectProvidingExtensionsInstalled } from './constants';
 
 export class DataWorkspaceExtension implements IExtension {
 	constructor(private workspaceService: WorkspaceService) {
@@ -22,7 +24,11 @@ export class DataWorkspaceExtension implements IExtension {
 	}
 
 	showProjectsView(): void {
-		vscode.commands.executeCommand('dataworkspace.views.main.focus');
+		void vscode.commands.executeCommand('dataworkspace.views.main.focus');
+	}
+
+	refreshProjectsTree(): void {
+		this.workspaceService.refreshProjectsTree();
 	}
 
 	get defaultProjectSaveLocation(): vscode.Uri | undefined {
@@ -34,7 +40,27 @@ export class DataWorkspaceExtension implements IExtension {
 	}
 
 	openSpecificProjectNewProjectDialog(projectType: IProjectType): Promise<vscode.Uri | undefined> {
+		if (!this.workspaceService.isProjectProviderAvailable) {
+			void vscode.window.showErrorMessage(noProjectProvidingExtensionsInstalled);
+		}
+
 		return openSpecificProjectNewProjectDialog(projectType, this.workspaceService);
+	}
+
+	isValidFilenameCharacter(c: string): boolean {
+		return isValidFilenameCharacter(c);
+	}
+
+	sanitizeStringForFilename(s: string): string {
+		return sanitizeStringForFilename(s);
+	}
+
+	isValidBasename(name?: string): boolean {
+		return isValidBasename(name);
+	}
+
+	isValidBasenameErrorMessage(name?: string): string | undefined {
+		return isValidBasenameErrorMessage(name);
 	}
 
 }

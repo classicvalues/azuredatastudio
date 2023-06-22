@@ -3,105 +3,94 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { getMigrationStatus, DatabaseMigration, startMigrationCutover, stopMigration, getMigrationAsyncOperationDetails, AzureAsyncOperationResource, BackupFileInfo } from '../../api/azure';
-import { MigrationContext } from '../../models/migrationLocalStorage';
-import { sendSqlMigrationActionEvent, TelemetryAction, TelemetryViews } from '../../telemtery';
+import { DatabaseMigration, startMigrationCutover, stopMigration, BackupFileInfo, getResourceGroupFromId, getMigrationDetails, getMigrationTargetName } from '../../api/azure';
+import { MigrationServiceContext } from '../../models/migrationLocalStorage';
+import { logError, sendSqlMigrationActionEvent, TelemetryAction, TelemetryViews } from '../../telemetry';
 import * as constants from '../../constants/strings';
+import { getMigrationTargetType, getMigrationMode, isBlobMigration } from '../../constants/helper';
 
 export class MigrationCutoverDialogModel {
+	public CutoverError?: Error;
+	public CancelMigrationError?: Error;
 
-	public migrationStatus!: DatabaseMigration;
-	public migrationOpStatus!: AzureAsyncOperationResource;
-
-	constructor(public _migration: MigrationContext) {
-	}
+	constructor(
+		public serviceContext: MigrationServiceContext,
+		public migration: DatabaseMigration) { }
 
 	public async fetchStatus(): Promise<void> {
-		if (this._migration.asyncUrl) {
-			this.migrationOpStatus = await getMigrationAsyncOperationDetails(
-				this._migration.azureAccount,
-				this._migration.subscription,
-				this._migration.asyncUrl,
-				this._migration.sessionId!);
+		try {
+			const migrationStatus = await getMigrationDetails(
+				this.serviceContext.azureAccount!,
+				this.serviceContext.subscription!,
+				this.migration.id,
+				this.migration.properties?.migrationOperationId);
+			this.migration = migrationStatus;
+		} catch (error) {
+			logError(TelemetryViews.MigrationDetailsTab, 'fetchStatus', error);
+		} finally {
+			sendSqlMigrationActionEvent(
+				TelemetryViews.MigrationDetailsTab,
+				TelemetryAction.MigrationStatus,
+				{ 'migrationStatus': this.migration.properties?.migrationStatus },
+				{});
 		}
-
-		this.migrationStatus = await getMigrationStatus(
-			this._migration.azureAccount,
-			this._migration.subscription,
-			this._migration.migrationContext,
-			this._migration.sessionId!);
-
-		sendSqlMigrationActionEvent(
-			TelemetryViews.MigrationCutoverDialog,
-			TelemetryAction.MigrationStatus,
-			{
-				'sessionId': this._migration.sessionId!,
-				'migrationStatus': this.migrationStatus.properties?.migrationStatus
-			},
-			{}
-		);
-		// Logging status to help debugging.
-		console.log(this.migrationStatus);
 	}
 
 	public async startCutover(): Promise<DatabaseMigration | undefined> {
 		try {
-			if (this.migrationStatus) {
+			this.CutoverError = undefined;
+			if (this.migration) {
 				const cutover = await startMigrationCutover(
-					this._migration.azureAccount,
-					this._migration.subscription,
-					this.migrationStatus,
-					this._migration.sessionId!
-				);
+					this.serviceContext.azureAccount!,
+					this.serviceContext.subscription!,
+					this.migration!);
 				sendSqlMigrationActionEvent(
 					TelemetryViews.MigrationCutoverDialog,
 					TelemetryAction.CutoverMigration,
 					{
-						'sessionId': this._migration.sessionId!,
-						'migrationEndTime': new Date().toString()
+						...this.getTelemetryProps(this.serviceContext, this.migration),
+						'migrationEndTime': new Date().toString(),
 					},
 					{}
 				);
 				return cutover;
 			}
 		} catch (error) {
-			console.log(error);
+			this.CutoverError = error;
+			logError(TelemetryViews.MigrationCutoverDialog, 'StartCutoverError', error);
 		}
 		return undefined!;
 	}
 
 	public async cancelMigration(): Promise<void> {
 		try {
-			if (this.migrationStatus) {
+			this.CancelMigrationError = undefined;
+			if (this.migration) {
 				const cutoverStartTime = new Date().toString();
 				await stopMigration(
-					this._migration.azureAccount,
-					this._migration.subscription,
-					this.migrationStatus,
-					this._migration.sessionId!
-				);
+					this.serviceContext.azureAccount!,
+					this.serviceContext.subscription!,
+					this.migration);
 				sendSqlMigrationActionEvent(
 					TelemetryViews.MigrationCutoverDialog,
 					TelemetryAction.CancelMigration,
 					{
-						'sessionId': this._migration.sessionId!,
-						'cutoverStartTime': cutoverStartTime
+						...this.getTelemetryProps(this.serviceContext, this.migration),
+						'migrationMode': getMigrationMode(this.migration),
+						'cutoverStartTime': cutoverStartTime,
 					},
 					{}
 				);
 			}
 		} catch (error) {
-			console.log(error);
+			this.CancelMigrationError = error;
+			logError(TelemetryViews.MigrationCutoverDialog, 'CancelMigrationError', error);
 		}
 		return undefined!;
 	}
 
-	public isBlobMigration(): boolean {
-		return this._migration.migrationContext.properties.backupConfiguration?.sourceLocation?.azureBlob !== undefined;
-	}
-
 	public confirmCutoverStepsString(): string {
-		if (this.isBlobMigration()) {
+		if (isBlobMigration(this.migration)) {
 			return `${constants.CUTOVER_HELP_STEP1}
 			${constants.CUTOVER_HELP_STEP2_BLOB_CONTAINER}
 			${constants.CUTOVER_HELP_STEP3_BLOB_CONTAINER}`;
@@ -113,22 +102,34 @@ export class MigrationCutoverDialogModel {
 	}
 
 	public getLastBackupFileRestoredName(): string | undefined {
-		return this.migrationStatus.properties.migrationStatusDetails?.lastRestoredFilename;
+		return this.migration.properties.migrationStatusDetails?.lastRestoredFilename;
 	}
 
 	public getPendingLogBackupsCount(): number | undefined {
-		return this.migrationStatus.properties.migrationStatusDetails?.pendingLogBackupsCount;
+		return this.migration.properties.migrationStatusDetails?.pendingLogBackupsCount;
 	}
 
-	public getPendingfiles(): BackupFileInfo[] {
+	public getPendingFiles(): BackupFileInfo[] {
 		const files: BackupFileInfo[] = [];
-		this.migrationStatus.properties.migrationStatusDetails?.activeBackupSets?.forEach(abs => {
+		this.migration.properties.migrationStatusDetails?.activeBackupSets?.forEach(abs => {
 			abs.listOfBackupFiles.forEach(f => {
-				if (f.status !== 'Restored') {
+				if (f.status !== constants.BackupFileInfoStatus.Restored) {
 					files.push(f);
 				}
 			});
 		});
 		return files;
+	}
+
+	private getTelemetryProps(serviceContext: MigrationServiceContext, migration: DatabaseMigration) {
+		return {
+			'subscriptionId': serviceContext.subscription!.id,
+			'resourceGroup': getResourceGroupFromId(migration.id),
+			'sqlServerName': migration.properties.sourceServerName,
+			'sourceDatabaseName': migration.properties.sourceDatabaseName,
+			'targetType': getMigrationTargetType(migration),
+			'targetDatabaseName': migration.name,
+			'targetServerName': getMigrationTargetName(migration),
+		};
 	}
 }

@@ -10,15 +10,14 @@ import * as vscode from 'vscode';
 import * as sinon from 'sinon';
 import 'mocha';
 
-import { azureResource } from 'azureResource';
 import { AzureResourceDatabaseTreeDataProvider } from '../../../../azureResource/providers/database/databaseTreeDataProvider';
 import { AzureResourceItemType } from '../../../../azureResource/constants';
-import { IAzureResourceService } from '../../../../azureResource/interfaces';
-import { AzureAccount } from 'azurecore';
+import { AzureAccount, azureResource } from 'azurecore';
 import settings from '../../../../account-provider/providerSettings';
+import { DATABASE_PROVIDER_ID } from '../../../../constants';
 
 // Mock services
-let mockDatabaseService: TypeMoq.IMock<IAzureResourceService<azureResource.AzureResourceDatabase>>;
+let mockDatabaseService: TypeMoq.IMock<azureResource.IAzureResourceService>;
 let mockExtensionContext: TypeMoq.IMock<vscode.ExtensionContext>;
 
 // Mock test data
@@ -36,6 +35,10 @@ const mockAccount: AzureAccount = {
 	properties: {
 		providerSettings: settings[0].metadata,
 		isMsAccount: true,
+		owningTenant: {
+			id: 'tenantId',
+			displayName: 'tenantDisplayName',
+		},
 		tenants: []
 	},
 	isStale: false
@@ -73,6 +76,8 @@ const mockDatabases: azureResource.AzureResourceDatabase[] = [
 	{
 		name: 'mock database 1',
 		id: 'mock-id-1',
+		provider: DATABASE_PROVIDER_ID,
+		tenant: 'mockTenantId',
 		serverName: 'mock database server 1',
 		serverFullName: 'mock database server full name 1',
 		loginName: 'mock login',
@@ -85,6 +90,8 @@ const mockDatabases: azureResource.AzureResourceDatabase[] = [
 	{
 		name: 'mock database 2',
 		id: 'mock-id-2',
+		provider: DATABASE_PROVIDER_ID,
+		tenant: 'mockTenantId',
 		serverName: 'mock database server 2',
 		serverFullName: 'mock database server full name 2',
 		loginName: 'mock login',
@@ -98,14 +105,12 @@ const mockDatabases: azureResource.AzureResourceDatabase[] = [
 
 describe('AzureResourceDatabaseTreeDataProvider.info', function (): void {
 	beforeEach(() => {
-		mockDatabaseService = TypeMoq.Mock.ofType<IAzureResourceService<azureResource.AzureResourceDatabase>>();
+		mockDatabaseService = TypeMoq.Mock.ofType<azureResource.IAzureResourceService>();
 		mockExtensionContext = TypeMoq.Mock.ofType<vscode.ExtensionContext>();
 	});
 
 	it('Should be correct when created.', async function (): Promise<void> {
-		const treeDataProvider = new AzureResourceDatabaseTreeDataProvider(mockDatabaseService.object, mockExtensionContext.object);
-
-		const treeItem = await treeDataProvider.getTreeItem(mockResourceRootNode);
+		const treeItem = mockResourceRootNode.treeItem;
 		should(treeItem.id).equal(mockResourceRootNode.treeItem.id);
 		should(treeItem.label).equal(mockResourceRootNode.treeItem.label);
 		should(treeItem.collapsibleState).equal(mockResourceRootNode.treeItem.collapsibleState);
@@ -115,7 +120,7 @@ describe('AzureResourceDatabaseTreeDataProvider.info', function (): void {
 
 describe('AzureResourceDatabaseTreeDataProvider.getChildren', function (): void {
 	beforeEach(() => {
-		mockDatabaseService = TypeMoq.Mock.ofType<IAzureResourceService<azureResource.AzureResourceDatabase>>();
+		mockDatabaseService = TypeMoq.Mock.ofType<azureResource.IAzureResourceService>();
 		mockExtensionContext = TypeMoq.Mock.ofType<vscode.ExtensionContext>();
 
 		sinon.stub(azdata.accounts, 'getAccountSecurityToken').returns(Promise.resolve(mockToken));
@@ -130,19 +135,16 @@ describe('AzureResourceDatabaseTreeDataProvider.getChildren', function (): void 
 	it('Should return container node when element is undefined.', async function (): Promise<void> {
 		const treeDataProvider = new AzureResourceDatabaseTreeDataProvider(mockDatabaseService.object, mockExtensionContext.object);
 
-		const children = await treeDataProvider.getChildren();
+		const children = await treeDataProvider.getRootChildren();
 
 		should(children).Array();
 		should(children.length).equal(1);
 
 		const child = children[0];
-		should(child.account).undefined();
-		should(child.subscription).undefined();
-		should(child.tenantId).undefined();
-		should(child.treeItem.id).equal('azure.resource.providers.database.treeDataProvider.databaseContainer');
-		should(child.treeItem.label).equal('SQL database');
-		should(child.treeItem.collapsibleState).equal(vscode.TreeItemCollapsibleState.Collapsed);
-		should(child.treeItem.contextValue).equal('azure.resource.itemType.databaseContainer');
+		should(child.id).equal('azure.resource.providers.database.treeDataProvider.databaseContainer');
+		should(child.label).equal('SQL databases');
+		should(child.collapsibleState).equal(vscode.TreeItemCollapsibleState.Collapsed);
+		should(child.contextValue).equal('azure.resource.itemType.databaseContainer');
 	});
 
 	it('Should return resource nodes when it is container node.', async function (): Promise<void> {
@@ -160,10 +162,13 @@ describe('AzureResourceDatabaseTreeDataProvider.getChildren', function (): void 
 			should(child.account).equal(mockAccount);
 			should(child.subscription).equal(mockSubscription);
 			should(child.tenantId).equal(mockTenantId);
-			should(child.treeItem.id).equal(`databaseServer_${database.serverFullName}.database_${database.name}`);
+			should(child.treeItem.id).equal(`database_${mockAccount.key.accountId}${database.tenant}${database.serverFullName}.database_${database.id}`);
 			should(child.treeItem.label).equal(`${database.name} (${database.serverName})`);
 			should(child.treeItem.collapsibleState).equal(vscode.TreeItemCollapsibleState.Collapsed);
 			should(child.treeItem.contextValue).equal(AzureResourceItemType.database);
+
+			// Authentication type should be empty string by default to support setting 'Sql: Default Authentication Type'.
+			should(child.treeItem.payload!.authenticationType).equal('');
 		}
 	});
 });

@@ -12,7 +12,6 @@ import {
 import { GroupLayout, GroupContainerProperties, CssStyles } from 'azdata';
 
 import { ContainerBase } from 'sql/workbench/browser/modelComponents/componentBase';
-import { endsWith } from 'vs/base/common/strings';
 import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { KeyCode } from 'vs/base/common/keyCodes';
 import * as DOM from 'vs/base/browser/dom';
@@ -23,9 +22,10 @@ import { ILogService } from 'vs/platform/log/common/log';
 	selector: 'modelview-groupContainer',
 	template: `
 		<div *ngIf="hasHeader()" [class]="getHeaderClass()" (click)="changeState()" (keydown)="onKeyDown($event)" [tabindex]="isCollapsible()? 0 : -1" [attr.role]="isCollapsible() ? 'button' : null" [attr.aria-expanded]="isCollapsible() ? !collapsed : null">
-				{{_containerLayout.header}}
+				{{header}}
 		</div>
 		<!-- This extra div is needed so that the expanded state of the header is updated correctly. See https://github.com/microsoft/azuredatastudio/pull/16499 for more details -->
+		<fieldset [attr.aria-label]="header" class="modelview-group-fieldset">
 		<div>
 			<div #container *ngIf="items" class="modelview-group-container" [ngStyle]="CSSStyles">
 				<ng-container *ngFor="let item of items">
@@ -38,6 +38,7 @@ import { ILogService } from 'vs/platform/log/common/log';
 				</ng-container>
 			</div>
 		</div>
+		</fieldset>
 	`
 })
 export default class GroupContainer extends ContainerBase<GroupLayout, GroupContainerProperties> implements IComponent, OnDestroy, AfterViewInit {
@@ -96,6 +97,10 @@ export default class GroupContainer extends ContainerBase<GroupLayout, GroupCont
 		return this.getPropertyOrDefault<boolean>((props) => props.collapsed, false);
 	}
 
+	public get header(): string {
+		return this._containerLayout?.header ?? '';
+	}
+
 	private hasHeader(): boolean {
 		return this._containerLayout && !!this._containerLayout.header;
 	}
@@ -107,7 +112,7 @@ export default class GroupContainer extends ContainerBase<GroupLayout, GroupCont
 	public getContainerWidth(): string {
 		if (this._containerLayout && this._containerLayout.width) {
 			let width: string = this._containerLayout.width.toString();
-			if (!endsWith(width, '%') && !endsWith(width.toLowerCase(), 'px')) {
+			if (!width.endsWith('%') && !width.toLowerCase().endsWith('px')) {
 				width = width + 'px';
 			}
 			return width;

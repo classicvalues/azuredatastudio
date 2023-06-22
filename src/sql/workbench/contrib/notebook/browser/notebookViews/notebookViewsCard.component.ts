@@ -3,36 +3,38 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import 'vs/css!./cellToolbar';
-import * as DOM from 'vs/base/browser/dom';
-import { Component, OnInit, Input, ViewChild, TemplateRef, ElementRef, Inject, Output, EventEmitter, ChangeDetectorRef, forwardRef, SimpleChanges } from '@angular/core';
+import { Component, OnInit, Input, ViewChild, TemplateRef, ElementRef, Inject, Output, EventEmitter, ChangeDetectorRef, forwardRef, SimpleChange } from '@angular/core';
 import { CellExecutionState, ICellModel } from 'sql/workbench/services/notebook/browser/models/modelInterfaces';
 import { NotebookModel } from 'sql/workbench/services/notebook/browser/models/notebookModel';
-import { DEFAULT_VIEW_CARD_HEIGHT, DEFAULT_VIEW_CARD_WIDTH } from 'sql/workbench/services/notebook/browser/notebookViews/notebookViewModel';
-import { CellChangeEventType, INotebookView, INotebookViewCell } from 'sql/workbench/services/notebook/browser/notebookViews/notebookViews';
+import { DEFAULT_VIEW_CARD_HEIGHT, DEFAULT_VIEW_CARD_WIDTH, ViewsTab } from 'sql/workbench/services/notebook/browser/notebookViews/notebookViewModel';
+import { CellChangeEventType, INotebookView, INotebookViewCard } from 'sql/workbench/services/notebook/browser/notebookViews/notebookViews';
 import { ITaskbarContent, Taskbar } from 'sql/base/browser/ui/taskbar/taskbar';
 import { CellContext } from 'sql/workbench/contrib/notebook/browser/cellViews/codeActions';
-import { RunCellAction, HideCellAction, ViewCellToggleMoreActions } from 'sql/workbench/contrib/notebook/browser/notebookViews/notebookViewsActions';
+import { RunCellAction, HideCellAction, ViewCellToggleMoreAction, ViewCellToggleMoreActionViewItem } from 'sql/workbench/contrib/notebook/browser/notebookViews/notebookViewsActions';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { CellTypes } from 'sql/workbench/services/notebook/common/contracts';
 import { AngularDisposable } from 'sql/base/browser/lifecycle';
 import { IColorTheme, ICssStyleCollector, registerThemingParticipant } from 'vs/platform/theme/common/themeService';
 import { cellBorder, notebookToolbarSelectBackground } from 'sql/platform/theme/common/colorRegistry';
+import { TabComponent } from 'sql/base/browser/ui/panel/tab.component';
+import { EDITOR_GROUP_HEADER_TABS_BACKGROUND, TAB_ACTIVE_BACKGROUND, TAB_BORDER, TAB_INACTIVE_BACKGROUND } from 'vs/workbench/common/theme';
 
 @Component({
 	selector: 'view-card-component',
 	templateUrl: decodeURI(require.toUrl('./notebookViewsCard.component.html'))
 })
 export class NotebookViewsCardComponent extends AngularDisposable implements OnInit {
+	cell: ICellModel;
+
 	private _actionbar: Taskbar;
-	private _metadata: INotebookViewCell;
 	private _executionState: CellExecutionState;
 	private _pendingReinitialize: boolean = false;
 
-	public _cellToggleMoreActions: ViewCellToggleMoreActions;
-
-	@Input() cell: ICellModel;
+	@Input() card: INotebookViewCard;
+	@Input() cells: ICellModel[];
 	@Input() model: NotebookModel;
 	@Input() activeView: INotebookView;
+	@Input() activeTab: ViewsTab;
 	@Input() meta: boolean;
 	@Input() ready: boolean;
 	@Output() onChange: EventEmitter<any> = new EventEmitter();
@@ -49,26 +51,14 @@ export class NotebookViewsCardComponent extends AngularDisposable implements OnI
 	}
 
 	ngOnInit() {
-		this.initActionBar();
-	}
-
-	ngAfterViewInit() {
 		this.initialize();
 	}
 
-	ngOnChanges(changes: SimpleChanges) {
-		if (this.activeView && changes['activeView'] && changes['activeView'].currentValue?.guid !== changes['activeView'].previousValue?.guid) {
-			this._metadata = this.activeView.getCellMetadata(this.cell);
-			this._pendingReinitialize = true;
-		}
+	ngOnChanges(changes: { [propKey: string]: SimpleChange }) {
 		this.detectChanges();
 	}
 
-	ngAfterContentInit() {
-		if (this.activeView) {
-			this._metadata = this.activeView.getCellMetadata(this.cell);
-			this._pendingReinitialize = true;
-		}
+	ngAfterViewInit() {
 		this.detectChanges();
 	}
 
@@ -76,6 +66,27 @@ export class NotebookViewsCardComponent extends AngularDisposable implements OnI
 		if (this._pendingReinitialize) {
 			this._pendingReinitialize = false;
 			this.initialize();
+		}
+	}
+
+	handleTabChange(selectedTab: TabComponent) {
+		const tab = this.tabs.find(t => t.id === selectedTab.identifier);
+		if (tab && this.cell?.cellGuid !== tab.cell?.guid) {
+			this.cell = this.cells.find(c => c.cellGuid === tab.cell.guid);
+			this.model.updateActiveCell(this.cell);
+			this.changed('active');
+
+			this.initActionBar();
+		}
+	}
+
+	handleTabClose(selectedTab: TabComponent) {
+		const tab = this.tabs.find(t => t.id === selectedTab.identifier);
+		if (tab) {
+			const cell = this.cells.find(c => c.cellGuid === tab.cell.guid);
+			if (cell) {
+				this.activeView.hideCell(cell);
+			}
 		}
 	}
 
@@ -87,7 +98,15 @@ export class NotebookViewsCardComponent extends AngularDisposable implements OnI
 
 	public initialize(): void {
 		this.initActionBar();
+		if (this.card.activeTab !== undefined) {
+			this.cell = this.cells.find(c => c.cellGuid === this.card.activeTab.cell.guid);
+		}
+
 		this.detectChanges();
+	}
+
+	public get tabs(): ViewsTab[] {
+		return this.card?.tabs ?? [];
 	}
 
 	initActionBar() {
@@ -99,7 +118,14 @@ export class NotebookViewsCardComponent extends AngularDisposable implements OnI
 				this._actionbar.dispose();
 			}
 
-			this._actionbar = new Taskbar(this._actionbarRef.nativeElement);
+			this._actionbar = new Taskbar(this._actionbarRef.nativeElement, {
+				actionViewItemProvider: action => {
+					if (action.id === ViewCellToggleMoreAction.ID) {
+						return this._instantiationService.createInstance(ViewCellToggleMoreActionViewItem, action, this._actionbar.actionRunner, context);
+					}
+					return undefined;
+				}
+			});
 			this._actionbar.context = { target: this._actionbarRef.nativeElement };
 
 			if (this.cell.cellType === CellTypes.Code) {
@@ -110,10 +136,8 @@ export class NotebookViewsCardComponent extends AngularDisposable implements OnI
 			let hideButton = new HideCellAction(this.hide, this);
 			taskbarContent.push({ action: hideButton });
 
-			let moreActionsContainer = DOM.$('li.action-item');
-			this._cellToggleMoreActions = this._instantiationService.createInstance(ViewCellToggleMoreActions);
-			this._cellToggleMoreActions.onInit(moreActionsContainer, context);
-			taskbarContent.push({ element: moreActionsContainer });
+			const viewCellToggleMoreAction = this._instantiationService.createInstance(ViewCellToggleMoreAction);
+			taskbarContent.push({ action: viewCellToggleMoreAction });
 
 			this._actionbar.setContent(taskbarContent);
 		}
@@ -123,9 +147,11 @@ export class NotebookViewsCardComponent extends AngularDisposable implements OnI
 		return this._item;
 	}
 
+
 	changed(event: CellChangeEventType) {
 		this.onChange.emit({ cell: this.cell, event: event });
 	}
+
 
 	get displayInputModal(): boolean {
 		return this.awaitingInput;
@@ -158,8 +184,13 @@ export class NotebookViewsCardComponent extends AngularDisposable implements OnI
 		this.changed('hide');
 	}
 
-	public get metadata(): INotebookViewCell {
-		return this._metadata;
+
+	public get metadata(): INotebookViewCard {
+		return this.card;
+	}
+
+	public get guid(): string {
+		return this.metadata.guid;
 	}
 
 	public get width(): number {
@@ -186,7 +217,7 @@ export class NotebookViewsCardComponent extends AngularDisposable implements OnI
 			return true;
 		}
 
-		if (!this._metadata) { //Means not initialized
+		if (!this.cell) { //Means not initialized
 			return false;
 		}
 
@@ -208,13 +239,60 @@ export class NotebookViewsCardComponent extends AngularDisposable implements OnI
 registerThemingParticipant((theme: IColorTheme, collector: ICssStyleCollector) => {
 	const cellBorderColor = theme.getColor(cellBorder);
 	if (cellBorderColor) {
-		collector.addRule(`.notebookEditor .nb-grid-stack .notebook-cell.active .actionbar { border-color: ${cellBorderColor};}`);
-		collector.addRule(`.notebookEditor .nb-grid-stack .notebook-cell.active .actionbar .codicon:before { background-color: ${cellBorderColor};}`);
+		collector.addRule(`.notebookEditor .nb-grid-stack .actionbar { border-color: ${cellBorderColor};}`);
+		collector.addRule(`.notebookEditor .nb-grid-stack .actionbar .codicon:before { background-color: ${cellBorderColor};}`);
 	}
 
 	// Cell toolbar background
 	const notebookToolbarSelectBackgroundColor = theme.getColor(notebookToolbarSelectBackground);
 	if (notebookToolbarSelectBackgroundColor) {
 		collector.addRule(`.notebookEditor .nb-grid-stack .notebook-cell.active .actionbar { background-color: ${notebookToolbarSelectBackgroundColor};}`);
+	}
+
+
+	const tabBorder = theme.getColor(TAB_BORDER);
+	const tabBackground = theme.getColor(TAB_INACTIVE_BACKGROUND);
+	const tabActiveBackground = theme.getColor(TAB_ACTIVE_BACKGROUND);
+
+	const headerBackground = theme.getColor(EDITOR_GROUP_HEADER_TABS_BACKGROUND);
+	if (headerBackground) {
+		collector.addRule(`
+			.notebook-cell .grid-stack-header {
+				background-color: ${headerBackground.toString()};
+			}
+		`);
+	}
+
+	if (tabBackground && tabBorder) {
+		collector.addRule(`
+		.notebook-cell .tabbedPanel.horizontal > .title .tabList {
+			border-color: ${tabBorder.toString()};
+			background-color: ${tabBackground.toString()};
+		}
+
+		.notebook-cell .tabbedPanel.horizontal > .title .tabList .tab-header {
+			border-right: 1px solid ${tabBorder.toString()};
+			background-color: ${tabBackground.toString()};
+			margin: 0;
+		}
+
+		.notebook-cell .tabbedPanel.horizontal > .title .tabList a.action-label.codicon.close {
+			background-size: 9px 9px !important;
+			margin-top: -1px;
+		}
+
+		.notebook-cell .tabbedPanel.horizontal > .title .tabList .actions-container {
+			margin-right: 0px;
+			margin-left: 8px;
+		}
+		`);
+	}
+
+	if (tabActiveBackground) {
+		collector.addRule(`
+		.notebook-cell .tabbedPanel.horizontal > .title .tabList .tab-header.active {
+			background-color: ${tabActiveBackground.toString()};
+		}
+		`);
 	}
 });

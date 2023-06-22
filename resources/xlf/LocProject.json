@@ -28,26 +28,14 @@
           "OutputPath": "resources\\xlf"
         },
 		{
-          "SourceFile": "resources\\xlf\\en\\azdata.xlf",
-          "LclFile": "resources\\localization\\LCL\\{Lang}\\azdata.xlf.lcl",
+          "SourceFile": "resources\\xlf\\en\\azcli.xlf",
+          "LclFile": "resources\\localization\\LCL\\{Lang}\\azcli.xlf.lcl",
           "CopyOption": "LangIDOnPath",
           "OutputPath": "resources\\xlf"
         },
 		{
           "SourceFile": "resources\\xlf\\en\\azurecore.xlf",
           "LclFile": "resources\\localization\\LCL\\{Lang}\\azurecore.xlf.lcl",
-          "CopyOption": "LangIDOnPath",
-          "OutputPath": "resources\\xlf"
-        },
-		{
-          "SourceFile": "resources\\xlf\\en\\azurehybridtoolkit.xlf",
-          "LclFile": "resources\\localization\\LCL\\{Lang}\\azurehybridtoolkit.xlf.lcl",
-          "CopyOption": "LangIDOnPath",
-          "OutputPath": "resources\\xlf"
-        },
-		{
-          "SourceFile": "resources\\xlf\\en\\big-data-cluster.xlf",
-          "LclFile": "resources\\localization\\LCL\\{Lang}\\big-data-cluster.xlf.lcl",
           "CopyOption": "LangIDOnPath",
           "OutputPath": "resources\\xlf"
         },
@@ -70,6 +58,12 @@
           "OutputPath": "resources\\xlf"
         },
 		{
+          "SourceFile": "resources\\xlf\\en\\git.xlf",
+          "LclFile": "resources\\localization\\LCL\\{Lang}\\git.xlf.lcl",
+          "CopyOption": "LangIDOnPath",
+          "OutputPath": "resources\\xlf"
+        },
+		{
           "SourceFile": "resources\\xlf\\en\\import.xlf",
           "LclFile": "resources\\localization\\LCL\\{Lang}\\import.xlf.lcl",
           "CopyOption": "LangIDOnPath",
@@ -84,12 +78,6 @@
 		{
           "SourceFile": "resources\\xlf\\en\\machine-learning.xlf",
           "LclFile": "resources\\localization\\LCL\\{Lang}\\machine-learning.xlf.lcl",
-          "CopyOption": "LangIDOnPath",
-          "OutputPath": "resources\\xlf"
-        },
-		{
-          "SourceFile": "resources\\xlf\\en\\Microsoft.sqlservernotebook.xlf",
-          "LclFile": "resources\\localization\\LCL\\{Lang}\\Microsoft.sqlservernotebook.xlf.lcl",
           "CopyOption": "LangIDOnPath",
           "OutputPath": "resources\\xlf"
         },
@@ -126,6 +114,12 @@
 		{
           "SourceFile": "resources\\xlf\\en\\schema-compare.xlf",
           "LclFile": "resources\\localization\\LCL\\{Lang}\\schema-compare.xlf.lcl",
+          "CopyOption": "LangIDOnPath",
+          "OutputPath": "resources\\xlf"
+        },
+		{
+          "SourceFile": "resources\\xlf\\en\\server-report.xlf",
+          "LclFile": "resources\\localization\\LCL\\{Lang}\\server-report.xlf.lcl",
           "CopyOption": "LangIDOnPath",
           "OutputPath": "resources\\xlf"
         },

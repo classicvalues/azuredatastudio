@@ -7,7 +7,7 @@ import 'vs/css!./media/actions';
 
 import { localize } from 'vs/nls';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
-import { domEvent } from 'vs/base/browser/event';
+import { DomEmitter } from 'vs/base/browser/event';
 import { Color } from 'vs/base/common/color';
 import { Event } from 'vs/base/common/event';
 import { IDisposable, toDisposable, dispose, Disposable, DisposableStore } from 'vs/base/common/lifecycle';
@@ -19,7 +19,7 @@ import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { timeout } from 'vs/base/common/async';
 import { ILayoutService } from 'vs/platform/layout/browser/layoutService';
 import { Registry } from 'vs/platform/registry/common/platform';
-import { registerAction2, Action2 } from 'vs/platform/actions/common/actions';
+import { registerAction2, Action2, MenuRegistry } from 'vs/platform/actions/common/actions';
 import { IStorageService } from 'vs/platform/storage/common/storage';
 import { clamp } from 'vs/base/common/numbers';
 import { KeyCode } from 'vs/base/common/keyCodes';
@@ -48,9 +48,7 @@ class InspectContextKeysAction extends Action2 {
 
 		const stylesheet = createStyleSheet();
 		disposables.add(toDisposable(() => {
-			if (stylesheet.parentNode) {
-				stylesheet.parentNode.removeChild(stylesheet);
-			}
+			stylesheet.parentNode?.removeChild(stylesheet);
 		}));
 		createCSSRule('*', 'cursor: crosshair !important;', stylesheet);
 
@@ -63,8 +61,8 @@ class InspectContextKeysAction extends Action2 {
 		hoverFeedback.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
 		hoverFeedback.style.zIndex = '1000';
 
-		const onMouseMove = domEvent(document.body, 'mousemove', true);
-		disposables.add(onMouseMove(e => {
+		const onMouseMove = disposables.add(new DomEmitter(document.body, 'mousemove', true));
+		disposables.add(onMouseMove.event(e => {
 			const target = e.target as HTMLElement;
 			const position = getDomNodePagePosition(target);
 
@@ -74,11 +72,11 @@ class InspectContextKeysAction extends Action2 {
 			hoverFeedback.style.height = `${position.height}px`;
 		}));
 
-		const onMouseDown = Event.once(domEvent(document.body, 'mousedown', true));
-		onMouseDown(e => { e.preventDefault(); e.stopPropagation(); }, null, disposables);
+		const onMouseDown = disposables.add(new DomEmitter(document.body, 'mousedown', true));
+		Event.once(onMouseDown.event)(e => { e.preventDefault(); e.stopPropagation(); }, null, disposables);
 
-		const onMouseUp = Event.once(domEvent(document.body, 'mouseup', true));
-		onMouseUp(e => {
+		const onMouseUp = disposables.add(new DomEmitter(document.body, 'mouseup', true));
+		Event.once(onMouseUp.event)(e => {
 			e.preventDefault();
 			e.stopPropagation();
 
@@ -120,9 +118,9 @@ class ToggleScreencastModeAction extends Action2 {
 		const mouseMarker = append(container, $('.screencast-mouse'));
 		disposables.add(toDisposable(() => mouseMarker.remove()));
 
-		const onMouseDown = domEvent(container, 'mousedown', true);
-		const onMouseUp = domEvent(container, 'mouseup', true);
-		const onMouseMove = domEvent(container, 'mousemove', true);
+		const onMouseDown = disposables.add(new DomEmitter(container, 'mousedown', true));
+		const onMouseUp = disposables.add(new DomEmitter(container, 'mouseup', true));
+		const onMouseMove = disposables.add(new DomEmitter(container, 'mousemove', true));
 
 		const updateMouseIndicatorColor = () => {
 			mouseMarker.style.borderColor = Color.fromHex(configurationService.getValue<string>('screencastMode.mouseIndicatorColor')).toString();
@@ -139,17 +137,17 @@ class ToggleScreencastModeAction extends Action2 {
 		updateMouseIndicatorColor();
 		updateMouseIndicatorSize();
 
-		disposables.add(onMouseDown(e => {
+		disposables.add(onMouseDown.event(e => {
 			mouseMarker.style.top = `${e.clientY - mouseIndicatorSize / 2}px`;
 			mouseMarker.style.left = `${e.clientX - mouseIndicatorSize / 2}px`;
 			mouseMarker.style.display = 'block';
 
-			const mouseMoveListener = onMouseMove(e => {
+			const mouseMoveListener = onMouseMove.event(e => {
 				mouseMarker.style.top = `${e.clientY - mouseIndicatorSize / 2}px`;
 				mouseMarker.style.left = `${e.clientX - mouseIndicatorSize / 2}px`;
 			});
 
-			Event.once(onMouseUp)(() => {
+			Event.once(onMouseUp.event)(() => {
 				mouseMarker.style.display = 'none';
 				mouseMoveListener.dispose();
 			});
@@ -197,17 +195,17 @@ class ToggleScreencastModeAction extends Action2 {
 			}
 		}));
 
-		const onKeyDown = domEvent(window, 'keydown', true);
+		const onKeyDown = disposables.add(new DomEmitter(window, 'keydown', true));
 		let keyboardTimeout: IDisposable = Disposable.None;
 		let length = 0;
 
-		disposables.add(onKeyDown(e => {
+		disposables.add(onKeyDown.event(e => {
 			keyboardTimeout.dispose();
 
 			const event = new StandardKeyboardEvent(e);
 			const shortcut = keybindingService.softDispatch(event, event.target);
 
-			if (shortcut || !configurationService.getValue<boolean>('screencastMode.onlyKeyboardShortcuts')) {
+			if (shortcut?.commandId || !configurationService.getValue('screencastMode.onlyKeyboardShortcuts')) {
 				if (
 					event.ctrlKey || event.altKey || event.metaKey || event.shiftKey
 					|| length > 20
@@ -217,11 +215,37 @@ class ToggleScreencastModeAction extends Action2 {
 					length = 0;
 				}
 
+				const format = configurationService.getValue<'keys' | 'command' | 'commandWithGroup' | 'commandAndKeys' | 'commandWithGroupAndKeys'>('screencastMode.keyboardShortcutsFormat');
 				const keybinding = keybindingService.resolveKeyboardEvent(event);
-				const label = keybinding.getLabel();
-				const key = $('span.key', {}, label || '');
+				const command = shortcut?.commandId ? MenuRegistry.getCommand(shortcut.commandId) : null;
+
+				let titleLabel = '';
+				let keyLabel = keybinding.getLabel();
+
+				if (command) {
+					titleLabel = typeof command.title === 'string' ? command.title : command.title.value;
+
+					if ((format === 'commandWithGroup' || format === 'commandWithGroupAndKeys') && command.category) {
+						titleLabel = `${typeof command.category === 'string' ? command.category : command.category.value}: ${titleLabel} `;
+					}
+
+					if (shortcut?.commandId) {
+						const fullKeyLabel = keybindingService.lookupKeybinding(shortcut.commandId);
+						if (fullKeyLabel) {
+							keyLabel = fullKeyLabel.getLabel();
+						}
+					}
+				}
+
+				if (format !== 'keys' && titleLabel) {
+					append(keyboardMarker, $('span.title', {}, `${titleLabel} `));
+				}
+
+				if (!configurationService.getValue('screencastMode.onlyKeyboardShortcuts') || !titleLabel || shortcut?.commandId && (format === 'keys' || format === 'commandAndKeys' || format === 'commandWithGroupAndKeys')) {
+					append(keyboardMarker, $('span.key', {}, keyLabel || ''));
+				}
+
 				length++;
-				append(keyboardMarker, key);
 			}
 
 			const promise = timeout(keyboardMarkerTimeout);
@@ -249,7 +273,7 @@ class LogStorageAction extends Action2 {
 	}
 
 	run(accessor: ServicesAccessor): void {
-		accessor.get(IStorageService).logStorage();
+		accessor.get(IStorageService).log();
 	}
 }
 
@@ -317,6 +341,18 @@ configurationRegistry.registerConfiguration({
 			minimum: 20,
 			maximum: 100,
 			description: localize('screencastMode.fontSize', "Controls the font size (in pixels) of the screencast mode keyboard.")
+		},
+		'screencastMode.keyboardShortcutsFormat': {
+			enum: ['keys', 'command', 'commandWithGroup', 'commandAndKeys', 'commandWithGroupAndKeys'],
+			enumDescriptions: [
+				localize('keyboardShortcutsFormat.keys', "Keys."),
+				localize('keyboardShortcutsFormat.command', "Command title."),
+				localize('keyboardShortcutsFormat.commandWithGroup', "Command title prefixed by its group."),
+				localize('keyboardShortcutsFormat.commandAndKeys', "Command title and keys."),
+				localize('keyboardShortcutsFormat.commandWithGroupAndKeys', "Command title and keys, with the command prefixed by its group.")
+			],
+			description: localize('screencastMode.keyboardShortcutsFormat', "Controls what is displayed in the keyboard overlay when showing shortcuts."),
+			default: 'commandAndKeys'
 		},
 		'screencastMode.onlyKeyboardShortcuts': {
 			type: 'boolean',

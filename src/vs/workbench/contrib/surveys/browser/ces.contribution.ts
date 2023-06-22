@@ -1,10 +1,9 @@
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
- *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
 import * as nls from 'vs/nls';
-import { optional } from 'vs/platform/instantiation/common/instantiation';
 import { language } from 'vs/base/common/platform';
 import { IWorkbenchContributionsRegistry, IWorkbenchContribution, Extensions as WorkbenchExtensions } from 'vs/workbench/common/contributions';
 import { Registry } from 'vs/platform/registry/common/platform';
@@ -14,7 +13,7 @@ import { IProductService } from 'vs/platform/product/common/productService';
 import { LifecyclePhase } from 'vs/workbench/services/lifecycle/common/lifecycle';
 import { Severity, INotificationService } from 'vs/platform/notification/common/notification';
 import { IOpenerService } from 'vs/platform/opener/common/opener';
-import { ITASExperimentService } from 'vs/workbench/services/experiment/common/experimentService';
+import { IWorkbenchAssignmentService } from 'vs/workbench/services/assignment/common/assignmentService';
 import { URI } from 'vs/base/common/uri';
 import { platform } from 'vs/base/common/process';
 import { ThrottledDelayer } from 'vs/base/common/async';
@@ -22,7 +21,7 @@ import { Disposable } from 'vs/base/common/lifecycle';
 import { Event } from 'vs/base/common/event';
 
 const WAIT_TIME_TO_SHOW_SURVEY = 1000 * 60 * 60; // 1 hour
-const MIN_WAIT_TIME_TO_SHOW_SURVEY = 1000 * 60 * 5; // 5 minutes
+const MIN_WAIT_TIME_TO_SHOW_SURVEY = 1000 * 60 * 2; // 2 minutes
 const MAX_INSTALL_AGE = 1000 * 60 * 60 * 24; // 24 hours
 const REMIND_LATER_DELAY = 1000 * 60 * 60 * 4; // 4 hours
 const SKIP_SURVEY_KEY = 'ces/skipSurvey';
@@ -31,7 +30,7 @@ const REMIND_LATER_DATE_KEY = 'ces/remindLaterDate';
 class CESContribution extends Disposable implements IWorkbenchContribution {
 
 	private promptDelayer = this._register(new ThrottledDelayer<void>(0));
-	private readonly tasExperimentService: ITASExperimentService | undefined;
+	private readonly tasExperimentService: IWorkbenchAssignmentService | undefined;
 
 	constructor(
 		@IStorageService private readonly storageService: IStorageService,
@@ -39,7 +38,7 @@ class CESContribution extends Disposable implements IWorkbenchContribution {
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@IProductService private readonly productService: IProductService,
-		@optional(ITASExperimentService) tasExperimentService: ITASExperimentService,
+		@IWorkbenchAssignmentService tasExperimentService: IWorkbenchAssignmentService,
 	) {
 		super();
 
@@ -49,7 +48,7 @@ class CESContribution extends Disposable implements IWorkbenchContribution {
 			return;
 		}
 
-		const skipSurvey = storageService.get(SKIP_SURVEY_KEY, StorageScope.GLOBAL, '');
+		const skipSurvey = storageService.get(SKIP_SURVEY_KEY, StorageScope.APPLICATION, '');
 		if (skipSurvey) {
 			return;
 		}
@@ -58,9 +57,16 @@ class CESContribution extends Disposable implements IWorkbenchContribution {
 	}
 
 	private async promptUser() {
+		const isCandidate = await this.tasExperimentService?.getTreatment<boolean>('CESSurvey');
+		if (!isCandidate) {
+			this.skipSurvey();
+			return;
+		}
+
 		const sendTelemetry = (userReaction: 'accept' | 'remindLater' | 'neverShowAgain' | 'cancelled') => {
 			/* __GDPR__
 			"cesSurvey:popup" : {
+				"owner": "digitarald",
 				"userReaction" : { "classification": "SystemMetaData", "purpose": "FeatureInsight" }
 			}
 			*/
@@ -78,7 +84,18 @@ class CESContribution extends Disposable implements IWorkbenchContribution {
 				run: () => {
 					sendTelemetry('accept');
 					this.telemetryService.getTelemetryInfo().then(info => {
-						this.openerService.open(URI.parse(`${this.productService.cesSurveyUrl}?o=${encodeURIComponent(platform)}&v=${encodeURIComponent(this.productService.version)}&m=${encodeURIComponent(info.machineId)}}`));
+						let surveyUrl = `${this.productService.cesSurveyUrl}?o=${encodeURIComponent(platform)}&v=${encodeURIComponent(this.productService.version)}&m=${encodeURIComponent(info.machineId)}`;
+
+						const usedParams = this.productService.surveys
+							?.filter(surveyData => surveyData.surveyId && surveyData.languageId)
+							// Counts provided by contrib/surveys/browser/languageSurveys
+							.filter(surveyData => this.storageService.getNumber(`${surveyData.surveyId}.editedCount`, StorageScope.APPLICATION, 0) > 0)
+							.map(surveyData => `${encodeURIComponent(surveyData.languageId)}Lang=1`)
+							.join('&');
+						if (usedParams) {
+							surveyUrl += `&${usedParams}`;
+						}
+						this.openerService.open(URI.parse(surveyUrl));
 						this.skipSurvey();
 					});
 				}
@@ -86,7 +103,7 @@ class CESContribution extends Disposable implements IWorkbenchContribution {
 				label: nls.localize('remindLater', "Remind Me later"),
 				run: () => {
 					sendTelemetry('remindLater');
-					this.storageService.store(REMIND_LATER_DATE_KEY, new Date().toUTCString(), StorageScope.GLOBAL, StorageTarget.USER);
+					this.storageService.store(REMIND_LATER_DATE_KEY, new Date().toUTCString(), StorageScope.APPLICATION, StorageTarget.USER);
 					this.schedulePrompt();
 				}
 			}],
@@ -103,14 +120,8 @@ class CESContribution extends Disposable implements IWorkbenchContribution {
 	}
 
 	private async schedulePrompt(): Promise<void> {
-		const isCandidate = await this.tasExperimentService?.getTreatment<boolean>('CESSurvey');
-		if (!isCandidate) {
-			this.skipSurvey();
-			return;
-		}
-
 		let waitTimeToShowSurvey = 0;
-		const remindLaterDate = this.storageService.get(REMIND_LATER_DATE_KEY, StorageScope.GLOBAL, '');
+		const remindLaterDate = this.storageService.get(REMIND_LATER_DATE_KEY, StorageScope.APPLICATION, '');
 		if (remindLaterDate) {
 			const timeToRemind = new Date(remindLaterDate).getTime() + REMIND_LATER_DELAY - Date.now();
 			if (timeToRemind > 0) {
@@ -131,7 +142,9 @@ class CESContribution extends Disposable implements IWorkbenchContribution {
 			}
 		}
 		/* __GDPR__
-		"cesSurvey:schedule" : { }
+		"cesSurvey:schedule" : {
+			"owner": "digitarald"
+		}
 		*/
 		this.telemetryService.publicLog('cesSurvey:schedule');
 
@@ -141,7 +154,7 @@ class CESContribution extends Disposable implements IWorkbenchContribution {
 	}
 
 	private skipSurvey(): void {
-		this.storageService.store(SKIP_SURVEY_KEY, this.productService.version, StorageScope.GLOBAL, StorageTarget.USER);
+		this.storageService.store(SKIP_SURVEY_KEY, this.productService.version, StorageScope.APPLICATION, StorageTarget.USER);
 	}
 }
 

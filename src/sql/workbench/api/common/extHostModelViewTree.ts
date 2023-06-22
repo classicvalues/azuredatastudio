@@ -6,7 +6,7 @@
 import { localize } from 'vs/nls';
 import * as errors from 'vs/base/common/errors';
 import * as vscode from 'vscode';
-import { SqlMainContext, ExtHostModelViewTreeViewsShape, MainThreadModelViewShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
+import { ExtHostModelViewTreeViewsShape, MainThreadModelViewShape } from 'sql/workbench/api/common/sqlExtHost.protocol';
 import { ITreeComponentItem } from 'sql/workbench/common/views';
 import { CommandsConverter } from 'vs/workbench/api/common/extHostCommands';
 import { IMainContext } from 'vs/workbench/api/common/extHost.protocol';
@@ -14,9 +14,8 @@ import * as azdata from 'azdata';
 import * as  vsTreeExt from 'vs/workbench/api/common/extHostTreeViews';
 import { Emitter } from 'vs/base/common/event';
 import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
-import { assign } from 'vs/base/common/objects';
 import { ILogService } from 'vs/platform/log/common/log';
-import { TreeDataTransferDTO } from 'vs/workbench/api/common/shared/treeDataTransfer';
+import { SqlMainContext, DataTransferDTO } from 'vs/workbench/api/common/extHost.protocol';
 
 export class ExtHostModelViewTreeViews implements ExtHostModelViewTreeViewsShape {
 	private _proxy: MainThreadModelViewShape;
@@ -86,7 +85,11 @@ export class ExtHostModelViewTreeViews implements ExtHostModelViewTreeViewsShape
 		return Promise.resolve(undefined);
 	}
 
-	$onDrop(treeViewId: string, treeDataTransferDTO: TreeDataTransferDTO, newParentItemHandle: string): Promise<void> {
+	$handleDrop(destinationViewId: string, requestId: number, treeDataTransfer: DataTransferDTO, targetHandle: string | undefined, token: vscode.CancellationToken, operationUuid?: string, sourceViewId?: string, sourceTreeItemHandles?: string[]): Promise<void> {
+		return Promise.resolve(undefined);
+	}
+
+	$handleDrag(sourceViewId: string, sourceTreeItemHandles: string[], operationUuid: string, token: vscode.CancellationToken): Promise<DataTransferDTO | undefined> {
 		return Promise.resolve(undefined);
 	}
 
@@ -166,7 +169,7 @@ export class ExtHostTreeView<T> extends vsTreeExt.ExtHostTreeView<T> {
 	protected override createTreeNode(element: T, extensionTreeItem: azdata.TreeComponentItem, parent?: vsTreeExt.TreeNode | vsTreeExt.Root): vsTreeExt.TreeNode {
 		let node = super.createTreeNode(element, extensionTreeItem, parent);
 		if (node.item) {
-			node.item = assign(node.item, { checked: extensionTreeItem.checked, enabled: extensionTreeItem.enabled });
+			node.item = Object.assign(node.item, { checked: extensionTreeItem.checked, enabled: extensionTreeItem.enabled });
 		}
 		return node;
 	}

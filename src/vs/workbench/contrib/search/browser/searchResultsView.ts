@@ -8,11 +8,10 @@ import { ActionBar } from 'vs/base/browser/ui/actionbar/actionbar';
 import { CountBadge } from 'vs/base/browser/ui/countBadge/countBadge';
 import { IListVirtualDelegate } from 'vs/base/browser/ui/list/list';
 import { IListAccessibilityProvider } from 'vs/base/browser/ui/list/listWidget';
-import { ITreeNode, ITreeRenderer, ITreeDragAndDrop, ITreeDragOverReaction } from 'vs/base/browser/ui/tree/tree';
+import { ITreeNode, ITreeRenderer } from 'vs/base/browser/ui/tree/tree';
 import { IAction } from 'vs/base/common/actions';
 import { Disposable, IDisposable, dispose } from 'vs/base/common/lifecycle';
 import * as paths from 'vs/base/common/path';
-import * as resources from 'vs/base/common/resources';
 import * as nls from 'vs/nls';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { FileKind } from 'vs/platform/files/common/files';
@@ -26,10 +25,7 @@ import { IResourceLabel, ResourceLabels } from 'vs/workbench/browser/labels';
 import { RemoveAction, ReplaceAction, ReplaceAllAction, ReplaceAllInFolderAction } from 'vs/workbench/contrib/search/browser/searchActions';
 import { SearchView } from 'vs/workbench/contrib/search/browser/searchView';
 import { FileMatch, Match, RenderableMatch, SearchModel, FolderMatch } from 'vs/workbench/contrib/search/common/searchModel';
-import { IDragAndDropData } from 'vs/base/browser/dnd';
-import { fillResourceDataTransfers } from 'vs/workbench/browser/dnd';
-import { ElementsDragAndDropData } from 'vs/base/browser/ui/list/listView';
-import { URI } from 'vs/base/common/uri';
+import { isEqual } from 'vs/base/common/resources';
 
 export interface IFolderMatchTemplate {	// {{SQL CARBON EDIT}}
 	label: IResourceLabel;
@@ -58,8 +54,10 @@ export interface IMatchTemplate {	// {{SQL CARBON EDIT}}
 
 export class SearchDelegate implements IListVirtualDelegate<RenderableMatch> {
 
+	public static ITEM_HEIGHT = 22;
+
 	getHeight(element: RenderableMatch): number {
-		return 22;
+		return SearchDelegate.ITEM_HEIGHT;
 	}
 
 	getTemplateId(element: RenderableMatch): string {
@@ -116,7 +114,7 @@ export class FolderMatchRenderer extends Disposable implements ITreeRenderer<Fol
 		const folderMatch = node.element;
 		if (folderMatch.resource) {
 			const workspaceFolder = this.contextService.getWorkspaceFolder(folderMatch.resource);
-			if (workspaceFolder && resources.isEqual(workspaceFolder.uri, folderMatch.resource)) {
+			if (workspaceFolder && isEqual(workspaceFolder.uri, folderMatch.resource)) {
 				templateData.label.setFile(folderMatch.resource, { fileKind: FileKind.ROOT_FOLDER, hidePath: true });
 			} else {
 				templateData.label.setFile(folderMatch.resource, { fileKind: FileKind.FOLDER });
@@ -135,7 +133,7 @@ export class FolderMatchRenderer extends Disposable implements ITreeRenderer<Fol
 			actions.push(this.instantiationService.createInstance(ReplaceAllInFolderAction, this.searchView.getControl(), folderMatch));
 		}
 
-		actions.push(new RemoveAction(this.searchView.getControl(), folderMatch));
+		actions.push(this.instantiationService.createInstance(RemoveAction, this.searchView.getControl(), folderMatch));
 		templateData.actions.push(actions, { icon: true, label: false });
 	}
 
@@ -186,7 +184,7 @@ export class FileMatchRenderer extends Disposable implements ITreeRenderer<FileM
 	renderElement(node: ITreeNode<FileMatch, any>, index: number, templateData: IFileMatchTemplate): void {
 		const fileMatch = node.element;
 		templateData.el.setAttribute('data-resource', fileMatch.resource.toString());
-		templateData.label.setFile(fileMatch.resource, { hideIcon: false });
+		templateData.label.setFile(fileMatch.resource, { hideIcon: false, fileDecorations: { colors: true, badges: true } });
 		const count = fileMatch.count();
 		templateData.badge.setCount(count);
 		templateData.badge.setTitleFormat(count > 1 ? nls.localize('searchMatches', "{0} matches found", count) : nls.localize('searchMatch', "{0} match found", count));
@@ -197,7 +195,7 @@ export class FileMatchRenderer extends Disposable implements ITreeRenderer<FileM
 		if (this.searchModel.isReplaceActive() && count > 0) {
 			actions.push(this.instantiationService.createInstance(ReplaceAllAction, this.searchView, fileMatch));
 		}
-		actions.push(new RemoveAction(this.searchView.getControl(), fileMatch));
+		actions.push(this.instantiationService.createInstance(RemoveAction, this.searchView.getControl(), fileMatch));
 		templateData.actions.push(actions, { icon: true, label: false });
 	}
 
@@ -271,9 +269,9 @@ export class MatchRenderer extends Disposable implements ITreeRenderer<Match, vo
 
 		templateData.actions.clear();
 		if (this.searchModel.isReplaceActive()) {
-			templateData.actions.push([this.instantiationService.createInstance(ReplaceAction, this.searchView.getControl(), match, this.searchView), new RemoveAction(this.searchView.getControl(), match)], { icon: true, label: false });
+			templateData.actions.push([this.instantiationService.createInstance(ReplaceAction, this.searchView.getControl(), match, this.searchView), this.instantiationService.createInstance(RemoveAction, this.searchView.getControl(), match)], { icon: true, label: false });
 		} else {
-			templateData.actions.push([new RemoveAction(this.searchView.getControl(), match)], { icon: true, label: false });
+			templateData.actions.push([this.instantiationService.createInstance(RemoveAction, this.searchView.getControl(), match)], { icon: true, label: false });
 		}
 	}
 
@@ -339,49 +337,5 @@ export class SearchAccessibilityProvider implements IListAccessibilityProvider<R
 			return nls.localize('searchResultAria', "Found '{0}' at column {1} in line '{2}'", matchString, range.startColumn + 1, matchText);
 		}
 		return null;
-	}
-}
-
-export class SearchDND implements ITreeDragAndDrop<RenderableMatch> {
-	constructor(
-		@IInstantiationService private instantiationService: IInstantiationService
-	) { }
-
-	onDragOver(data: IDragAndDropData, targetElement: RenderableMatch, targetIndex: number, originalEvent: DragEvent): boolean | ITreeDragOverReaction {
-		return false;
-	}
-
-	getDragURI(element: RenderableMatch): string | null {
-		if (element instanceof FileMatch) {
-			return element.remove.toString();
-		}
-
-		return null;
-	}
-
-	getDragLabel?(elements: RenderableMatch[]): string | undefined {
-		if (elements.length > 1) {
-			return String(elements.length);
-		}
-
-		const element = elements[0];
-		return element instanceof FileMatch ?
-			resources.basename(element.resource) :
-			undefined;
-	}
-
-	onDragStart(data: IDragAndDropData, originalEvent: DragEvent): void {
-		const elements = (data as ElementsDragAndDropData<RenderableMatch>).elements;
-		const resources: URI[] = elements
-			.filter<FileMatch>((e): e is FileMatch => e instanceof FileMatch)
-			.map((fm: FileMatch) => fm.resource);
-
-		if (resources.length) {
-			// Apply some datatransfer types to allow for dragging the element outside of the application
-			this.instantiationService.invokeFunction(fillResourceDataTransfers, resources, undefined, originalEvent);
-		}
-	}
-
-	drop(data: IDragAndDropData, targetElement: RenderableMatch, targetIndex: number, originalEvent: DragEvent): void {
 	}
 }

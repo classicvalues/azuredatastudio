@@ -3,7 +3,6 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { EditorInput, IEditorInput } from 'vs/workbench/common/editor';
 import { IConnectionManagementService, IConnectableInput, INewConnectionParams } from 'sql/platform/connection/common/connectionManagement';
 import { IQueryModelService } from 'sql/workbench/services/query/common/queryModel';
 import { Event, Emitter } from 'vs/base/common/event';
@@ -18,6 +17,7 @@ import { UntitledTextEditorInput } from 'vs/workbench/services/untitled/common/u
 import { IResolvedTextEditorModel } from 'vs/editor/common/services/resolverService';
 import { IUntitledTextEditorModel, UntitledTextEditorModel } from 'vs/workbench/services/untitled/common/untitledTextEditorModel';
 import { EncodingMode } from 'vs/workbench/services/textfile/common/textfiles';
+import { EditorInput } from 'vs/workbench/common/editor/editorInput';
 
 /**
  * Input for the EditDataEditor.
@@ -44,6 +44,7 @@ export class EditDataInput extends EditorInput implements IConnectableInput {
 		private _sql: UntitledTextEditorInput,
 		private _queryString: string,
 		private _results: EditDataResultsInput,
+		private _initialConnectionUri: string,
 		@IConnectionManagementService private _connectionManagementService: IConnectionManagementService,
 		@IQueryModelService private _queryModelService: IQueryModelService,
 		@INotificationService private notificationService: INotificationService
@@ -114,7 +115,7 @@ export class EditDataInput extends EditorInput implements IConnectableInput {
 	public get objectType(): string { return this._objectType; }
 	public showResultsEditor(): void { this._showResultsEditor.fire(undefined); }
 	public override isDirty(): boolean { return false; }
-	public override save(): Promise<IEditorInput | undefined> { return Promise.resolve(undefined); }
+	public override save(): Promise<EditorInput | undefined> { return Promise.resolve(undefined); }
 	public override get typeId(): string { return EditDataInput.ID; }
 	public setBootstrappedTrue(): void { this._hasBootstrapped = true; }
 	public get resource(): URI { return this._uri; }
@@ -205,6 +206,9 @@ export class EditDataInput extends EditorInput implements IConnectableInput {
 	public override dispose(): void {
 		// Dispose our edit session then disconnect our input
 		this._queryModelService.disposeEdit(this.uri).then(() => {
+			if (this._initialConnectionUri) {
+				this._connectionManagementService.disconnect(this._initialConnectionUri);
+			}
 			return this._connectionManagementService.disconnectEditor(this, true);
 		});
 		this._queryModelService.disposeQuery(this.uri);

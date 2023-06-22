@@ -9,10 +9,19 @@ import { Event, Emitter } from 'vs/base/common/event';
 import { URI } from 'vs/base/common/uri';
 import { Disposable, IDisposable, toDisposable, DisposableStore, dispose } from 'vs/base/common/lifecycle';
 import { ResourceMap } from 'vs/base/common/map';
-import { IWorkingCopy } from 'vs/workbench/services/workingCopy/common/workingCopy';
+import { IWorkingCopy, IWorkingCopyIdentifier, IWorkingCopySaveEvent as IBaseWorkingCopySaveEvent } from 'vs/workbench/services/workingCopy/common/workingCopy';
 import { Schemas } from 'vs/base/common/network'; // {{SQL CARBON EDIT}} @chlafreniere need to block working copies of notebook editors from being tracked
+import { CELL_URI_PATH_PREFIX } from 'sql/workbench/common/constants';
 
 export const IWorkingCopyService = createDecorator<IWorkingCopyService>('workingCopyService');
+
+export interface IWorkingCopySaveEvent extends IBaseWorkingCopySaveEvent {
+
+	/**
+	 * The working copy that was saved.
+	 */
+	readonly workingCopy: IWorkingCopy;
+}
 
 export interface IWorkingCopyService {
 
@@ -40,6 +49,11 @@ export interface IWorkingCopyService {
 	 * An event for when a working copy's content changed.
 	 */
 	readonly onDidChangeContent: Event<IWorkingCopy>;
+
+	/**
+	 * An event for when a working copy was saved.
+	 */
+	readonly onDidSave: Event<IWorkingCopySaveEvent>;
 
 	//#endregion
 
@@ -91,6 +105,25 @@ export interface IWorkingCopyService {
 	 */
 	registerWorkingCopy(workingCopy: IWorkingCopy): IDisposable;
 
+	/**
+	 * Whether a working copy with the given resource or identifier
+	 * exists.
+	 */
+	has(identifier: IWorkingCopyIdentifier): boolean;
+	has(resource: URI): boolean;
+
+	/**
+	 * Returns a working copy with the given identifier or `undefined`
+	 * if no such working copy exists.
+	 */
+	get(identifier: IWorkingCopyIdentifier): IWorkingCopy | undefined;
+
+	/**
+	 * Returns all working copies with the given resource or `undefined`
+	 * if no such working copy exists.
+	 */
+	getAll(resource: URI): readonly IWorkingCopy[] | undefined;
+
 	//#endregion
 }
 
@@ -112,6 +145,9 @@ export class WorkingCopyService extends Disposable implements IWorkingCopyServic
 	private readonly _onDidChangeContent = this._register(new Emitter<IWorkingCopy>());
 	readonly onDidChangeContent = this._onDidChangeContent.event;
 
+	private readonly _onDidSave = this._register(new Emitter<IWorkingCopySaveEvent>());
+	readonly onDidSave = this._onDidSave.event;
+
 	//#endregion
 
 
@@ -125,11 +161,11 @@ export class WorkingCopyService extends Disposable implements IWorkingCopyServic
 	registerWorkingCopy(workingCopy: IWorkingCopy): IDisposable {
 		let workingCopiesForResource = this.mapResourceToWorkingCopies.get(workingCopy.resource);
 		if (workingCopiesForResource?.has(workingCopy.typeId)) {
-			throw new Error(`Cannot register more than one working copy with the same resource ${workingCopy.resource.toString(true)} and type ${workingCopy.typeId}.`);
+			throw new Error(`Cannot register more than one working copy with the same resource ${workingCopy.resource.toString()} and type ${workingCopy.typeId}.`);
 		}
 
 		// {{SQL CARBON EDIT}} @chlafreniere need to block working copies of notebook editors from being tracked
-		if (workingCopy.resource.path.includes('notebook-editor-') && workingCopy.resource.scheme === Schemas.untitled) {
+		if (workingCopy.resource.path.includes(CELL_URI_PATH_PREFIX) && workingCopy.resource.scheme === Schemas.untitled) {
 			return new DisposableStore();
 		}
 
@@ -147,6 +183,7 @@ export class WorkingCopyService extends Disposable implements IWorkingCopyServic
 		const disposables = new DisposableStore();
 		disposables.add(workingCopy.onDidChangeContent(() => this._onDidChangeContent.fire(workingCopy)));
 		disposables.add(workingCopy.onDidChangeDirty(() => this._onDidChangeDirty.fire(workingCopy)));
+		disposables.add(workingCopy.onDidSave(e => this._onDidSave.fire({ workingCopy, ...e })));
 
 		// Send some initial events
 		this._onDidRegister.fire(workingCopy);
@@ -163,7 +200,7 @@ export class WorkingCopyService extends Disposable implements IWorkingCopyServic
 		});
 	}
 
-	private unregisterWorkingCopy(workingCopy: IWorkingCopy): void {
+	protected unregisterWorkingCopy(workingCopy: IWorkingCopy): void {
 
 		// Registry (all)
 		this._workingCopies.delete(workingCopy);
@@ -179,6 +216,29 @@ export class WorkingCopyService extends Disposable implements IWorkingCopyServic
 		if (workingCopy.isDirty()) {
 			this._onDidChangeDirty.fire(workingCopy);
 		}
+	}
+
+	has(identifier: IWorkingCopyIdentifier): boolean;
+	has(resource: URI): boolean;
+	has(resourceOrIdentifier: URI | IWorkingCopyIdentifier): boolean {
+		if (URI.isUri(resourceOrIdentifier)) {
+			return this.mapResourceToWorkingCopies.has(resourceOrIdentifier);
+		}
+
+		return this.mapResourceToWorkingCopies.get(resourceOrIdentifier.resource)?.has(resourceOrIdentifier.typeId) ?? false;
+	}
+
+	get(identifier: IWorkingCopyIdentifier): IWorkingCopy | undefined {
+		return this.mapResourceToWorkingCopies.get(identifier.resource)?.get(identifier.typeId);
+	}
+
+	getAll(resource: URI): readonly IWorkingCopy[] | undefined {
+		const workingCopies = this.mapResourceToWorkingCopies.get(resource);
+		if (!workingCopies) {
+			return undefined;
+		}
+
+		return Array.from(workingCopies.values());
 	}
 
 	//#endregion

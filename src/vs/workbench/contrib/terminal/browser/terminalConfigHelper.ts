@@ -6,46 +6,44 @@
 import * as nls from 'vs/nls';
 import { EDITOR_FONT_DEFAULTS, IEditorOptions } from 'vs/editor/common/config/editorOptions';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { ITerminalConfiguration, TERMINAL_CONFIG_SECTION, DEFAULT_LETTER_SPACING, DEFAULT_LINE_HEIGHT, MINIMUM_LETTER_SPACING, LinuxDistro, MINIMUM_FONT_WEIGHT, MAXIMUM_FONT_WEIGHT, DEFAULT_FONT_WEIGHT, DEFAULT_BOLD_FONT_WEIGHT, FontWeight, ITerminalFont } from 'vs/workbench/contrib/terminal/common/terminal';
+import { ITerminalConfiguration, TERMINAL_CONFIG_SECTION, DEFAULT_LETTER_SPACING, DEFAULT_LINE_HEIGHT, MINIMUM_LETTER_SPACING, MINIMUM_FONT_WEIGHT, MAXIMUM_FONT_WEIGHT, DEFAULT_FONT_WEIGHT, DEFAULT_BOLD_FONT_WEIGHT, FontWeight, ITerminalFont } from 'vs/workbench/contrib/terminal/common/terminal';
 import Severity from 'vs/base/common/severity';
 import { INotificationService, NeverShowAgainScope } from 'vs/platform/notification/common/notification';
-import { IBrowserTerminalConfigHelper } from 'vs/workbench/contrib/terminal/browser/terminal';
+import { IBrowserTerminalConfigHelper, LinuxDistro } from 'vs/workbench/contrib/terminal/browser/terminal';
 import { Emitter, Event } from 'vs/base/common/event';
 import { basename } from 'vs/base/common/path';
 import { IExtensionManagementService } from 'vs/platform/extensionManagement/common/extensionManagement';
-import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { InstallRecommendedExtensionAction } from 'vs/workbench/contrib/extensions/browser/extensionsActions';
 import { IProductService } from 'vs/platform/product/common/productService';
-import { XTermCore } from 'vs/workbench/contrib/terminal/browser/xterm-private';
+import { IXtermCore } from 'vs/workbench/contrib/terminal/browser/xterm-private';
 import { IShellLaunchConfig } from 'vs/platform/terminal/common/terminal';
-import { isWindows } from 'vs/base/common/platform';
+import { isLinux, isWindows } from 'vs/base/common/platform';
 
 const MINIMUM_FONT_SIZE = 6;
-const MAXIMUM_FONT_SIZE = 25;
+const MAXIMUM_FONT_SIZE = 100;
 
 /**
  * Encapsulates terminal configuration logic, the primary purpose of this file is so that platform
  * specific test cases can be written.
  */
 export class TerminalConfigHelper implements IBrowserTerminalConfigHelper {
-	public panelContainer: HTMLElement | undefined;
+	panelContainer: HTMLElement | undefined;
 
 	private _charMeasureElement: HTMLElement | undefined;
 	private _lastFontMeasurement: ITerminalFont | undefined;
-	private _linuxDistro: LinuxDistro = LinuxDistro.Unknown;
-	public config!: ITerminalConfiguration;
+	protected _linuxDistro: LinuxDistro = LinuxDistro.Unknown;
+	config!: ITerminalConfiguration;
 
 	private readonly _onConfigChanged = new Emitter<void>();
-	public get onConfigChanged(): Event<void> { return this._onConfigChanged.event; }
+	get onConfigChanged(): Event<void> { return this._onConfigChanged.event; }
 
-	public constructor(
+	constructor(
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IExtensionManagementService private readonly _extensionManagementService: IExtensionManagementService,
 		@INotificationService private readonly _notificationService: INotificationService,
-		@ITelemetryService private readonly telemetryService: ITelemetryService,
-		@IInstantiationService private readonly instantiationService: IInstantiationService,
-		@IProductService private readonly productService: IProductService,
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		@IProductService private readonly _productService: IProductService,
 	) {
 		this._updateConfig();
 		this._configurationService.onDidChangeConfiguration(e => {
@@ -53,10 +51,13 @@ export class TerminalConfigHelper implements IBrowserTerminalConfigHelper {
 				this._updateConfig();
 			}
 		});
-	}
-
-	public setLinuxDistro(linuxDistro: LinuxDistro) {
-		this._linuxDistro = linuxDistro;
+		if (isLinux) {
+			if (navigator.userAgent.includes('Ubuntu')) {
+				this._linuxDistro = LinuxDistro.Ubuntu;
+			} else if (navigator.userAgent.includes('Fedora')) {
+				this._linuxDistro = LinuxDistro.Fedora;
+			}
+		}
 	}
 
 	private _updateConfig(): void {
@@ -68,18 +69,18 @@ export class TerminalConfigHelper implements IBrowserTerminalConfigHelper {
 		this._onConfigChanged.fire();
 	}
 
-	public configFontIsMonospace(): boolean {
+	configFontIsMonospace(): boolean {
 		const fontSize = 15;
 		const fontFamily = this.config.fontFamily || this._configurationService.getValue<IEditorOptions>('editor').fontFamily || EDITOR_FONT_DEFAULTS.fontFamily;
-		const i_rect = this._getBoundingRectFor('i', fontFamily, fontSize);
-		const w_rect = this._getBoundingRectFor('w', fontFamily, fontSize);
+		const iRect = this._getBoundingRectFor('i', fontFamily, fontSize);
+		const wRect = this._getBoundingRectFor('w', fontFamily, fontSize);
 
 		// Check for invalid bounds, there is no reason to believe the font is not monospace
-		if (!i_rect || !w_rect || !i_rect.width || !w_rect.width) {
+		if (!iRect || !wRect || !iRect.width || !wRect.width) {
 			return true;
 		}
 
-		return i_rect.width === w_rect.width;
+		return iRect.width === wRect.width;
 	}
 
 	private _createCharMeasureElementIfNecessary(): HTMLElement {
@@ -151,7 +152,7 @@ export class TerminalConfigHelper implements IBrowserTerminalConfigHelper {
 	 * Gets the font information based on the terminal.integrated.fontFamily
 	 * terminal.integrated.fontSize, terminal.integrated.lineHeight configuration properties
 	 */
-	public getFont(xtermCore?: XTermCore, excludeDimensions?: boolean): ITerminalFont {
+	getFont(xtermCore?: IXtermCore, excludeDimensions?: boolean): ITerminalFont {
 		const editorConfig = this._configurationService.getValue<IEditorOptions>('editor');
 
 		let fontFamily = this.config.fontFamily || editorConfig.fontFamily || EDITOR_FONT_DEFAULTS.fontFamily;
@@ -214,21 +215,21 @@ export class TerminalConfigHelper implements IBrowserTerminalConfigHelper {
 		return r;
 	}
 
-	private recommendationsShown = false;
+	private _recommendationsShown = false;
 
-	public async showRecommendations(shellLaunchConfig: IShellLaunchConfig): Promise<void> {
-		if (this.recommendationsShown) {
+	async showRecommendations(shellLaunchConfig: IShellLaunchConfig): Promise<void> {
+		if (this._recommendationsShown) {
 			return;
 		}
-		this.recommendationsShown = true;
+		this._recommendationsShown = true;
 
 		if (isWindows && shellLaunchConfig.executable && basename(shellLaunchConfig.executable).toLowerCase() === 'wsl.exe') {
-			const exeBasedExtensionTips = this.productService.exeBasedExtensionTips;
+			const exeBasedExtensionTips = this._productService.exeBasedExtensionTips;
 			if (!exeBasedExtensionTips || !exeBasedExtensionTips.wsl) {
 				return;
 			}
 			const extId = Object.keys(exeBasedExtensionTips.wsl.recommendations).find(extId => exeBasedExtensionTips.wsl.recommendations[extId].important);
-			if (extId && ! await this.isExtensionInstalled(extId)) {
+			if (extId && ! await this._isExtensionInstalled(extId)) {
 				this._notificationService.prompt(
 					Severity.Info,
 					nls.localize(
@@ -237,35 +238,21 @@ export class TerminalConfigHelper implements IBrowserTerminalConfigHelper {
 						{
 							label: nls.localize('install', 'Install'),
 							run: () => {
-								/* __GDPR__
-								"terminalLaunchRecommendation:popup" : {
-									"userReaction" : { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
-									"extensionId": { "classification": "PublicNonPersonalData", "purpose": "FeatureInsight" }
-								}
-								*/
-								this.telemetryService.publicLog('terminalLaunchRecommendation:popup', { userReaction: 'install', extId });
-								this.instantiationService.createInstance(InstallRecommendedExtensionAction, extId).run();
+								this._instantiationService.createInstance(InstallRecommendedExtensionAction, extId).run();
 							}
 						}
 					],
 					{
 						sticky: true,
-						neverShowAgain: { id: 'terminalConfigHelper/launchRecommendationsIgnore', scope: NeverShowAgainScope.GLOBAL },
-						onCancel: () => {
-							/* __GDPR__
-								"terminalLaunchRecommendation:popup" : {
-									"userReaction" : { "classification": "SystemMetaData", "purpose": "FeatureInsight" }
-								}
-							*/
-							this.telemetryService.publicLog('terminalLaunchRecommendation:popup', { userReaction: 'cancelled' });
-						}
+						neverShowAgain: { id: 'terminalConfigHelper/launchRecommendationsIgnore', scope: NeverShowAgainScope.APPLICATION },
+						onCancel: () => { }
 					}
 				);
 			}
 		}
 	}
 
-	private async isExtensionInstalled(id: string): Promise<boolean> {
+	private async _isExtensionInstalled(id: string): Promise<boolean> {
 		const extensions = await this._extensionManagementService.getInstalled();
 		return extensions.some(e => e.identifier.id === id);
 	}

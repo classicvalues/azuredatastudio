@@ -14,6 +14,9 @@ import { ConnectToControllerDialog } from './ui/dialogs/connectControllerDialog'
 import { AzureArcTreeDataProvider } from './ui/tree/azureArcTreeDataProvider';
 import { ControllerTreeNode } from './ui/tree/controllerTreeNode';
 import { TreeNode } from './ui/tree/treeNode';
+import * as pricing from './common/pricingUtils';
+import * as workspace from './common/workspaceUtils';
+import { LogAnalyticsWorkspaceOptionsSourceProvider } from './providers/logAnalyticsWorkspaceOptionsSourceProvider';
 
 export async function activate(context: vscode.ExtensionContext): Promise<arc.IExtension> {
 	IconPathHelper.setExtensionContext(context);
@@ -60,6 +63,55 @@ export async function activate(context: vscode.ExtensionContext): Promise<arc.IE
 	// register option sources
 	const rdApi = <rd.IExtension>vscode.extensions.getExtension(rd.extension.name)?.exports;
 	context.subscriptions.push(rdApi.registerOptionsSourceProvider(new ArcControllersOptionsSourceProvider(treeDataProvider)));
+	context.subscriptions.push(rdApi.registerOptionsSourceProvider(new LogAnalyticsWorkspaceOptionsSourceProvider()));
+
+	// Register valueprovider for getting the Log Analytics workspace id from the workspace name.
+	context.subscriptions.push(rdApi.registerValueProvider({
+		id: 'workspace-name-to-id',
+		getValue: async (triggerFields: { [key: string]: rd.InputValueType }) => {
+			return workspace.getWorkspaceIdFromName(triggerFields);
+		}
+	}));
+
+	// Register valueprovider for getting the calculated cost per VCore.
+	context.subscriptions.push(rdApi.registerValueProvider({
+		id: 'params-to-cost-per-vcore',
+		getValue: async (mapping: { [key: string]: rd.InputValueType }) => {
+			return pricing.fullPriceForOneVCore(mapping);
+		}
+	}));
+
+	// Register valueprovider for getting the number of CPU VCores Limit input by the user.
+	context.subscriptions.push(rdApi.registerValueProvider({
+		id: 'params-to-vcore-limit',
+		getValue: async (mapping: { [key: string]: rd.InputValueType }) => {
+			return 'x ' + pricing.numCores(mapping).toString();
+		}
+	}));
+
+	// Register valueprovider for getting the number of billable replicas.
+	context.subscriptions.push(rdApi.registerValueProvider({
+		id: 'params-to-billable-replicas',
+		getValue: async (mapping: { [key: string]: rd.InputValueType }) => {
+			return 'x ' + pricing.numBillableReplicas(mapping).toString();
+		}
+	}));
+
+	// Register valueprovider for getting the amount of hybrid benefit discount to be applied.
+	context.subscriptions.push(rdApi.registerValueProvider({
+		id: 'params-to-hybrid-benefit-discount',
+		getValue: async (mapping: { [key: string]: rd.InputValueType }) => {
+			return '- ' + pricing.azureHybridBenefitDiscount(mapping).toString();
+		}
+	}));
+
+	// Register valueprovider for getting the total estimated cost.
+	context.subscriptions.push(rdApi.registerValueProvider({
+		id: 'params-to-estimated-cost',
+		getValue: async (mapping: { [key: string]: rd.InputValueType }) => {
+			return pricing.total(mapping).toString() + ' ' + loc.USD;
+		}
+	}));
 
 	return arcApi(treeDataProvider);
 }

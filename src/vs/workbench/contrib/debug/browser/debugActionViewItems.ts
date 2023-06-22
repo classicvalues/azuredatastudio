@@ -21,30 +21,32 @@ import { IDisposable, dispose } from 'vs/base/common/lifecycle';
 import { ADD_CONFIGURATION_ID } from 'vs/workbench/contrib/debug/browser/debugCommands';
 import { BaseActionViewItem, SelectActionViewItem } from 'vs/base/browser/ui/actionbar/actionViewItems';
 import { debugStart } from 'vs/workbench/contrib/debug/browser/debugIcons';
+import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 
 const $ = dom.$;
 
 export class StartDebugActionViewItem extends BaseActionViewItem {
 
-	private static readonly SEPARATOR = '─────────';
+	private static readonly SEPARATOR = '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500';
 
 	private container!: HTMLElement;
 	private start!: HTMLElement;
 	private selectBox: SelectBox;
-	private debugOptions: { label: string, handler: (() => Promise<boolean>) }[] = [];
+	private debugOptions: { label: string; handler: (() => Promise<boolean>) }[] = [];
 	private toDispose: IDisposable[];
 	private selected = 0;
-	private providers: { label: string, type: string, pick: () => Promise<{ launch: ILaunch, config: IConfig } | undefined> }[] = [];
+	private providers: { label: string; type: string; pick: () => Promise<{ launch: ILaunch; config: IConfig } | undefined> }[] = [];
 
 	constructor(
 		private context: unknown,
-		private action: IAction,
+		action: IAction,
 		@IDebugService private readonly debugService: IDebugService,
 		@IThemeService private readonly themeService: IThemeService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
 		@IContextViewService contextViewService: IContextViewService,
+		@IKeybindingService private readonly keybindingService: IKeybindingService
 	) {
 		super(context, action);
 		this.toDispose = [];
@@ -71,7 +73,9 @@ export class StartDebugActionViewItem extends BaseActionViewItem {
 		this.container = container;
 		container.classList.add('start-debug-action-item');
 		this.start = dom.append(container, $(ThemeIcon.asCSSSelector(debugStart)));
-		this.start.title = this.action.label;
+		const keybinding = this.keybindingService.lookupKeybinding(this.action.id)?.getLabel();
+		const keybindingLabel = keybinding ? ` (${keybinding})` : '';
+		this.start.title = this.action.label + keybindingLabel;
 		this.start.setAttribute('role', 'button');
 
 		this.toDispose.push(dom.addDisposableListener(this.start, dom.EventType.CLICK, () => {

@@ -9,19 +9,22 @@ import { Project } from '../models/project';
 import { PublishProfile, readPublishProfile } from '../models/publishProfile/publishProfile';
 import { promptForPublishProfile } from './publishDatabaseDialog';
 import { getDefaultPublishDeploymentOptions, getVscodeMssqlApi } from '../common/utils';
-import { IConnectionInfo } from 'vscode-mssql';
-import { ProjectsController } from '../controllers/projectController';
-import { IDeploySettings } from '../models/IDeploySettings';
+import { IConnectionInfo, IFireWallRuleError } from 'vscode-mssql';
+import { getPublishServerName } from './utils';
+import { ISqlProject, SqlTargetPlatform } from 'sqldbproj';
+import { DBProjectConfigurationKey } from '../tools/netcoreTool';
+import { ISqlProjectPublishSettings } from '../models/deploy/publishSettings';
 
 /**
  * Create flow for Publishing a database using only VS Code-native APIs such as QuickPick
  */
-export async function getPublishDatabaseSettings(project: Project, promptForConnection: boolean = true): Promise<IDeploySettings | undefined> {
+export async function getPublishDatabaseSettings(project: ISqlProject, promptForConnection: boolean = true): Promise<ISqlProjectPublishSettings | undefined> {
 
 	// 1. Select publish settings file (optional)
+	let publishProfileUri;
 	// Create custom quickpick so we can control stuff like displaying the loading indicator
 	const quickPick = vscode.window.createQuickPick();
-	quickPick.items = [{ label: constants.dontUseProfile }, { label: constants.browseForProfile }];
+	quickPick.items = [{ label: constants.dontUseProfile }, { label: constants.browseForProfileWithIcon }];
 	quickPick.ignoreFocusOut = true;
 	quickPick.title = constants.selectProfileToUse;
 	const profilePicked = new Promise<PublishProfile | undefined>((resolve, reject) => {
@@ -31,7 +34,7 @@ export async function getPublishDatabaseSettings(project: Project, promptForConn
 			reject();
 		});
 		quickPick.onDidChangeSelection(async items => {
-			if (items[0].label === constants.browseForProfile) {
+			if (items[0].label === constants.browseForProfileWithIcon) {
 				const locations = await promptForPublishProfile(project.projectFolderPath);
 				if (!locations) {
 					// Clear items so that this event will trigger again if they select the same item
@@ -40,7 +43,7 @@ export async function getPublishDatabaseSettings(project: Project, promptForConn
 					// If the user cancels out of the file picker then just return and let them choose another option
 					return;
 				}
-				let publishProfileUri = locations[0];
+				publishProfileUri = locations[0];
 				try {
 					// Show loading state while reading profile
 					quickPick.busy = true;
@@ -88,7 +91,18 @@ export async function getPublishDatabaseSettings(project: Project, promptForConn
 			}
 			// Get the list of databases now to validate that the connection is valid and re-prompt them if it isn't
 			try {
-				connectionUri = await vscodeMssqlApi.connect(connectionProfile);
+				try {
+					connectionUri = await vscodeMssqlApi.connect(connectionProfile);
+				} catch (azureErr) {
+					// If the error is the firewall rule, prompt to add firewall rule and try again
+					const firewallRuleError = <IFireWallRuleError>azureErr;
+					if (firewallRuleError?.connectionUri) {
+						await vscodeMssqlApi.promptForFirewallRule(azureErr.connectionUri, connectionProfile);
+						connectionUri = await vscodeMssqlApi.connect(connectionProfile);
+					} else {
+						throw azureErr;
+					}
+				}
 				dbs = await vscodeMssqlApi.listDatabases(connectionUri);
 			} catch (err) {
 				// no-op, the mssql extension handles showing the error to the user. We'll just go
@@ -100,22 +114,27 @@ export async function getPublishDatabaseSettings(project: Project, promptForConn
 	}
 
 	// 3. Select database
-	const dbQuickpicks = dbs.map(db => {
-		return {
-			label: db,
-			dbName: db
-		} as vscode.QuickPickItem & { dbName: string, isCreateNew?: boolean };
-	});
-	// Ensure the project name is an option, either adding it if it doesn't already exist or moving it to the top if it does
-	const projectNameIndex = dbs.findIndex(db => db === project.projectFileName);
-	if (projectNameIndex === -1) {
-		dbQuickpicks.unshift({ label: constants.newDatabaseTitle(project.projectFileName), dbName: project.projectFileName });
-	} else {
-		dbQuickpicks.splice(projectNameIndex, 1);
-		dbQuickpicks.unshift({ label: project.projectFileName, dbName: project.projectFileName });
-	}
+	const dbQuickpicks = dbs
+		.filter(db => !constants.systemDbs.includes(db))
+		.map(db => {
+			return {
+				label: db
+			} as vscode.QuickPickItem & { isCreateNew?: boolean };
+		});
+	// Add Create New at the top now so it'll show second to top below the suggested name of the current project
+	dbQuickpicks.unshift({ label: `$(add) ${constants.createNew}`, isCreateNew: true });
 
-	dbQuickpicks.push({ label: constants.createNew, dbName: '', isCreateNew: true });
+	// if a publish profile was loaded and had a database name, use that instead of the project file name
+	const dbName = publishProfile?.databaseName || project.projectFileName;
+
+	// Ensure the project name or name specified in the publish profile is an option
+	const projectNameIndex = dbQuickpicks.findIndex(db => db.label === dbName);
+	if (projectNameIndex === -1) { // add it if it doesn't already exist...
+		dbQuickpicks.unshift({ label: dbName, description: constants.newText });
+	} else { // ...or move it to the top if it does
+		const removed = dbQuickpicks.splice(projectNameIndex, 1)[0];
+		dbQuickpicks.unshift(removed);
+	}
 
 	let databaseName: string | undefined = undefined;
 	while (!databaseName) {
@@ -126,7 +145,7 @@ export async function getPublishDatabaseSettings(project: Project, promptForConn
 			// User cancelled
 			return;
 		}
-		databaseName = selectedDatabase.dbName;
+		databaseName = selectedDatabase.label;
 		if (selectedDatabase.isCreateNew) {
 			databaseName = await vscode.window.showInputBox(
 				{
@@ -140,26 +159,25 @@ export async function getPublishDatabaseSettings(project: Project, promptForConn
 	}
 
 	// 4. Modify sqlcmd vars
-	// If a publish profile is provided then the values from there will overwrite the ones in the
-	// project file (if they exist)
-	let sqlCmdVariables = Object.assign({}, project.sqlCmdVariables, publishProfile?.sqlCmdVariables);
+	let sqlCmdVariables: Map<string, string> = getInitialSqlCmdVariables(project, publishProfile);
 
-	if (Object.keys(sqlCmdVariables).length > 0) {
+	if (sqlCmdVariables.size > 0) {
 		// Continually loop here, allowing the user to modify SQLCMD variables one
 		// at a time until they're done (either by selecting the "Done" option or
 		// escaping out of the quick pick dialog). Users can modify each variable
 		// as many times as they wish - with an option to reset all the variables
 		// to their starting values being provided as well.
 		while (true) {
-			const quickPickItems = Object.keys(sqlCmdVariables).map(key => {
-				return {
+			let quickPickItems = [];
+			for (const key of sqlCmdVariables.keys()) {
+				quickPickItems.push({
 					label: key,
-					description: sqlCmdVariables[key],
+					description: sqlCmdVariables.get(key),
 					key: key
-				} as vscode.QuickPickItem & { key?: string, isResetAllVars?: boolean, isDone?: boolean };
-			});
-			quickPickItems.push({ label: constants.resetAllVars, isResetAllVars: true });
-			quickPickItems.unshift({ label: constants.done, isDone: true });
+				} as vscode.QuickPickItem & { key?: string, isResetAllVars?: boolean, isDone?: boolean })
+			}
+			quickPickItems.push({ label: `$(refresh) ${constants.resetAllVars}`, isResetAllVars: true });
+			quickPickItems.unshift({ label: `$(check) ${constants.done}`, isDone: true });
 			const sqlCmd = await vscode.window.showQuickPick(
 				quickPickItems,
 				{ title: constants.chooseSqlcmdVarsToModify, ignoreFocusOut: true }
@@ -173,15 +191,15 @@ export async function getPublishDatabaseSettings(project: Project, promptForConn
 				const newValue = await vscode.window.showInputBox(
 					{
 						title: constants.enterNewValueForVar(sqlCmd.key),
-						value: sqlCmdVariables[sqlCmd.key],
+						value: sqlCmdVariables.get(sqlCmd.key),
 						ignoreFocusOut: true
 					}
 				);
 				if (newValue) {
-					sqlCmdVariables[sqlCmd.key] = newValue;
+					sqlCmdVariables.set(sqlCmd.key, newValue);
 				}
 			} else if (sqlCmd.isResetAllVars) {
-				sqlCmdVariables = Object.assign({}, project.sqlCmdVariables, publishProfile?.sqlCmdVariables);
+				sqlCmdVariables = getInitialSqlCmdVariables(project, publishProfile);
 			} else if (sqlCmd.isDone) {
 				break;
 			}
@@ -190,32 +208,78 @@ export async function getPublishDatabaseSettings(project: Project, promptForConn
 	}
 
 	// 6. Generate script/publish
-	let settings: IDeploySettings = {
+	let settings: ISqlProjectPublishSettings = {
 		databaseName: databaseName,
 		serverName: connectionProfile?.server || '',
 		connectionUri: connectionUri || '',
 		sqlCmdVariables: sqlCmdVariables,
-		deploymentOptions: await getDefaultPublishDeploymentOptions(project),
-		profileUsed: !!publishProfile
+		deploymentOptions: publishProfile?.options ?? await getDefaultPublishDeploymentOptions(project),
+		publishProfileUri: publishProfileUri
 	};
 	return settings;
 }
 
 /**
-* Create flow for Publishing a database using only VS Code-native APIs such as QuickPick
-*/
-export async function launchPublishDatabaseQuickpick(project: Project, projectController: ProjectsController): Promise<void> {
-	let settings: IDeploySettings | undefined = await getPublishDatabaseSettings(project);
-
-	if (settings) {
-		// 5. Select action to take
-		const action = await vscode.window.showQuickPick(
-			[constants.generateScriptButtonText, constants.publish],
-			{ title: constants.chooseAction, ignoreFocusOut: true });
-		if (!action) {
-			return;
+ * Loads the sqlcmd variables from a sql projects. If a publish profile is provided then the values from there will overwrite the ones in the project file (if they exist)
+ * @param project
+ * @param publishProfile
+ * @returns Map of sqlcmd variables
+ */
+function getInitialSqlCmdVariables(project: ISqlProject, publishProfile?: PublishProfile): Map<string, string> {
+	// create a copy of the sqlcmd variable map so that the original ones don't get overwritten
+	let sqlCmdVariables = new Map(project.sqlCmdVariables);
+	if (publishProfile?.sqlCmdVariables) {
+		for (const [key, value] of publishProfile.sqlCmdVariables) {
+			sqlCmdVariables.set(key, value);
 		}
-		await projectController.publishOrScriptProject(project, settings, action === constants.publish);
+	}
+
+	return sqlCmdVariables;
+}
+
+export async function launchPublishTargetOption(project: Project): Promise<constants.PublishTargetType | undefined> {
+	// Show options to user for deploy to existing server or docker
+	const target = project.getProjectTargetVersion();
+	const name = getPublishServerName(target);
+	const logicalServerName = target === constants.targetPlatformToVersion.get(SqlTargetPlatform.sqlAzure) ? constants.AzureSqlLogicalServerName : constants.SqlServerName;
+
+	// Options list based on target
+	let options;
+
+	if (target === constants.targetPlatformToVersion.get(SqlTargetPlatform.sqlAzure)) {
+		options = [constants.publishToAzureEmulator, constants.publishToExistingServer(logicalServerName)]
+
+		// only show "Publish to New Azure Server" option if preview features are enabled
+		const enablePreviewFeatures = vscode.workspace.getConfiguration(DBProjectConfigurationKey).get(constants.enablePreviewFeaturesKey);
+		if (enablePreviewFeatures) {
+			options.push(constants.publishToNewAzureServer);
+		}
+	} else {
+		options = [constants.publishToDockerContainer(name), constants.publishToExistingServer(logicalServerName)];
+	}
+
+	// Show the options to the user
+	const publishOption = await vscode.window.showQuickPick(
+		options,
+		{ title: constants.selectPublishOption, ignoreFocusOut: true });
+
+	// Return when user hits escape
+	if (!publishOption) {
+		return undefined;
+	}
+
+	// Map the title to the publish option type
+	switch (publishOption) {
+		case constants.publishToExistingServer(name):
+			return constants.PublishTargetType.existingServer;
+		case constants.publishToDockerContainer(name):
+			return constants.PublishTargetType.docker;
+		case constants.publishToAzureEmulator:
+			return constants.PublishTargetType.docker;
+		case constants.publishToNewAzureServer:
+			return constants.PublishTargetType.newAzureServer;
+		default:
+			return constants.PublishTargetType.existingServer;
 	}
 }
 

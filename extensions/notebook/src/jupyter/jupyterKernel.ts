@@ -60,12 +60,6 @@ export class JupyterKernel implements nb.IKernel {
 		return true;
 	}
 
-	public get requiresConnection(): boolean {
-		// TODO would be good to have a smarter way to do this.
-		// for now only Spark kernels need a connection
-		return !!(this.kernelImpl.name && this.kernelImpl.name.toLowerCase().indexOf('spark') > -1);
-	}
-
 	public get isReady(): boolean {
 		return this.kernelImpl.isReady;
 	}
@@ -90,7 +84,7 @@ export class JupyterKernel implements nb.IKernel {
 	requestExecute(content: nb.IExecuteRequest, disposeOnDone?: boolean): nb.IFuture {
 		content.code = Array.isArray(content.code) ? content.code.join('') : content.code;
 		content.code = content.code.replace(/\r+\n/gm, '\n'); // Remove \r (if it exists) from newlines
-		let futureImpl = this.kernelImpl.requestExecute(content as KernelMessage.IExecuteRequest, disposeOnDone);
+		let futureImpl = this.kernelImpl.requestExecute(content as KernelMessage.IExecuteRequest & { language: string }, disposeOnDone);
 		return new JupyterFuture(futureImpl);
 	}
 
@@ -107,6 +101,10 @@ export class JupyterKernel implements nb.IKernel {
 
 	interrupt(): Promise<void> {
 		return this.kernelImpl.interrupt();
+	}
+
+	restart(): Promise<void> {
+		return this.kernelImpl.restart();
 	}
 }
 

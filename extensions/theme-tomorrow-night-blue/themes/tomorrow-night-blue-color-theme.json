@@ -32,7 +32,7 @@
 		"titleBar.activeBackground": "#001126",
 		"statusBar.background": "#001126",
 		"statusBarItem.remoteBackground": "#0e639c",
-		"ports.iconRunningProcessforeground": "#bbdaff",
+		"ports.iconRunningProcessForeground": "#bbdaff",
 		"statusBar.noFolderBackground": "#001126",
 		"statusBar.debuggingBackground": "#001126",
 		"activityBar.background": "#001733",
@@ -65,7 +65,7 @@
 			}
 		},
 		{
-			"scope": ["meta.embedded", "source.groovy.embedded"],
+			"scope": ["meta.embedded", "source.groovy.embedded", "meta.jsx.children"],
 			"settings": {
 				//"background": "#002451",
 				"foreground": "#FFFFFF"
@@ -235,6 +235,12 @@
 			"scope": "markup.italic",
 			"settings": {
 				"fontStyle": "italic"
+			}
+		},
+		{
+			"scope": "markup.strikethrough",
+			"settings": {
+				"fontStyle": "strikethrough"
 			}
 		},
 		{

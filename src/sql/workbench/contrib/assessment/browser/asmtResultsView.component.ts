@@ -48,6 +48,9 @@ import { ConnectionManagementInfo } from 'sql/platform/connection/common/connect
 import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
 import { attachTableFilterStyler } from 'sql/platform/theme/common/styler';
 import { DASHBOARD_BORDER } from 'sql/workbench/common/theme';
+import { IAccessibilityService } from 'vs/platform/accessibility/common/accessibility';
+import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
+import { IComponentContextService } from 'sql/workbench/services/componentContext/browser/componentContextService';
 
 export const ASMTRESULTSVIEW_SELECTOR: string = 'asmt-results-view-component';
 export const ROW_HEIGHT: number = 25;
@@ -144,13 +147,16 @@ export class AsmtResultsViewComponent extends TabChild implements IAssessmentCom
 		@Inject(IDashboardService) _dashboardService: IDashboardService,
 		@Inject(IAdsTelemetryService) private _telemetryService: IAdsTelemetryService,
 		@Inject(ILogService) protected _logService: ILogService,
-		@Inject(IContextViewService) private _contextViewService: IContextViewService
+		@Inject(IContextViewService) private _contextViewService: IContextViewService,
+		@Inject(IAccessibilityService) private _accessibilityService: IAccessibilityService,
+		@Inject(IQuickInputService) private _quickInputService: IQuickInputService,
+		@Inject(IComponentContextService) private componentContextService: IComponentContextService
 	) {
 		super();
 		let self = this;
 		const profile = this._commonService.connectionManagementService.connectionInfo.connectionProfile;
 
-		this.isServerMode = !profile.databaseName || Utils.isMaster(profile);
+		this.isServerMode = !profile.databaseName || Utils.isServerConnection(profile);
 
 		if (this.isServerMode) {
 			this.placeholderNoResultsLabel = nls.localize('asmt.TargetInstanceComplient', "Instance {0} is totally compliant with the best practices. Good job!", profile.serverName);
@@ -352,11 +358,11 @@ export class AsmtResultsViewComponent extends TabChild implements IAssessmentCom
 			this.initActionBar(databaseInvokeAsmt, databaseSelectAsmt);
 		}
 
-		this._table = this._register(new Table(this._gridEl.nativeElement, { columns }, options));
+		this._table = this._register(new Table(this._gridEl.nativeElement, this._accessibilityService, this._quickInputService, { columns }, options));
 		this._table.grid.setData(this.dataView, true);
 		this._table.registerPlugin(<any>this.rowDetail);
 		this._table.registerPlugin(filterPlugin);
-
+		this._register(this.componentContextService.registerTable(this._table));
 
 		this.placeholderElem = document.createElement('span');
 		this.placeholderElem.className = 'placeholder';

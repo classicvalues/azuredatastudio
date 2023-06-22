@@ -3,18 +3,18 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+/**
+ * This module contains utility functions related to the environment, cwd and paths.
+ */
+
 import * as path from 'vs/base/common/path';
 import { URI as Uri } from 'vs/base/common/uri';
 import { IWorkspaceFolder } from 'vs/platform/workspace/common/workspace';
 import { IConfigurationResolverService } from 'vs/workbench/services/configurationResolver/common/configurationResolver';
 import { sanitizeProcessEnvironment } from 'vs/base/common/processes';
 import { ILogService } from 'vs/platform/log/common/log';
-import { IShellLaunchConfig, ITerminalEnvironment } from 'vs/platform/terminal/common/terminal';
+import { IShellLaunchConfig, ITerminalEnvironment, TerminalSettingId, TerminalSettingPrefix } from 'vs/platform/terminal/common/terminal';
 import { IProcessEnvironment, isWindows, locale, OperatingSystem, OS, platform, Platform } from 'vs/base/common/platform';
-
-/**
- * This module contains utility functions related to the environment, cwd and paths.
- */
 
 export function mergeEnvironments(parent: IProcessEnvironment, other: ITerminalEnvironment | undefined): void {
 	if (!other) {
@@ -78,17 +78,17 @@ function mergeNonNullKeys(env: IProcessEnvironment, other: ITerminalEnvironment 
 	}
 }
 
-function resolveConfigurationVariables(variableResolver: VariableResolver, env: ITerminalEnvironment): ITerminalEnvironment {
-	Object.keys(env).forEach((key) => {
-		const value = env[key];
+async function resolveConfigurationVariables(variableResolver: VariableResolver, env: ITerminalEnvironment): Promise<ITerminalEnvironment> {
+	await Promise.all(Object.entries(env).map(async ([key, value]) => {
 		if (typeof value === 'string') {
 			try {
-				env[key] = variableResolver(value);
+				env[key] = await variableResolver(value);
 			} catch (e) {
 				env[key] = value;
 			}
 		}
-	});
+	}));
+
 	return env;
 }
 
@@ -179,17 +179,17 @@ export function getLangEnvVariable(locale?: string): string {
 	return parts.join('_') + '.UTF-8';
 }
 
-export function getCwd(
+export async function getCwd(
 	shell: IShellLaunchConfig,
 	userHome: string | undefined,
 	variableResolver: VariableResolver | undefined,
 	root: Uri | undefined,
 	customCwd: string | undefined,
 	logService?: ILogService
-): string {
+): Promise<string> {
 	if (shell.cwd) {
 		const unresolved = (typeof shell.cwd === 'object') ? shell.cwd.fsPath : shell.cwd;
-		const resolved = _resolveCwd(unresolved, variableResolver);
+		const resolved = await _resolveCwd(unresolved, variableResolver);
 		return _sanitizeCwd(resolved || unresolved);
 	}
 
@@ -197,7 +197,7 @@ export function getCwd(
 
 	if (!shell.ignoreConfigurationCwd && customCwd) {
 		if (variableResolver) {
-			customCwd = _resolveCwd(customCwd, variableResolver, logService);
+			customCwd = await _resolveCwd(customCwd, variableResolver, logService);
 		}
 		if (customCwd) {
 			if (path.isAbsolute(customCwd)) {
@@ -216,10 +216,10 @@ export function getCwd(
 	return _sanitizeCwd(cwd);
 }
 
-function _resolveCwd(cwd: string, variableResolver: VariableResolver | undefined, logService?: ILogService): string | undefined {
+async function _resolveCwd(cwd: string, variableResolver: VariableResolver | undefined, logService?: ILogService): Promise<string | undefined> {
 	if (variableResolver) {
 		try {
-			return variableResolver(cwd);
+			return await variableResolver(cwd);
 		} catch (e) {
 			logService?.error('Could not resolve terminal cwd', e);
 			return undefined;
@@ -236,32 +236,22 @@ function _sanitizeCwd(cwd: string): string {
 	return cwd;
 }
 
-export function escapeNonWindowsPath(path: string): string {
-	let newPath = path;
-	if (newPath.indexOf('\\') !== 0) {
-		newPath = newPath.replace(/\\/g, '\\\\');
-	}
-	const bannedChars = /[\`\$\|\&\>\~\#\!\^\*\;\<\"\']/g;
-	newPath = newPath.replace(bannedChars, '');
-	return `'${newPath}'`;
-}
-
 export type TerminalShellSetting = (
-	`terminal.integrated.automationShell.windows`
-	| `terminal.integrated.automationShell.osx`
-	| `terminal.integrated.automationShell.linux`
-	| `terminal.integrated.shell.windows`
-	| `terminal.integrated.shell.osx`
-	| `terminal.integrated.shell.linux`
+	TerminalSettingId.AutomationShellWindows
+	| TerminalSettingId.AutomationShellMacOs
+	| TerminalSettingId.AutomationShellLinux
+	| TerminalSettingId.ShellWindows
+	| TerminalSettingId.ShellMacOs
+	| TerminalSettingId.ShellLinux
 );
 
 export type TerminalShellArgsSetting = (
-	`terminal.integrated.shellArgs.windows`
-	| `terminal.integrated.shellArgs.osx`
-	| `terminal.integrated.shellArgs.linux`
+	TerminalSettingId.ShellArgsWindows
+	| TerminalSettingId.ShellArgsMacOs
+	| TerminalSettingId.ShellArgsLinux
 );
 
-export type VariableResolver = (str: string) => string;
+export type VariableResolver = (str: string) => Promise<string>;
 
 export function createVariableResolver(lastActiveWorkspace: IWorkspaceFolder | undefined, env: IProcessEnvironment, configurationResolverService: IConfigurationResolverService | undefined): VariableResolver | undefined {
 	if (!configurationResolverService) {
@@ -273,7 +263,7 @@ export function createVariableResolver(lastActiveWorkspace: IWorkspaceFolder | u
 /**
  * @deprecated Use ITerminalProfileResolverService
  */
-export function getDefaultShell(
+export async function getDefaultShell(
 	fetchSetting: (key: TerminalShellSetting) => string | undefined,
 	defaultShell: string,
 	isWoW64: boolean,
@@ -282,7 +272,7 @@ export function getDefaultShell(
 	logService: ILogService,
 	useAutomationShell: boolean,
 	platformOverride: Platform = platform
-): string {
+): Promise<string> {
 	let maybeExecutable: string | undefined;
 	if (useAutomationShell) {
 		// If automationShell is specified, this should override the normal setting
@@ -310,7 +300,7 @@ export function getDefaultShell(
 
 	if (variableResolver) {
 		try {
-			executable = variableResolver(executable);
+			executable = await variableResolver(executable);
 		} catch (e) {
 			logService.error(`Could not resolve shell`, e);
 		}
@@ -322,13 +312,13 @@ export function getDefaultShell(
 /**
  * @deprecated Use ITerminalProfileResolverService
  */
-export function getDefaultShellArgs(
+export async function getDefaultShellArgs(
 	fetchSetting: (key: TerminalShellSetting | TerminalShellArgsSetting) => string | string[] | undefined,
 	useAutomationShell: boolean,
 	variableResolver: VariableResolver | undefined,
 	logService: ILogService,
 	platformOverride: Platform = platform,
-): string | string[] {
+): Promise<string | string[]> {
 	if (useAutomationShell) {
 		if (!!getShellSetting(fetchSetting, 'automationShell', platformOverride)) {
 			return [];
@@ -336,20 +326,20 @@ export function getDefaultShellArgs(
 	}
 
 	const platformKey = platformOverride === Platform.Windows ? 'windows' : platformOverride === Platform.Mac ? 'osx' : 'linux';
-	let args = fetchSetting(<TerminalShellArgsSetting>`terminal.integrated.shellArgs.${platformKey}`);
+	let args = fetchSetting(<TerminalShellArgsSetting>`${TerminalSettingPrefix.ShellArgs}${platformKey}`);
 	if (!args) {
 		return [];
 	}
 	if (typeof args === 'string' && platformOverride === Platform.Windows) {
-		return variableResolver ? variableResolver(args) : args;
+		return variableResolver ? await variableResolver(args) : args;
 	}
 	if (variableResolver) {
 		const resolvedArgs: string[] = [];
 		for (const arg of args) {
 			try {
-				resolvedArgs.push(variableResolver(arg));
+				resolvedArgs.push(await variableResolver(arg));
 			} catch (e) {
-				logService.error(`Could not resolve terminal.integrated.shellArgs.${platformKey}`, e);
+				logService.error(`Could not resolve ${TerminalSettingPrefix.ShellArgs}${platformKey}`, e);
 				resolvedArgs.push(arg);
 			}
 		}
@@ -367,16 +357,16 @@ function getShellSetting(
 	return fetchSetting(<TerminalShellSetting>`terminal.integrated.${type}.${platformKey}`);
 }
 
-export function createTerminalEnvironment(
+export async function createTerminalEnvironment(
 	shellLaunchConfig: IShellLaunchConfig,
 	envFromConfig: ITerminalEnvironment | undefined,
 	variableResolver: VariableResolver | undefined,
 	version: string | undefined,
 	detectLocale: 'auto' | 'off' | 'on',
 	baseEnv: IProcessEnvironment
-): IProcessEnvironment {
+): Promise<IProcessEnvironment> {
 	// Create a terminal environment based on settings, launch config and permissions
-	let env: IProcessEnvironment = {};
+	const env: IProcessEnvironment = {};
 	if (shellLaunchConfig.strictEnv) {
 		// strictEnv is true, only use the requested env (ignoring null entries)
 		mergeNonNullKeys(env, shellLaunchConfig.env);
@@ -389,10 +379,10 @@ export function createTerminalEnvironment(
 		// Resolve env vars from config and shell
 		if (variableResolver) {
 			if (allowedEnvFromConfig) {
-				resolveConfigurationVariables(variableResolver, allowedEnvFromConfig);
+				await resolveConfigurationVariables(variableResolver, allowedEnvFromConfig);
 			}
 			if (shellLaunchConfig.env) {
-				resolveConfigurationVariables(variableResolver, shellLaunchConfig.env);
+				await resolveConfigurationVariables(variableResolver, shellLaunchConfig.env);
 			}
 		}
 

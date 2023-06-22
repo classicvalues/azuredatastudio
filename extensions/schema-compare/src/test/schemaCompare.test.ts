@@ -5,7 +5,7 @@
 
 import * as should from 'should';
 import * as vscode from 'vscode';
-import * as mssql from '../../../mssql';
+import * as mssql from 'mssql';
 import * as TypeMoq from 'typemoq';
 import * as loc from '../localizedConstants';
 import 'mocha';
@@ -67,7 +67,7 @@ describe('SchemaCompareMainWindow.start @DacFx@', function (): void {
 		let sc = new SchemaCompareTestService();
 
 		let result = new SchemaCompareMainWindowTest(sc, mockExtensionContext.object, null);
-		await result.start({connectionProfile: mockIConnectionProfile});
+		await result.start({ connectionProfile: mockIConnectionProfile });
 
 		should.notEqual(result.sourceEndpointInfo, undefined);
 		should.equal(result.sourceEndpointInfo.endpointType, mssql.SchemaCompareEndpointType.Database);
@@ -110,7 +110,7 @@ describe('SchemaCompareMainWindow.results @DacFx@', function (): void {
 
 	it('Should show error if publish changes fails', async function (): Promise<void> {
 		let service = createServiceMock();
-		service.setup(x => x.schemaComparePublishChanges(TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny())).returns(() => Promise.resolve({
+		service.setup(x => x.schemaComparePublishDatabaseChanges(TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny())).returns(() => Promise.resolve({
 			success: false,
 			errorMessage: 'error1'
 		}));
@@ -121,7 +121,7 @@ describe('SchemaCompareMainWindow.results @DacFx@', function (): void {
 		await schemaCompareResult.start(undefined);
 
 		schemaCompareResult.sourceEndpointInfo = setDacpacEndpointInfo(mocksource);
-		schemaCompareResult.targetEndpointInfo = setDacpacEndpointInfo(mocktarget);
+		schemaCompareResult.targetEndpointInfo = setDatabaseEndpointInfo();
 		await schemaCompareResult.execute();
 		await schemaCompareResult.publishChanges();
 
@@ -131,7 +131,7 @@ describe('SchemaCompareMainWindow.results @DacFx@', function (): void {
 
 	it('Should show not error if publish changes succeed', async function (): Promise<void> {
 		let service = createServiceMock();
-		service.setup(x => x.schemaComparePublishChanges(TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny())).returns(() => Promise.resolve({
+		service.setup(x => x.schemaComparePublishDatabaseChanges(TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny())).returns(() => Promise.resolve({
 			success: true,
 			errorMessage: ''
 		}));
@@ -140,7 +140,7 @@ describe('SchemaCompareMainWindow.results @DacFx@', function (): void {
 		await schemaCompareResult.start(undefined);
 
 		schemaCompareResult.sourceEndpointInfo = setDacpacEndpointInfo(mocksource);
-		schemaCompareResult.targetEndpointInfo = setDacpacEndpointInfo(mocktarget);
+		schemaCompareResult.targetEndpointInfo = setDatabaseEndpointInfo();
 		await schemaCompareResult.execute();
 		await schemaCompareResult.publishChanges();
 		should(showErrorMessageSpy.notCalled).be.true();
@@ -169,7 +169,7 @@ describe('SchemaCompareMainWindow.results @DacFx@', function (): void {
 
 		schemaCompareResult.sourceEndpointInfo = setDacpacEndpointInfo(mocksource);
 		schemaCompareResult.targetEndpointInfo = setDacpacEndpointInfo(mocktarget);
-		await schemaCompareResult.openScmp();
+		await schemaCompareResult.openScmpFile(files[0], true);
 
 		should(showErrorMessageSpy.calledOnce).be.true();
 		should.equal(showErrorMessageSpy.getCall(0).args[0], loc.openScmpErrorMessage('error1'));
@@ -343,7 +343,7 @@ describe('SchemaCompareMainWindow.results @DacFx@', function (): void {
 
 	it('Should not show error if user does not want to publish', async function (): Promise<void> {
 		let service = createServiceMock();
-		service.setup(x => x.schemaComparePublishChanges(TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny())).returns(() => Promise.resolve({
+		service.setup(x => x.schemaComparePublishDatabaseChanges(TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny())).returns(() => Promise.resolve({
 			success: true,
 			errorMessage: ''
 		}));
@@ -363,7 +363,7 @@ describe('SchemaCompareMainWindow.results @DacFx@', function (): void {
 	function createServiceMock() {
 		let sc = new SchemaCompareTestService(testStateScmp.SUCCESS_NOT_EQUAL);
 		let service = TypeMoq.Mock.ofInstance(new SchemaCompareTestService());
-		service.setup(x => x.schemaCompareGetDefaultOptions()).returns(x => sc.schemaCompareGetDefaultOptions());
+		service.setup(x => x.schemaCompareGetDefaultOptions()).returns(() => sc.schemaCompareGetDefaultOptions());
 		service.setup(x => x.schemaCompare(TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny())).returns(() => sc.schemaCompare('', undefined, undefined, undefined, undefined));
 		return service;
 	}
@@ -502,7 +502,8 @@ describe('SchemaCompareMainWindow.execute @DacFx@', function (): void {
 			selectSourceButtonState: true,
 			selectTargetButtonState: true,
 			generateScriptButtonState: true,
-			applyButtonState: true} );
+			applyButtonState: true
+		});
 	});
 
 });

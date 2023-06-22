@@ -3,7 +3,7 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { isObject, isUndefinedOrNull, isArray } from 'vs/base/common/types';
+import { isArray, isTypedArray, isObject, isUndefinedOrNull } from 'vs/base/common/types';
 
 export function deepClone<T>(obj: T): T {
 	if (!obj || typeof obj !== 'object') {
@@ -35,7 +35,7 @@ export function deepFreeze<T>(obj: T): T {
 		for (const key in obj) {
 			if (_hasOwnProperty.call(obj, key)) {
 				const prop = obj[key];
-				if (typeof prop === 'object' && !Object.isFrozen(prop)) {
+				if (typeof prop === 'object' && !Object.isFrozen(prop) && !isTypedArray(prop)) {
 					stack.push(prop);
 				}
 			}
@@ -45,6 +45,7 @@ export function deepFreeze<T>(obj: T): T {
 }
 
 const _hasOwnProperty = Object.prototype.hasOwnProperty;
+
 
 export function cloneAndChange(obj: any, changer: (orig: any) => any): any {
 	return _cloneAndChange(obj, changer, new Set());
@@ -74,7 +75,7 @@ function _cloneAndChange(obj: any, changer: (orig: any) => any, seen: Set<any>):
 		}
 		seen.add(obj);
 		const r2 = {};
-		for (let i2 in obj) {
+		for (const i2 in obj) {
 			if (_hasOwnProperty.call(obj, i2)) {
 				(r2 as any)[i2] = _cloneAndChange(obj[i2], changer, seen);
 			}
@@ -110,18 +111,6 @@ export function mixin(destination: any, source: any, overwrite: boolean = true):
 			}
 		});
 	}
-	return destination;
-}
-
-/**
- * @deprecated ES6
- */
-export function assign<T>(destination: T): T;
-export function assign<T, U>(destination: T, u: U): T & U;
-export function assign<T, U, V>(destination: T, u: U, v: V): T & U & V;
-export function assign<T, U, V, W>(destination: T, u: U, v: V, w: W): T & U & V & W;
-export function assign(destination: any, ...sources: any[]): any {
-	sources.forEach(source => Object.keys(source).forEach(key => destination[key] = source[key]));
 	return destination;
 }
 
@@ -197,12 +186,13 @@ export function safeStringify(obj: any): string {
 	});
 }
 
+// {{SQL CARBON EDIT}} - define getOrDefault
 export function getOrDefault<T, R>(obj: T, fn: (obj: T) => R | undefined, defaultValue: R): R {
 	const result = fn(obj);
 	return typeof result === 'undefined' ? defaultValue : result;
 }
 
-type obj = { [key: string]: any; };
+type obj = { [key: string]: any };
 /**
  * Returns an object that has keys for each value that is different in the base object. Keys
  * that do not exist in the target but in the base object are not considered.
@@ -237,4 +227,14 @@ export function getCaseInsensitive(target: obj, key: string): any {
 	const lowercaseKey = key.toLowerCase();
 	const equivalentKey = Object.keys(target).find(k => k.toLowerCase() === lowercaseKey);
 	return equivalentKey ? target[equivalentKey] : target[key];
+}
+
+export function filter(obj: obj, predicate: (key: string, value: any) => boolean): obj {
+	const result = Object.create(null);
+	for (const [key, value] of Object.entries(obj)) {
+		if (predicate(key, value)) {
+			result[key] = value;
+		}
+	}
+	return result;
 }

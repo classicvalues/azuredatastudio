@@ -4,8 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { promises as fs, constants as fsConstants } from 'fs';
+import { Logger } from '../../utils/Logger';
 
-export type ReadWriteHook = (contents: string) => Promise<string>;
+export type ReadWriteHook = (contents: string, resetOnError?: boolean) => Promise<string>;
 const noOpHook: ReadWriteHook = async (contents): Promise<string> => {
 	return contents;
 };
@@ -14,12 +15,13 @@ export class AlreadyInitializedError extends Error {
 
 }
 
+type DbMap = { [key: string]: string };
 export class FileDatabase {
-	private db: { [key: string]: string };
+	private db: DbMap = {};
 	private isDirty = false;
 	private isSaving = false;
 	private isInitialized = false;
-	private saveInterval: NodeJS.Timer;
+	private saveInterval: NodeJS.Timer | undefined;
 
 	constructor(
 		private readonly dbPath: string,
@@ -88,17 +90,16 @@ export class FileDatabase {
 		this.isDirty = true;
 	}
 
-
 	public async initialize(): Promise<void> {
 		this.isInitialized = true;
-		this.setupSaveTask();
+		this.saveInterval = setInterval(() => this.save(), 20 * 1000);
 		let fileContents: string;
 		try {
 			await fs.access(this.dbPath, fsConstants.R_OK | fsConstants.R_OK);
 			fileContents = await fs.readFile(this.dbPath, { encoding: 'utf8' });
-			fileContents = await this.readHook(fileContents);
+			fileContents = await this.readHook(fileContents, true);
 		} catch (ex) {
-			console.log(`file db does not exist ${ex}`);
+			Logger.error(`Error occurred when initializing File Database from file system cache, ADAL cache will be reset: ${ex}`);
 			await this.createFile();
 			this.db = {};
 			this.isDirty = true;
@@ -106,21 +107,19 @@ export class FileDatabase {
 		}
 
 		try {
-			this.db = JSON.parse(fileContents);
+			this.db = JSON.parse(fileContents) as DbMap;
 		} catch (ex) {
-			console.log(`DB was corrupted, resetting it ${ex}`);
+			Logger.error(`Error occurred when reading file database contents as JSON, ADAL cache will be reset: ${ex}`);
 			await this.createFile();
 			this.db = {};
 		}
 	}
 
-	private setupSaveTask(): NodeJS.Timer {
-		return setInterval(() => this.save(), 20 * 1000);
-	}
-
 	public async shutdown(): Promise<void> {
 		await this.waitForFileSave();
-		clearInterval((this.saveInterval));
+		if (this.saveInterval) {
+			clearInterval(this.saveInterval);
+		}
 		await this.save();
 	}
 
@@ -142,7 +141,7 @@ export class FileDatabase {
 
 			this.isDirty = false;
 		} catch (ex) {
-			console.log(`File saving is erroring! ${ex}`);
+			Logger.error(`Error occurred while saving cache contents to file storage, this may cause issues with ADAL cache persistence: ${ex}`);
 		} finally {
 			this.isSaving = false;
 		}

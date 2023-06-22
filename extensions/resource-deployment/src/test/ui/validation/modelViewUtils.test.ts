@@ -11,24 +11,22 @@ import { initializeWizardPage, InputComponent, InputComponentInfo, Validator, Wi
 import { FieldType } from '../../../interfaces';
 import { IToolsService } from '../../../services/toolsService';
 import { Deferred } from '../../utils';
-import { createModelViewMock } from '@microsoft/azdata-test/out/mocks/modelView/modelViewMock';
-import { StubCheckbox } from '@microsoft/azdata-test/out/stubs/modelView/stubCheckbox';
-import { StubInputBox } from '@microsoft/azdata-test/out/stubs/modelView/stubInputBox';
+import * as azdataTest from '@microsoft/azdata-test';
 import * as should from 'should';
 import * as sinon from 'sinon';
 
 describe('WizardPage', () => {
-	let stubCheckbox: StubCheckbox;
-	let stubInputBox: StubInputBox;
+	let stubCheckbox: azdataTest.stubs.azdata.modelView.StubCheckbox;
+	let stubInputBox: azdataTest.stubs.azdata.modelView.StubInputBox;
 	let testWizardPage: WizardPageContext;
 	let contentRegistered: Deferred<void>;
 
 	before(function () {
 		contentRegistered = new Deferred<void>();
 		const mockWizardPage = TypeMoq.Mock.ofType<azdata.window.WizardPage>();
-		stubCheckbox = new StubCheckbox();
-		stubInputBox = new StubInputBox();
-		const mockModelView = createModelViewMock({
+		stubCheckbox = new azdataTest.stubs.azdata.modelView.StubCheckbox();
+		stubInputBox = new azdataTest.stubs.azdata.modelView.StubInputBox();
+		const mockModelView = azdataTest.mocks.azdata.modelView.createModelViewMock({
 			checkBox: () => stubCheckbox,
 			inputBox: () => stubInputBox
 		});

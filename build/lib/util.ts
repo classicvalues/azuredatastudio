@@ -3,20 +3,18 @@
  *  Licensed under the Source EULA. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import * as es from 'event-stream';
-import debounce = require('debounce');
+import _debounce = require('debounce');
 import * as _filter from 'gulp-filter';
 import * as rename from 'gulp-rename';
 import * as _ from 'underscore';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as _rimraf from 'rimraf';
-import * as git from './git';
 import * as VinylFile from 'vinyl';
 import { ThroughStream } from 'through';
 import * as sm from 'source-map';
+import * as git from './git';
 
 const root = path.dirname(path.dirname(__dirname));
 
@@ -56,7 +54,7 @@ export function incremental(streamProvider: IStreamProvider, initial: NodeJS.Rea
 		run(initial, false);
 	}
 
-	const eventuallyRun = debounce(() => {
+	const eventuallyRun = _debounce(() => {
 		const paths = Object.keys(buffer);
 
 		if (paths.length === 0) {
@@ -73,6 +71,41 @@ export function incremental(streamProvider: IStreamProvider, initial: NodeJS.Rea
 
 		if (state === 'idle') {
 			eventuallyRun();
+		}
+	});
+
+	return es.duplex(input, output);
+}
+
+export function debounce(task: () => NodeJS.ReadWriteStream): NodeJS.ReadWriteStream {
+	const input = es.through();
+	const output = es.through();
+	let state = 'idle';
+
+	const run = () => {
+		state = 'running';
+
+		task()
+			.pipe(es.through(undefined, () => {
+				const shouldRunAgain = state === 'stale';
+				state = 'idle';
+
+				if (shouldRunAgain) {
+					eventuallyRun();
+				}
+			}))
+			.pipe(output);
+	};
+
+	run();
+
+	const eventuallyRun = _debounce(() => run(), 500);
+
+	input.on('data', () => {
+		if (state === 'idle') {
+			eventuallyRun();
+		} else {
+			state = 'stale';
 		}
 	});
 
@@ -227,7 +260,7 @@ export function rewriteSourceMappingURL(sourceMappingURLBase: string): NodeJS.Re
 		.pipe(es.mapSync<VinylFile, VinylFile>(f => {
 			const contents = (<Buffer>f.contents).toString('utf8');
 			const str = `//# sourceMappingURL=${sourceMappingURLBase}/${path.dirname(f.relative).replace(/\\/g, '/')}/$1`;
-			f.contents = Buffer.from(contents.replace(/\n\/\/# sourceMappingURL=(.*)$/gm, str));
+			f.contents = Buffer.from(contents.replace(/\n\/\/# sourceMappingURL=((?!data:).*)$/gm, str)); // {{SQL CARBON EDIT}} Don't rewrite embedded source maps - some of our dependencies have these (sanitize-html)
 			return f;
 		}));
 
@@ -271,7 +304,7 @@ function _rreaddir(dirPath: string, prepend: string, result: string[]): void {
 }
 
 export function rreddir(dirPath: string): string[] {
-	let result: string[] = [];
+	const result: string[] = [];
 	_rreaddir(dirPath, '', result);
 	return result;
 }
@@ -285,9 +318,9 @@ export function ensureDir(dirPath: string): void {
 }
 
 export function getVersion(root: string): string | undefined {
-	let version = process.env['BUILD_SOURCEVERSION'];
+	let version = process.env['VSCODE_DISTRO_COMMIT'] || process.env['BUILD_SOURCEVERSION'];
 
-	if (!version || !/^[0-9a-f]{40}$/i.test(version)) {
+	if (!version || !/^[0-9a-f]{40}$/i.test(version.trim())) {
 		version = git.getVersion(root);
 	}
 
@@ -340,3 +373,90 @@ export function getElectronVersion(): string {
 	const target = /^target "(.*)"$/m.exec(yarnrc)![1];
 	return target;
 }
+
+export function acquireWebNodePaths() {
+	const root = path.join(__dirname, '..', '..');
+	const webPackageJSON = path.join(root, '/remote/web', 'package.json');
+	const webPackages = JSON.parse(fs.readFileSync(webPackageJSON, 'utf8')).dependencies;
+	const nodePaths: { [key: string]: string } = {};
+	for (const key of Object.keys(webPackages)) {
+		const packageJSON = path.join(root, 'node_modules', key, 'package.json');
+		const packageData = JSON.parse(fs.readFileSync(packageJSON, 'utf8'));
+		let entryPoint: string = typeof packageData.browser === 'string' ? packageData.browser : packageData.main ?? packageData.main; // {{SQL CARBON EDIT}} Some packages (like Turndown) have objects in this field instead of the entry point, fall back to main in that case
+		// On rare cases a package doesn't have an entrypoint so we assume it has a dist folder with a min.js
+		if (!entryPoint) {
+			// TODO @lramos15 remove this when jschardet adds an entrypoint so we can warn on all packages w/out entrypoint
+			if (key !== 'jschardet') {
+				console.warn(`No entry point for ${key} assuming dist/${key}.min.js`);
+			}
+
+			entryPoint = `dist/${key}.min.js`;
+		}
+
+		// Remove any starting path information so it's all relative info
+		if (entryPoint.startsWith('./')) {
+			entryPoint = entryPoint.substring(2);
+		} else if (entryPoint.startsWith('/')) {
+			entryPoint = entryPoint.substring(1);
+		}
+
+		// Search for a minified entrypoint as well
+		if (/(?<!\.min)\.js$/i.test(entryPoint)) {
+			const minEntryPoint = entryPoint.replace(/\.js$/i, '.min.js');
+
+			if (fs.existsSync(path.join(root, 'node_modules', key, minEntryPoint))) {
+				entryPoint = minEntryPoint;
+			}
+		}
+
+		nodePaths[key] = entryPoint;
+	}
+
+	// @TODO lramos15 can we make this dynamic like the rest of the node paths
+	// Add these paths as well for 1DS SDK dependencies.
+	// Not sure why given the 1DS entrypoint then requires these modules
+	// they are not fetched from the right location and instead are fetched from out/
+	nodePaths['@microsoft/dynamicproto-js'] = 'lib/dist/umd/dynamicproto-js.min.js';
+	nodePaths['@microsoft/applicationinsights-shims'] = 'dist/umd/applicationinsights-shims.min.js';
+	nodePaths['@microsoft/applicationinsights-core-js'] = 'browser/applicationinsights-core-js.min.js';
+	return nodePaths;
+}
+
+export function createExternalLoaderConfig(webEndpoint?: string, commit?: string, quality?: string) {
+	if (!webEndpoint || !commit || !quality) {
+		return undefined;
+	}
+	webEndpoint = webEndpoint + `/${quality}/${commit}`;
+	const nodePaths = acquireWebNodePaths();
+	Object.keys(nodePaths).map(function (key, _) {
+		nodePaths[key] = `${webEndpoint}/node_modules/${key}/${nodePaths[key]}`;
+	});
+	const externalLoaderConfig = {
+		baseUrl: `${webEndpoint}/out`,
+		recordStats: true,
+		paths: nodePaths
+	};
+	return externalLoaderConfig;
+}
+
+export function buildWebNodePaths(outDir: string) {
+	const result = () => new Promise<void>((resolve, _) => {
+		const root = path.join(__dirname, '..', '..');
+		const nodePaths = acquireWebNodePaths();
+		// Now we write the node paths to out/vs
+		const outDirectory = path.join(root, outDir, 'vs');
+		fs.mkdirSync(outDirectory, { recursive: true });
+		const headerWithGeneratedFileWarning = `/*---------------------------------------------------------------------------------------------
+	 *  Copyright (c) Microsoft Corporation. All rights reserved.
+	 *  Licensed under the Source EULA. See License.txt in the project root for license information.
+	 *--------------------------------------------------------------------------------------------*/
+
+	// This file is generated by build/npm/postinstall.js. Do not edit.`;
+		const fileContents = `${headerWithGeneratedFileWarning}\nself.webPackagePaths = ${JSON.stringify(nodePaths, null, 2)};`;
+		fs.writeFileSync(path.join(outDirectory, 'webPackagePaths.js'), fileContents, 'utf8');
+		resolve();
+	});
+	result.taskName = 'build-web-node-paths';
+	return result;
+}
+

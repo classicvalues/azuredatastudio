@@ -6,6 +6,7 @@
 import { RawContextKey } from 'vs/platform/contextkey/common/contextkey';
 import * as glob from 'vs/base/common/glob';
 import { SearchSortOrder } from 'vs/workbench/services/search/common/search';
+import * as nls from 'vs/nls';
 
 export const FindInNotebooksActionId = 'workbench.action.findInNotebooks';
 export const FocusActiveEditorCommandId = 'notebookSearch.action.focusActiveEditor';
@@ -25,13 +26,34 @@ export const ToggleWholeWordCommandId = 'toggleSearchWholeWord';
 export const ToggleRegexCommandId = 'toggleSearchRegex';
 export const AddCursorsAtSearchResults = 'addCursorsAtSearchResults';
 
+export const CONFIG_WORKBENCH_ENABLEPREVIEWFEATURES = 'workbench.enablePreviewFeatures';
+export const CONFIG_WORKBENCH_USEVSCODENOTEBOOKS = 'workbench.useVSCodeNotebooks';
+
 export const SearchViewFocusedKey = new RawContextKey<boolean>('notebookSearchViewletFocus', false);
 export const InputBoxFocusedKey = new RawContextKey<boolean>('inputBoxFocus', false);
 export const SearchInputBoxFocusedKey = new RawContextKey<boolean>('searchInputBoxFocus', false);
 
+// !! Do not change these or updates won't be able to deserialize editors correctly !!
+export const UNTITLED_NOTEBOOK_TYPEID = 'workbench.editorinputs.untitledNotebookInput';
+export const UNTITLED_QUERY_EDITOR_TYPEID = 'workbench.editorInput.untitledQueryInput';
+export const FILE_QUERY_EDITOR_TYPEID = 'workbench.editorInput.fileQueryInput';
+export const RESOURCE_VIEWER_TYPEID = 'workbench.editorInput.resourceViewerInput';
+
+export const JUPYTER_PROVIDER_ID = 'jupyter';
+export const VSCODE_JUPYTER_PROVIDER_ID = 'jupyter-notebook';
+export const IPYKERNEL_DISPLAY_NAME = 'Python 3 (ipykernel)';
+export const TSGOPS_WEB_QUALITY = 'tsgops-image';
+export const CELL_URI_PATH_PREFIX = 'notebook-editor-';
+
+export const DEFAULT_NOTEBOOK_FILETYPE = '.ipynb';
+
+// The version of the notebook file format that we support
+export const NBFORMAT = 4;
+export const NBFORMAT_MINOR = 2;
+
 export const enum NotebookLanguage {
-	Notebook = 'Notebook',
-	Ipynb = 'ipynb'
+	Notebook = 'notebook',
+	Ipynb = 'ipynb',
 }
 export interface INotebookSearchConfigurationProperties {
 	exclude: glob.IExpression;
@@ -66,3 +88,5 @@ export const RESULTS_GRID_DEFAULTS = {
 	cellPadding: [5, 8, 4],
 	rowHeight: 24
 };
+
+export const notebookMultipleRequestsError = nls.localize('notebookMultipleRequestsError', "Cannot execute code cell. Another cell is currently being executed.");

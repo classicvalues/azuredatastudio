@@ -9,7 +9,7 @@ import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IComposite, ICompositeControl } from 'vs/workbench/common/composite';
 import { Event, Emitter } from 'vs/base/common/event';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
-import { IConstructorSignature0, IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
+import { IConstructorSignature, IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { trackFocus, Dimension } from 'vs/base/browser/dom';
 import { IStorageService } from 'vs/platform/storage/common/storage';
 import { Disposable } from 'vs/base/common/lifecycle';
@@ -43,9 +43,7 @@ export abstract class Composite extends Component implements IComposite {
 	}
 
 	protected fireOnDidFocus(): void {
-		if (this._onDidFocus) {
-			this._onDidFocus.fire();
-		}
+		this._onDidFocus?.fire();
 	}
 
 	private _onDidBlur: Emitter<void> | undefined;
@@ -62,19 +60,21 @@ export abstract class Composite extends Component implements IComposite {
 		return this._hasFocus;
 	}
 
-	private registerFocusTrackEvents(): { onDidFocus: Emitter<void>, onDidBlur: Emitter<void> } {
+	private registerFocusTrackEvents(): { onDidFocus: Emitter<void>; onDidBlur: Emitter<void> } {
 		const container = assertIsDefined(this.getContainer());
 		const focusTracker = this._register(trackFocus(container));
 
 		const onDidFocus = this._onDidFocus = this._register(new Emitter<void>());
 		this._register(focusTracker.onDidFocus(() => {
 			this._hasFocus = true;
+
 			onDidFocus.fire();
 		}));
 
 		const onDidBlur = this._onDidBlur = this._register(new Emitter<void>());
 		this._register(focusTracker.onDidBlur(() => {
 			this._hasFocus = false;
+
 			onDidBlur.fire();
 		}));
 
@@ -118,10 +118,6 @@ export abstract class Composite extends Component implements IComposite {
 		this.parent = parent;
 	}
 
-	override updateStyles(): void {
-		super.updateStyles();
-	}
-
 	/**
 	 * Returns the container this composite is being build in.
 	 */
@@ -138,7 +134,7 @@ export abstract class Composite extends Component implements IComposite {
 	 * The composite will be on-DOM if visible is set to true and off-DOM otherwise.
 	 *
 	 * Typically this operation should be fast though because setVisible might be called many times during a session.
-	 * If there is a long running opertaion it is fine to have it running in the background asyncly and return before.
+	 * If there is a long running operation it is fine to have it running in the background asyncly and return before.
 	 */
 	setVisible(visible: boolean): void {
 		if (this.visible !== !!visible) {
@@ -157,6 +153,13 @@ export abstract class Composite extends Component implements IComposite {
 	 * Layout the contents of this composite using the provided dimensions.
 	 */
 	abstract layout(dimension: Dimension): void;
+
+	/**
+	 * Update the styles of the contents of this composite.
+	 */
+	override updateStyles(): void {
+		super.updateStyles();
+	}
 
 	/**
 	 * Returns an array of actions to show in the action bar of the composite.
@@ -235,12 +238,12 @@ export abstract class Composite extends Component implements IComposite {
 }
 
 /**
- * A composite descriptor is a leightweight descriptor of a composite in the workbench.
+ * A composite descriptor is a lightweight descriptor of a composite in the workbench.
  */
 export abstract class CompositeDescriptor<T extends Composite> {
 
 	constructor(
-		private readonly ctor: IConstructorSignature0<T>,
+		private readonly ctor: IConstructorSignature<T>,
 		readonly id: string,
 		readonly name: string,
 		readonly cssClass?: string,
