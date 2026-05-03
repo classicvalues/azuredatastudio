@@ -1589,7 +1589,7 @@
     ]
   },
   "dependencies": {
-    "uuid": "^8.3.0",
+    "uuid": "^14.0.0",
     "vscode-nls": "^4.1.2",
     "yamljs": "^0.3.0"
   },
