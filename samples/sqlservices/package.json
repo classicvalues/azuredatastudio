@@ -223,7 +223,7 @@
     "fs-extra": "^5.0.0",
     "handlebars": "^4.7.7",
     "vscode-nls": "^4.0.0",
-    "uuid": "^8.3.0"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@types/node": "^7.0.43",
